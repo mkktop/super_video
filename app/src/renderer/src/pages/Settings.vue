@@ -33,6 +33,11 @@ async function loadLog() {
   logLines.value = (await api.logTail()).lines
 }
 
+async function exportLog() {
+  const p = await window.sv.saveLog(logLines.value.join('\n') || '(空)')
+  if (p) message.success(`日志已导出: ${p}`)
+}
+
 async function saveEngine() {
   saving.value = true
   const r = await api.saveSettings({ engine: engine.value, precision: precision.value })
@@ -90,6 +95,7 @@ async function saveEngine() {
       <template #header>
         服务日志（最近 120 行）
         <NButton size="tiny" style="margin-left: 10px" @click="loadLog">刷新</NButton>
+        <NButton size="tiny" style="margin-left: 8px" @click="exportLog">导出</NButton>
       </template>
       <NCode :code="logLines.join('\n') || '(空)'" language="text" :word-wrap="true" class="log" />
     </NCard>

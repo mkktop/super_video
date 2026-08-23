@@ -113,6 +113,21 @@ export const api = {
   async deleteModel(id: string): Promise<Response> {
     return fetch(`${baseUrl}/api/models/${id}`, { method: 'DELETE' })
   },
+  async importModel(body: {
+    path: string
+    id: string
+    name: string
+    scale: number
+    color: string
+    value_range: string
+    tile: number
+  }): Promise<Response> {
+    return fetch(`${baseUrl}/api/models/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  },
   async tasks(): Promise<Task[]> {
     return (await fetch(`${baseUrl}/api/tasks`)).json()
   },

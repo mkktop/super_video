@@ -15,7 +15,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..models import manager
-from ..models.registry import BUNDLED_DIR, ModelNotFoundError, load_registry, model_dir
+from ..models.registry import (
+    BUNDLED_DIR,
+    USER_REGISTRY_DIR,
+    ModelNotFoundError,
+    load_registry,
+    model_dir,
+)
 from ..paths import ROOT, TEMP_DIR
 from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
 from . import db
@@ -72,7 +78,18 @@ class TaskCreate(BaseModel):
     input: str
     output: str | None = None
     model_id: str
-    params: dict = Field(default_factory=dict)  # scale/codec/crf/preset/tile 每任务独立
+    params: dict = Field(default_factory=dict)  # scale/codec/crf/preset/tile/interp/denoise 每任务独立
+
+
+class ModelImport(BaseModel):
+    path: str
+    id: str = Field(min_length=2, max_length=48)
+    name: str = Field(min_length=1, max_length=48)
+    scale: int = Field(ge=2, le=8)
+    color: str = "rgb"            # rgb | bgr
+    value_range: str = "0-1"      # 0-1 | 0-255
+    tile: int = 0
+    description: str = ""
 
 
 @app.get("/api/health")
@@ -190,7 +207,66 @@ def delete_model(model_id: str) -> dict:
     d = model_dir(model_id)
     if d.exists():
         shutil.rmtree(d, ignore_errors=True)
+    # 自定义导入的模型：连 manifest 一起删（内置模型保留注册表条目）
+    custom = USER_REGISTRY_DIR / f"{model_id}.json"
+    if custom.exists():
+        custom.unlink()
     return {"ok": True}
+
+
+@app.post("/api/models/import", status_code=201)
+def import_model(body: ModelImport) -> dict:
+    """自定义 ONNX 导入：拷贝入库 -> 真跑一帧验证 -> 写 manifest。"""
+    import re as _re
+    import shutil as _shutil
+
+    import numpy as np
+
+    from ..engines.onnx_engine import OnnxSrEngine
+
+    src = Path(body.path)
+    if not src.exists() or src.suffix.lower() != ".onnx":
+        raise HTTPException(400, f"ONNX 文件不存在: {body.path}")
+    if not _re.fullmatch(r"[a-z0-9][a-z0-9-]+", body.id):
+        raise HTTPException(400, "id 仅允许小写字母/数字/连字符")
+    if body.color not in ("rgb", "bgr") or body.value_range not in ("0-1", "0-255"):
+        raise HTTPException(400, "color 仅 rgb/bgr；value_range 仅 0-1/0-255")
+    if body.id in load_registry():
+        raise HTTPException(409, f"模型 id 已存在: {body.id}")
+
+    d = model_dir(body.id)
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / src.name
+    _shutil.copy2(src, dest)
+
+    io = {"color": body.color, "range": body.value_range}
+    try:
+        eng = OnnxSrEngine(dest, body.scale, io=io, tile=body.tile)
+        eng.load()
+        out = eng.process(np.random.default_rng(0).integers(0, 256, (64, 64, 3), dtype=np.uint8))
+        h, w = out.shape[:2]
+        if (w, h) != (64 * body.scale, 64 * body.scale):
+            raise ValueError(f"输出 {w}x{h} 与 x{body.scale} 预期不符，请核对倍率")
+        if float(out.std()) < 1.0:
+            raise ValueError("输出接近纯色，IO 约定（颜色序/值域）可能不对")
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 — 校验失败回滚拷贝
+        _shutil.rmtree(d, ignore_errors=True)
+        raise HTTPException(422, f"模型验证失败: {e}") from e
+
+    manifest = {
+        "id": body.id, "name": body.name, "vendor": "自定义", "license": "用户自带",
+        "engine": "onnx", "kind": "sr", "scale": [body.scale],
+        "content": [], "temporal": False, "speed": "balanced", "vram_gb": 4,
+        "tile_hint": int(body.tile), "description": body.description or "用户导入的 ONNX 模型",
+        "io": io, "files": [{"name": src.name}],
+    }
+    USER_REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    (USER_REGISTRY_DIR / f"{body.id}.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return {"ok": True, "id": body.id}
 
 
 @app.post("/api/models/{model_id}/download")

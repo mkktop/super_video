@@ -78,7 +78,18 @@ class Runner:
         from .settings import load as load_settings
 
         engine_setting = load_settings().get("engine", "auto")
-        self.engine = select_engine(None if engine_setting == "auto" else engine_setting)
+        # torch 引擎必须走 PyTorch CUDA 环境（独立 .venv-cuda）
+        try:
+            from ..models.registry import get_model
+
+            if get_model(task["model_id"]).engine == "torch":
+                self.engine = select_engine("cuda")
+            else:
+                self.engine = select_engine(
+                    None if engine_setting == "auto" else engine_setting
+                )
+        except Exception:  # noqa: BLE001 — 模型解析失败交给 worker 报具体错误
+            self.engine = select_engine(None if engine_setting == "auto" else engine_setting)
         worker_py = self.engine.python_exe
         env = {**os.environ, "PYTHONPATH": str(BACKEND_DIR), "PYTHONUNBUFFERED": "1"}
         self.proc = await asyncio.create_subprocess_exec(

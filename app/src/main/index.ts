@@ -138,6 +138,20 @@ function createWindow() {
   }
 }
 
+// 单实例：二次启动聚焦已有窗口（sidecar 复用机制天然支持，但避免双 UI 抢队列）
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
+}
+
 app.whenReady().then(async () => {
   try {
     await startOrReuseSidecar()
@@ -200,4 +214,23 @@ ipcMain.handle('dialog:pickOutput', async (_e, suggest: string) => {
 
 ipcMain.handle('shell:showInFolder', (_e, p: string) => {
   shell.showItemInFolder(p)
+})
+
+ipcMain.handle('dialog:pickModel', async () => {
+  const r = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'ONNX 模型', extensions: ['onnx'] }],
+  })
+  return r.canceled ? null : r.filePaths[0]
+})
+
+ipcMain.handle('dialog:saveLog', async (_e, content: string) => {
+  const r = await dialog.showSaveDialog({
+    defaultPath: 'super_video_日志.txt',
+    filters: [{ name: '文本', extensions: ['txt', 'log'] }],
+  })
+  if (r.canceled || !r.filePath) return null
+  const fs = await import('node:fs')
+  fs.writeFileSync(r.filePath, content, 'utf-8')
+  return r.filePath
 })

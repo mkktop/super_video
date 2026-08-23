@@ -112,3 +112,23 @@ PSNR 74~75dB = 数值级一致（远高于 CRF18 编码损失）；x4plus 58.7dB
 
 端到端冒烟（动漫测试2.mp4 1080p hevc → x2 4K x264，368 帧）：**5.71 fps 完成**（fp32 历史值 5.3，+8%）。
 推理 1.36x 只占端到端预算的一部分（hevc 解码 + 4K 编码不变），小分辨率与 x4/x4plus 场景提速占比更大。
+
+---
+
+# M3：torch 引擎 + 分块续跑（2026-08-23）
+
+**扩散模型调研结论（重要，决定 M3 走向）**：FlashVSR 与 SeedVR2-3B 在 Windows 当前不可行——
+- FlashVSR：无 ONNX；权重 6.4GiB（safetensors）；依赖需源码编译的 CUDA block-sparse-attention + Wan2.1 VAE
+- SeedVR2-3B：12.6GiB fp32 权重 + apex 仅提供 Linux wheel（Windows 需自行编译）
+- 结论：扩散引擎以「torch 适配器 + 分块 checkpoint 管线」形式落地，待官方支持 Windows 后接入模型本体
+
+**torch 引擎实测**（Real-ESRGAN x4plus 官方 pth，RTX 5080，torch 2.11 cu128，fp16 autocast，tile 256）：
+- 最小 RRDBNet 自实现（无 basicsr 依赖），官方权重 strict 加载通过
+- 180x120 → x4：36ms/帧；与 ONNX 版（同权重）输出 PSNR 30.1dB（tiled 边界/精度差异，一致性合格）
+- e2e 91 帧 1080p→8K 分块管线：373s 完成，checkpoint 分块续跑逻辑单测验证（预置 done 块 → 从其后继续）
+
+**Real-CUGAN DML 兼容性**：原生 opset13 导出在 DML 默认扩展优化下 Add 算子崩溃（MLOperatorAuthorImpl），
+`graph_optimization_level=ORT_ENABLE_BASIC` 即稳定（53ms/帧 @540p→1080p），性能与 DISABLE_ALL 持平。
+其 fp16 转换版 DML 加载失败 → manifest 标 fp16=false。
+
+**RIFE v4.26**（vs-mlrt impl=2 七通道版）：t=0 重构 I0 45.7dB；e2e 补帧输出帧率精确 ×2、时长/音轨保持。

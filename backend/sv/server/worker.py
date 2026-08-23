@@ -110,6 +110,59 @@ def main(task_id: str) -> int:
 
     t0 = time.perf_counter()
     precision = settings.load().get("precision", "fp32")
+    if spec.engine == "torch":
+        # ---- torch 路径：分块管线 + checkpoint 续跑（PyTorch CUDA 环境）----
+        from sv.engines.torch_engine import TorchSrEngine
+        from sv.pipeline.chunked import ChunkedPipeline
+
+        engine = TorchSrEngine(
+            model_file(spec, scale), scale, io=spec.io,
+            tile=int(params.get("tile") or 512),
+        )
+        engine.load()
+        emit({"type": "loaded", "provider": engine.provider_used, "precision": "fp16-autocast"})
+
+        preview_dir = TEMP_DIR / "previews"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+
+        def on_progress(frames, total, fps, eta):
+            emit({
+                "type": "progress", "frames": frames, "total": total,
+                "fps": round(fps, 2), "eta_sec": int(eta),
+            })
+
+        pipeline = ChunkedPipeline(
+            info, output_path, engine,
+            EncodeOpts(
+                codec=params.get("codec", "h264"),
+                crf=int(params.get("crf", 18)),
+                preset=params.get("preset", "medium"),
+            ),
+            task_id=task_id, chunk=int(params.get("chunk") or 32),
+            progress_cb=on_progress,
+            preview_path=preview_dir / f"{task_id}.jpg",
+            src_preview_path=preview_dir / f"{task_id}_src.jpg",
+        )
+        try:
+            stats = asyncio.run(pipeline.run())
+        except TaskCanceled:
+            emit({"type": "canceled"})
+            return 3
+        except PipelineError as e:
+            emit({"type": "failed", "error": str(e)})
+            return 1
+        except Exception as e:  # noqa: BLE001
+            emit({"type": "failed", "error": f"{type(e).__name__}: {e}"})
+            return 1
+        emit({
+            "type": "done", "frames": stats.frames,
+            "elapsed": round(stats.elapsed_s, 1),
+            "out_bytes": stats.out_bytes,
+            "preview": str(preview_dir / f"{task_id}.jpg"),
+            "src_preview": str(preview_dir / f"{task_id}_src.jpg"),
+        })
+        return 0
+
     weight = model_file(spec, scale, precision, variant)
     if precision == "fp16" and not weight.stem.endswith("_fp16"):
         emit({"type": "log", "line": f"生成 fp16 变体: {weight.name}"})

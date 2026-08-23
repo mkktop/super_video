@@ -6,6 +6,8 @@ declare global {
       backendInfo: () => Promise<{ baseUrl: string }>
       pickVideo: () => Promise<string[]>
       pickOutput: (suggest: string) => Promise<string | null>
+      pickModel: () => Promise<string | null>
+      saveLog: (content: string) => Promise<string | null>
       showInFolder: (p: string) => void
       win: {
         minimize: () => void

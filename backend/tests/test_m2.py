@@ -78,9 +78,10 @@ def test_model_delete_with_custom(client):
         r = client.delete("/api/models/tmp-del-me")
         assert r.status_code == 200
         assert not model_dir.exists()  # 目录连同权重被删除
-        # registry 条目保留（删除的是权重），installed 变为 False
-        models = {m["id"]: m for m in client.get("/api/models").json()}
-        assert "tmp-del-me" in models and models["tmp-del-me"]["installed"] is False
+        # 自定义模型的 manifest 一并移除（导入功能后的语义：卸载即彻底删除）；
+        # 内置模型删除仅清权重、注册表条目保留
+        models = {m["id"] for m in client.get("/api/models").json()}
+        assert "tmp-del-me" not in models and not manifest.exists()
     finally:
         manifest.unlink(missing_ok=True)
         import shutil

@@ -92,8 +92,25 @@ def download(spec: ModelSpec, progress_cb=None) -> None:
                     if progress_cb:
                         progress_cb(done, total, name)
         except (urllib.error.URLError, OSError) as e:
-            tmp.unlink(missing_ok=True)
-            raise DownloadError(f"下载 {name} 失败: {e}") from e
+            mirrors = [u for u in f.get("mirror_urls", []) if u]
+            if not mirrors:
+                tmp.unlink(missing_ok=True)
+                raise DownloadError(f"下载 {name} 失败: {e}") from e
+            # 主源失败 -> 依次镜像重试（国内 ghproxy 类镜像，M4 启用）
+            ok = False
+            for m in mirrors:
+                try:
+                    req = urllib.request.Request(m, headers={"User-Agent": "super-video/0.1"})
+                    with urllib.request.urlopen(req, timeout=60) as resp, open(tmp, "wb") as out:
+                        while chunk := resp.read(1 << 20):
+                            out.write(chunk)
+                    ok = True
+                    break
+                except (urllib.error.URLError, OSError):
+                    continue
+            if not ok:
+                tmp.unlink(missing_ok=True)
+                raise DownloadError(f"下载 {name} 失败（含 {len(mirrors)} 个镜像）: {e}") from e
 
         # 校验/提取中间产物 -> 最终 dest
         try:

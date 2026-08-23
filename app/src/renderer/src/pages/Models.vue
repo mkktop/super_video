@@ -4,7 +4,15 @@ import {
   NButton,
   NCard,
   NEmpty,
+  NForm,
+  NFormItem,
+  NInput,
+  NInputNumber,
+  NModal,
   NProgress,
+  NRadioGroup,
+  NRadioButton,
+  NSelect,
   NSpace,
   NTag,
   useMessage,
@@ -37,6 +45,49 @@ async function onDelete(id: string) {
     message.error(`删除失败: ${r.status}`)
   }
 }
+
+// ---- 自定义模型导入 ----
+const showImport = ref(false)
+const importing = ref(false)
+const impPath = ref('')
+const impId = ref('')
+const impName = ref('')
+const impScale = ref(2)
+const impColor = ref<'rgb' | 'bgr'>('rgb')
+const impRange = ref<'0-1' | '0-255'>('0-1')
+const impTile = ref<number | null>(0)
+
+async function pickOnnx() {
+  const p = await window.sv.pickModel()
+  if (p) {
+    impPath.value = p
+    if (!impId.value) {
+      impId.value = p.split(/[\\/]/).pop()!.replace(/\.onnx$/i, '').toLowerCase()
+        .replace(/[^a-z0-9-]+/g, '-').slice(0, 40)
+    }
+    if (!impName.value) impName.value = p.split(/[\\/]/).pop()!.replace(/\.onnx$/i, '')
+  }
+}
+
+async function doImport() {
+  if (!impPath.value || !impId.value || !impName.value) return
+  importing.value = true
+  const r = await api.importModel({
+    path: impPath.value, id: impId.value, name: impName.value,
+    scale: impScale.value, color: impColor.value, value_range: impRange.value,
+    tile: impTile.value ?? 0,
+  })
+  importing.value = false
+  if (r.ok) {
+    message.success(`已导入「${impName.value}」并通过验证`)
+    showImport.value = false
+    impPath.value = impId.value = impName.value = ''
+    refreshModels()
+  } else {
+    const e = await r.json().catch(() => ({ detail: r.status }))
+    message.error(`导入失败: ${e.detail ?? r.status}`)
+  }
+}
 </script>
 
 <template>
@@ -47,6 +98,7 @@ async function onDelete(id: string) {
         <p class="sub">按需下载 · sha256 校验 · 未安装的模型在任务启动时也会自动下载</p>
       </div>
       <NSpace>
+        <NButton size="small" @click="showImport = true">导入自定义模型</NButton>
         <NButton size="small" :type="tab === 'anime' ? 'primary' : 'default'" @click="tab = 'anime'">动漫</NButton>
         <NButton size="small" :type="tab === 'general' ? 'primary' : 'default'" @click="tab = 'general'">真人/通用</NButton>
         <NButton size="small" :type="tab === 'all' ? 'primary' : 'default'" @click="tab = 'all'">全部</NButton>
@@ -102,6 +154,56 @@ async function onDelete(id: string) {
         </div>
       </NCard>
     </NSpace>
+
+    <NModal
+      v-model:show="showImport"
+      preset="card"
+      title="导入自定义 ONNX 模型"
+      style="width: 560px"
+    >
+      <NForm label-placement="left" label-width="88">
+        <NFormItem label="模型文件">
+          <div class="imp-file">
+            <span class="imp-path">{{ impPath || '未选择' }}</span>
+            <NButton size="small" @click="pickOnnx">选择 .onnx…</NButton>
+          </div>
+        </NFormItem>
+        <NFormItem label="模型 ID">
+          <NInput v-model:value="impId" placeholder="小写字母/数字/连字符" />
+        </NFormItem>
+        <NFormItem label="显示名称">
+          <NInput v-model:value="impName" />
+        </NFormItem>
+        <NFormItem label="放大倍率">
+          <NInputNumber v-model:value="impScale" :min="2" :max="8" style="width: 120px" />
+        </NFormItem>
+        <NFormItem label="颜色序">
+          <NRadioGroup v-model:value="impColor">
+            <NRadioButton value="rgb">RGB</NRadioButton>
+            <NRadioButton value="bgr">BGR</NRadioButton>
+          </NRadioGroup>
+        </NFormItem>
+        <NFormItem label="值域">
+          <NRadioGroup v-model:value="impRange">
+            <NRadioButton value="0-1">0-1 归一化</NRadioButton>
+            <NRadioButton value="0-255">0-255</NRadioButton>
+          </NRadioGroup>
+        </NFormItem>
+        <NFormItem label="分块 (px)">
+          <NInputNumber v-model:value="impTile" :min="0" :max="1024" :step="64" style="width: 120px" />
+          <span class="imp-hint">0 = 不分块；固定输入尺寸的模型填其尺寸（如 64）</span>
+        </NFormItem>
+      </NForm>
+      <p class="imp-note">导入时会真跑一帧验证（倍率/IO 约定），验证不过会给出原因并回滚。</p>
+      <template #footer>
+        <NSpace justify="end">
+          <NButton @click="showImport = false">取消</NButton>
+          <NButton type="primary" :loading="importing" :disabled="!impPath || !impId || !impName" @click="doImport">
+            导入并验证
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
   </div>
 </template>
 
@@ -121,4 +223,8 @@ h1 { font-size: 20px; font-weight: 700; }
 .bundled-note { color: #34d399; font-size: 12.5px; }
 .dl { width: 180px; display: flex; align-items: center; gap: 8px; }
 .dl-pct { font-size: 12px; color: #4f8cff; width: 40px; text-align: right; }
+.imp-file { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.imp-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9aa0a6; font-size: 12.5px; }
+.imp-hint { margin-left: 10px; font-size: 11.5px; color: #9aa0a6; }
+.imp-note { font-size: 12px; color: #9aa0a6; margin: 8px 0 0; }
 </style>
