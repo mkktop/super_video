@@ -110,12 +110,13 @@ function killSidecar() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 800,
-    minWidth: 940,
+    width: 1200,
+    height: 820,
+    minWidth: 960,
     minHeight: 640,
+    frame: false, // 自绘标题栏
     backgroundColor: '#141517',
-    autoHideMenuBar: true,
+    show: false,
     title: 'super_video',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -124,6 +125,11 @@ function createWindow() {
       sandbox: false,
     },
   })
+  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  const sendMaxState = () =>
+    mainWindow?.webContents.send('win:maximized', !!mainWindow?.isMaximized())
+  mainWindow.on('maximize', sendMaxState)
+  mainWindow.on('unmaximize', sendMaxState)
   // electron-vite dev 模式注入 ELECTRON_RENDERER_URL
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -161,6 +167,15 @@ app.on('before-quit', async (e) => {
 })
 
 ipcMain.handle('backend:info', () => ({ baseUrl }))
+
+// ---- 自绘标题栏的窗口控制 ----
+ipcMain.on('win:minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+ipcMain.on('win:toggle-maximize', (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  if (win?.isMaximized()) win.unmaximize()
+  else win?.maximize()
+})
+ipcMain.on('win:close', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
 
 ipcMain.handle('dialog:pickVideo', async () => {
   const r = await dialog.showOpenDialog({
