@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import {
   NButton,
   NCard,
@@ -11,9 +11,14 @@ import {
 } from 'naive-ui'
 import { api, type Task } from '../api'
 import { store } from '../store'
+import CompareSlider from './CompareSlider.vue'
 
 const props = defineProps<{ task: Task }>()
 const message = useMessage()
+const showCompare = ref(false)
+const canCompare = computed(
+  () => !!props.task.preview_src && !!props.task.preview_path,
+)
 
 const fileName = computed(() => props.task.input_path.split(/[\\/]/).pop() ?? '')
 const outName = computed(() => props.task.output_path.split(/[\\/]/).pop() ?? '')
@@ -117,13 +122,24 @@ function onOpenFolder() {
         v-if="task.preview_path || task.status === 'done'"
         :src="api.previewUrl(task.id, task.updated_at)"
         class="preview"
+        @click="canCompare && (showCompare = !showCompare)"
       />
       <div class="spacer" />
-      <n-button v-if="isBusy" size="small" quaternary type="error" @click="onCancel">取消</n-button>
-      <n-button v-if="task.status === 'done'" size="small" quaternary type="info" @click="onOpenFolder">
+      <NButton v-if="canCompare" size="small" quaternary type="info" @click="showCompare = !showCompare">
+        {{ showCompare ? '收起对比' : '对比预览' }}
+      </NButton>
+      <NButton v-if="isBusy" size="small" quaternary type="error" @click="onCancel">取消</NButton>
+      <NButton v-if="task.status === 'done'" size="small" quaternary type="info" @click="onOpenFolder">
         打开所在文件夹
-      </n-button>
-      <n-button v-if="!isBusy" size="small" quaternary @click="onDelete">删除</n-button>
+      </NButton>
+      <NButton v-if="!isBusy" size="small" quaternary @click="onDelete">删除</NButton>
+    </div>
+
+    <div v-if="showCompare && canCompare" class="compare-wrap">
+      <CompareSlider
+        :src-url="api.previewUrl(task.id, task.updated_at, true)"
+        :out-url="api.previewUrl(task.id, task.updated_at)"
+      />
     </div>
   </n-card>
 </template>
@@ -149,4 +165,5 @@ function onOpenFolder() {
   object-fit: contain;
 }
 .spacer { flex: 1; }
+.compare-wrap { margin-top: 12px; }
 </style>

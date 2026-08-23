@@ -15,7 +15,8 @@ import Sidebar from './components/Sidebar.vue'
 import NewTaskModal from './components/NewTaskModal.vue'
 import Home from './pages/Home.vue'
 import Tasks from './pages/Tasks.vue'
-import Placeholder from './pages/Placeholder.vue'
+import Models from './pages/Models.vue'
+import Settings from './pages/Settings.vue'
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -57,12 +58,8 @@ onMounted(() => {
           <main class="page">
             <Home v-if="ui.page === 'home'" />
             <Tasks v-else-if="ui.page === 'tasks'" />
-            <Placeholder
-              v-else-if="ui.page === 'models'"
-              title="模型市场"
-              desc="应用内下载与管理超分模型，按内容类型推荐"
-            />
-            <Placeholder v-else title="设置" desc="引擎后端、临时目录、编码偏好等" />
+            <Models v-else-if="ui.page === 'models'" />
+            <Settings v-else />
           </main>
         </div>
         <NewTaskModal v-model:show="ui.showNewTask" />

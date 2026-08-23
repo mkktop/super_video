@@ -3,16 +3,15 @@ import { computed } from 'vue'
 import { store, ui } from '../store'
 
 const items = computed(() => [
-  { key: 'home', label: '首页', icon: 'home', badge: 0, soon: false },
+  { key: 'home', label: '首页', icon: 'home' },
   {
     key: 'tasks',
     label: '任务',
     icon: 'tasks',
     badge: store.tasks.filter((t) => t.status === 'running' || t.status === 'queued').length,
-    soon: false,
   },
-  { key: 'models', label: '模型市场', icon: 'cube', badge: 0, soon: true },
-  { key: 'settings', label: '设置', icon: 'gear', badge: 0, soon: true },
+  { key: 'models', label: '模型市场', icon: 'cube' },
+  { key: 'settings', label: '设置', icon: 'gear' },
 ])
 </script>
 
@@ -24,8 +23,7 @@ const items = computed(() => [
         :key="it.key"
         class="nav-item"
         :class="{ active: ui.page === it.key }"
-        :disabled="it.soon"
-        @click="!it.soon && (ui.page = it.key as typeof ui.page)"
+        @click="ui.page = it.key as typeof ui.page"
       >
         <span class="icon">
           <svg v-if="it.icon === 'home'" width="16" height="16" viewBox="0 0 16 16">
@@ -43,8 +41,7 @@ const items = computed(() => [
           </svg>
         </span>
         <span class="label">{{ it.label }}</span>
-        <span v-if="it.soon" class="soon">M2</span>
-        <span v-else-if="it.badge" class="badge">{{ it.badge }}</span>
+        <span v-if="it.badge" class="badge">{{ it.badge }}</span>
       </button>
     </nav>
     <div class="foot">

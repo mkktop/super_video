@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,17 +14,38 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..models import manager
-from ..models.registry import ModelNotFoundError, load_registry
+from ..models.registry import BUNDLED_DIR, ModelNotFoundError, load_registry, model_dir
+from ..paths import ROOT, TEMP_DIR
 from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
 from . import db
 from .engine_select import select_engine
 from .events import EventBus
 from .hardware import hardware_info
 from .runner import Runner
+from .settings import DEFAULTS, load as load_settings, save as save_settings
 
 bus = EventBus()
 runner = Runner(bus)
 _download_lock = asyncio.Lock()
+
+# 硬件探测含 nvidia-smi/NVENC 试编码，按 60s 缓存
+_hw_cache: tuple[float, dict] = (0.0, {})
+
+
+def cached_hardware() -> dict:
+    global _hw_cache
+    ts, data = _hw_cache
+    if not data or time.time() - ts > 60:
+        data = hardware_info()
+        _hw_cache = (time.time(), data)
+    return data
+
+
+_PRESETS_PATH = Path(__file__).parent / "presets.json"
+
+
+def _presets() -> list[dict]:
+    return json.loads(_PRESETS_PATH.read_text(encoding="utf-8"))
 
 
 @asynccontextmanager
@@ -56,7 +79,7 @@ def health() -> dict:
 
 @app.get("/api/hardware")
 def get_hardware() -> dict:
-    return hardware_info()
+    return cached_hardware()
 
 
 @app.get("/api/engine")
@@ -68,18 +91,102 @@ def get_engine() -> dict:
     return {"backend": e.backend, "python": e.python_exe, "detail": e.detail}
 
 
+@app.get("/api/presets")
+def get_presets() -> list[dict]:
+    return _presets()
+
+
+class ProbeBody(BaseModel):
+    path: str
+
+
+@app.post("/api/probe")
+def probe_media(body: ProbeBody) -> dict:
+    """向导第一步：媒体信息 + M0 可行性（供 UI 展示与预估）。"""
+    p = Path(body.path)
+    if not p.exists():
+        raise HTTPException(400, f"文件不存在: {body.path}")
+    try:
+        info = probe(p)
+        m0_error = None
+        try:
+            validate_m0(info)
+        except UnsupportedMedia as e:
+            m0_error = str(e)
+    except UnsupportedMedia as e:
+        raise HTTPException(422, str(e))
+    return {
+        "ok": m0_error is None,
+        "error": m0_error,
+        "width": info.width, "height": info.height,
+        "fps": round(info.fps, 3),
+        "duration_s": round(info.duration_s, 2),
+        "total_frames": info.total_frames,
+        "codec": info.video_codec, "pix_fmt": info.pix_fmt,
+        "has_audio": info.has_audio,
+    }
+
+
+@app.get("/api/settings")
+def get_settings() -> dict:
+    return load_settings()
+
+
+@app.get("/api/log-tail")
+def log_tail(n: int = 120) -> dict:
+    p = ROOT / ".tmp" / "sidecar.log"
+    if not p.exists():
+        return {"lines": []}
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
+    return {"lines": lines}
+
+
+@app.put("/api/settings")
+def put_settings(body: dict) -> dict:
+    try:
+        return save_settings(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/models")
 def get_models() -> list[dict]:
+    hw = cached_hardware()
+    gpu_vram = next(
+        (g["vram_gb"] for g in hw.get("gpus", []) if g.get("vram_gb")), None
+    )
     out = []
     for spec in load_registry().values():
+        bundled = all(
+            (BUNDLED_DIR / f["name"]).exists() for f in spec.files if "url" not in f
+        )
+        size_mb = round(sum(f.get("size", 0) for f in spec.files) / 1e6, 1)
+        vram_ok = gpu_vram is None or spec.vram_gb <= gpu_vram
         out.append({
             "id": spec.id, "name": spec.name, "scale": spec.scale,
             "content": spec.content, "speed": spec.speed,
             "vram_gb": spec.vram_gb, "description": spec.description,
             "tile_hint": spec.tile_hint,
             "installed": manager.is_downloaded(spec),
+            "bundled": bundled,
+            "size_mb": size_mb,
+            "vram_ok": vram_ok,
+            "vram_note": None if vram_ok else (
+                f"需要约 {spec.vram_gb}GB 显存，本机 {gpu_vram}GB"
+            ),
         })
     return out
+
+
+@app.delete("/api/models/{model_id}")
+def delete_model(model_id: str) -> dict:
+    specs = load_registry()
+    if model_id not in specs:
+        raise HTTPException(404, f"未知模型 {model_id}")
+    d = model_dir(model_id)
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+    return {"ok": True}
 
 
 @app.post("/api/models/{model_id}/download")
@@ -210,11 +317,12 @@ def remove_task(task_id: str) -> dict:
 
 
 @app.get("/api/tasks/{task_id}/preview")
-def task_preview(task_id: str):
+def task_preview(task_id: str, src: int = 0):
+    """处理预览帧；?src=1 返回源首帧（对比预览左半边）。"""
     t = db.get_task(task_id)
     if t is None:
         raise HTTPException(404)
-    p = t.get("preview_path")
+    p = t.get("preview_src") if src else t.get("preview_path")
     if not p or not Path(p).exists():
         raise HTTPException(404, "暂无预览")
     return FileResponse(p, media_type="image/jpeg")

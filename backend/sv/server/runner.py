@@ -28,6 +28,10 @@ class Runner:
     # ---- 生命周期 ----
 
     def start(self) -> None:
+        # 同进程内 app 可能多次启停（测试、热重启）：必须重建停止信号，
+        # 否则上一次 stop() 置位的 _stopping 会让本实例的循环立即退出、队列假死
+        self._stopping = asyncio.Event()
+        self._cancel_requested = None
         recovered = db.recover_running()
         if recovered:
             self.bus.publish({"type": "recovered", "count": recovered})
@@ -70,7 +74,12 @@ class Runner:
         self.current_id = task_id
         self.bus.publish({"type": "task_status", "task_id": task_id, "status": "running"})
 
-        worker_py = self.engine.python_exe if self.engine else sys.executable
+        # 每个任务启动时按当前设置选择后端（设置热切换，下一任务生效）
+        from .settings import load as load_settings
+
+        engine_setting = load_settings().get("engine", "auto")
+        self.engine = select_engine(None if engine_setting == "auto" else engine_setting)
+        worker_py = self.engine.python_exe
         env = {**os.environ, "PYTHONPATH": str(BACKEND_DIR), "PYTHONUNBUFFERED": "1"}
         self.proc = await asyncio.create_subprocess_exec(
             worker_py, "-m", "sv.server.worker", task_id,
@@ -114,6 +123,7 @@ class Runner:
             db.update_task(
                 task_id, status="done", out_bytes=final.get("out_bytes", 0),
                 preview_path=final.get("preview"),
+                preview_src=final.get("src_preview"),
                 progress_frames=t.get("total_frames", 0),
             )
             self.bus.publish({"type": "task_status", "task_id": task_id, "status": "done"})

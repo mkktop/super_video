@@ -127,6 +127,7 @@ class StreamPipeline:
         progress_cb=None,  # cb(frames, total, fps, eta_s)
         cancel_event: asyncio.Event | None = None,
         preview_path: Path | None = None,
+        src_preview_path: Path | None = None,  # 源首帧截图（对比预览用）
         preview_interval_s: float = 5.0,
         target_scale: int | None = None,  # 目标倍率；小于引擎倍率时编码器缩放
     ):
@@ -137,6 +138,7 @@ class StreamPipeline:
         self.progress_cb = progress_cb
         self.cancel_event = cancel_event
         self.preview_path = preview_path
+        self.src_preview_path = src_preview_path
         self.preview_interval_s = preview_interval_s
         self.target_scale = target_scale
 
@@ -205,11 +207,15 @@ class StreamPipeline:
                         pending.append(f)
                     if not pending:
                         break  # 干净 EOF
+                    if frames == 0 and self.src_preview_path is not None:
+                        self._save_jpg(pending[0], self.src_preview_path)
                     outs = tx.process_batch(np.stack(pending))  # [N,H',W',3]
                 else:
                     f = await read_frame()
                     if f is None:
                         break  # 干净 EOF
+                    if frames == 0 and self.src_preview_path is not None:
+                        self._save_jpg(f, self.src_preview_path)
                     outs = tx.process(f)[None]
 
                 for i in range(outs.shape[0]):
@@ -281,12 +287,17 @@ class StreamPipeline:
                     pass
 
     def _save_preview(self, frame: np.ndarray) -> None:
+        self._save_jpg(frame, self.preview_path)
+
+    def _save_jpg(self, frame: np.ndarray, path: Path | None) -> None:
+        if path is None:
+            return
         try:
             from PIL import Image
 
             img = Image.fromarray(frame)
             img.thumbnail((960, 960))
-            self.preview_path.parent.mkdir(parents=True, exist_ok=True)
-            img.save(self.preview_path, quality=88)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            img.save(path, quality=88)
         except Exception:
             pass  # 预览失败不影响主流程

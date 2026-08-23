@@ -32,8 +32,14 @@ def _cuda_venv_python() -> Path | None:
     return p if p.exists() else None
 
 
+_PROBE_CACHE: dict[str, tuple[bool, str]] = {}
+
+
 def _probe_cuda(python_exe: Path) -> tuple[bool, str]:
-    """在候选解释器里跑真会话验证；返回 (ok, 说明)。"""
+    """在候选解释器里跑真会话验证；返回 (ok, 说明)。结果缓存（进程生命周期内）。"""
+    key = str(python_exe)
+    if key in _PROBE_CACHE:
+        return _PROBE_CACHE[key]
     model = BUNDLED_DIR / "RealESR-AnimeVideo-v3_x4.onnx"
     if not model.exists():
         return False, "缺少校验用模型"
@@ -46,9 +52,11 @@ def _probe_cuda(python_exe: Path) -> tuple[bool, str]:
         )
         line = out.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
         info = json.loads(line)
-        return bool(info.get("ok")), info.get("error") or info.get("provider", "")
+        result = (bool(info.get("ok")), info.get("error") or info.get("provider", ""))
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, IndexError) as e:
-        return False, f"探测失败: {e}"
+        result = (False, f"探测失败: {e}")
+    _PROBE_CACHE[key] = result
+    return result
 
 
 def select_engine(force: str | None = None) -> EngineChoice:
@@ -67,7 +75,7 @@ def select_engine(force: str | None = None) -> EngineChoice:
             if ok:
                 return EngineChoice("cuda", str(py), detail)
         return EngineChoice(
-            "directml", sys.executable, "SV_ENGINE=cuda 但 CUDA 不可用，回落 DirectML"
+            "directml", sys.executable, "CUDA 不可用，回落 DirectML"
         )
     register_nvidia_dlls()
     return EngineChoice("directml", sys.executable)

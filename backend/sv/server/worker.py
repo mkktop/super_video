@@ -100,6 +100,7 @@ def main(task_id: str) -> int:
     preview_dir = TEMP_DIR / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
     preview_path = preview_dir / f"{task_id}.jpg"
+    src_preview_path = preview_dir / f"{task_id}_src.jpg"
 
     def on_progress(frames, total, fps, eta):
         emit({
@@ -115,6 +116,7 @@ def main(task_id: str) -> int:
             preset=params.get("preset", "medium"),
         ),
         progress_cb=on_progress, preview_path=preview_path,
+        src_preview_path=src_preview_path,
         target_scale=target,
     )
     try:
@@ -133,6 +135,7 @@ def main(task_id: str) -> int:
         "type": "done", "frames": stats.frames,
         "elapsed": round(stats.elapsed_s, 1),
         "out_bytes": stats.out_bytes, "preview": str(preview_path),
+        "src_preview": str(src_preview_path),
     })
     return 0
 
