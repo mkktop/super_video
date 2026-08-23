@@ -1,17 +1,44 @@
 {
   "name": "super-video-app",
   "version": "0.1.0",
-  "description": "super_video 桌面端 (M1)",
+  "description": "super_video 桌面端 —— AI 视频超分",
   "main": "out/main/index.js",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "start": "electron-vite preview"
+    "start": "electron-vite preview",
+    "dist": "electron-vite build && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.supervideo.app",
+    "productName": "super_video",
+    "directories": { "output": "../dist-app" },
+    "files": [
+      "out/**",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README_*.md,.md}",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "../backend/dist/sidecar", "to": "sidecar" },
+      { "from": "../bin", "to": "bin" }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "super_video_${version}_setup.exe"
+    }
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.8",
     "electron": "^43.4.1",
+    "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0"
   },
   "dependencies": {

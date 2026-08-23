@@ -14,6 +14,7 @@ let sidecar: ChildProcess | null = null
 let baseUrl = ''
 
 function findRoot(): string {
+  if (app.isPackaged) return process.resourcesPath  // 安装包布局：resources/{bin,sidecar}
   let dir = app.getAppPath()
   for (let i = 0; i < 5; i++) {
     if (fs.existsSync(path.join(dir, '.venv')) && fs.existsSync(path.join(dir, 'backend'))) {
@@ -59,20 +60,28 @@ async function startOrReuseSidecar(): Promise<string> {
   }
   // 2) 全新拉起（detached：独立于 Electron 生命周期）
   const root = findRoot()
-  const py = path.join(root, '.venv', 'Scripts', 'python.exe')
-  const cli = path.join(root, 'backend', 'cli.py')
   const logPath = path.join(root, '.tmp', 'sidecar.log')
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
   const logFd = fs.openSync(logPath, 'a')
 
+  const isPackaged = app.isPackaged
+  const py = isPackaged
+    ? path.join(root, 'sidecar', 'sidecar.exe')
+    : path.join(root, '.venv', 'Scripts', 'python.exe')
+  const serveArgs = isPackaged
+    ? ['serve', '--port', '{PORT}']
+    : [path.join(root, 'backend', 'cli.py'), 'serve', '--port', '{PORT}']
+
   for (let p = 8730; p < 8740; p++) {
     if (await tryConnect(p)) continue // 端口被非 sidecar 占用，跳过
     baseUrl = `http://127.0.0.1:${p}`
-    sidecar = spawn(py, [cli, 'serve', '--port', String(p)], {
-      cwd: path.join(root, 'backend'),
+    const args = serveArgs.map((a) => (a === '{PORT}' ? String(p) : a))
+    sidecar = spawn(py, args, {
+      cwd: isPackaged ? undefined : path.join(root, 'backend'),
       detached: true,
       stdio: ['ignore', logFd, logFd],
       windowsHide: true,
+      env: isPackaged ? { ...process.env, SV_ROOT: root } : process.env,
     })
     sidecar.unref()
     fs.closeSync(logFd)

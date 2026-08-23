@@ -66,7 +66,11 @@ def select_engine(force: str | None = None) -> EngineChoice:
     DirectML 全面快于 CUDA EP（animevideov3 +10~25%, x4plus +270%），故默认 DirectML；
     CUDA 基础设施保留，SV_ENGINE=cuda 强制启用（M3 扩散模型 PyTorch 阶段启用）。
     force: 'cuda' | 'directml'（环境变量 SV_ENGINE）。
+
+    打包版（PyInstaller frozen）：无独立 venv，worker 复用 sidecar.exe（DirectML）。
     """
+    if getattr(sys, "frozen", False):
+        return EngineChoice("directml", sys.executable, "打包版 DirectML")
     force = force or os.environ.get("SV_ENGINE")
     if force == "cuda":
         py = _cuda_venv_python()

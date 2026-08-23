@@ -92,9 +92,16 @@ class Runner:
             self.engine = select_engine(None if engine_setting == "auto" else engine_setting)
         worker_py = self.engine.python_exe
         env = {**os.environ, "PYTHONPATH": str(BACKEND_DIR), "PYTHONUNBUFFERED": "1"}
+        # 打包版复用 sidecar.exe 自身作为 worker（cli.py worker 子命令）
+        if getattr(sys, "frozen", False):
+            spawn_cmd = [worker_py, "worker", task_id]
+            env.pop("PYTHONPATH", None)
+        else:
+            spawn_cmd = [worker_py, "-m", "sv.server.worker", task_id]
         self.proc = await asyncio.create_subprocess_exec(
-            worker_py, "-m", "sv.server.worker", task_id,
-            cwd=str(BACKEND_DIR), env=env,
+            *spawn_cmd,
+            cwd=str(BACKEND_DIR) if not getattr(sys, "frozen", False) else None,
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,  # stderr 混入 stdout 按日志行处理
             creationflags=WINDOWS_CREATE_FLAGS,

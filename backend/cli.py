@@ -174,6 +174,13 @@ def cmd_serve(args):
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
+def cmd_worker(args):
+    """打包模式复用入口：sidecar.exe worker <task_id>（等价 python -m sv.server.worker）。"""
+    from sv.server.worker import main as worker_main
+
+    sys.exit(worker_main(args.task_id))
+
+
 def main():
     ap = argparse.ArgumentParser(prog="sv", description="super_video CLI (M0)")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -211,6 +218,10 @@ def main():
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8730)
     p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("worker", help="[内部] 执行一个任务（打包模式复用入口）")
+    p.add_argument("task_id")
+    p.set_defaults(func=cmd_worker)
 
     args = ap.parse_args()
     if not getattr(args, "model_id", True) and args.cmd == "models" and args.action != "list":
