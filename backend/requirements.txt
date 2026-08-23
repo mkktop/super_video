@@ -7,4 +7,5 @@ psutil
 rich
 pytest
 fastapi
+httpx2
 uvicorn
