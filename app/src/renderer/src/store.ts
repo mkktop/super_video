@@ -11,7 +11,7 @@ export const store = reactive({
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
-async function refreshTasks() {
+export async function refreshTasks() {
   try {
     store.tasks = await api.tasks()
     store.connected = true
@@ -49,5 +49,7 @@ export async function initStore() {
   store.gpuName = hw.gpus?.[0]?.name ?? '未知显卡'
   await refreshTasks()
   connectWs()
+  // 轮询兜底：WS 失效时列表仍然实时（本地服务，开销可忽略）
+  setInterval(refreshTasks, 1500)
   store.ready = true
 }

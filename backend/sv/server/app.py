@@ -206,11 +206,23 @@ def task_preview(task_id: str):
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     q = bus.subscribe()
+    # 客户端不发消息；并发挂一个 receive 作断连哨兵，否则 q.get() 永远发现不了断开
+    sentinel = asyncio.create_task(ws.receive())
     try:
         while True:
-            event = await q.get()
+            send_task = asyncio.create_task(q.get())
+            done, _ = await asyncio.wait(
+                {sentinel, send_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if sentinel in done:
+                send_task.cancel()
+                break
+            if send_task not in done:
+                continue
+            event = send_task.result()
             await ws.send_text(json.dumps(event, ensure_ascii=False))
-    except WebSocketDisconnect:
+    except Exception:  # 断开时 send 抛异常，走统一清理
         pass
     finally:
+        sentinel.cancel()
         bus.unsubscribe(q)

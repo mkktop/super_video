@@ -15,7 +15,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api } from '../api'
-import { store } from '../store'
+import { refreshTasks, store } from '../store'
 
 const show = defineModel<boolean>('show', { default: false })
 const message = useMessage()
@@ -95,6 +95,7 @@ async function submit() {
     show.value = false
     inputs.value = []
     output.value = ''
+    refreshTasks() // 立即刷新，不等轮询/WS
   } else {
     message.error(`创建失败: ${lastErr}`)
   }
