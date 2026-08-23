@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 运行时产物
+.tmp/
+models_store/
+output/
+
+# 用户素材（仅本地）
+samples/
+
+# 打包与工具
+bin/
+ffmpeg.zip
+ffmpeg_tmp/
+*.log

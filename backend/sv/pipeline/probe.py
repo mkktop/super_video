@@ -1,0 +1,160 @@
+"""ffprobe 封装：媒体信息探测 + M0 输入校验（SDR 8bit + CFR）。"""
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from dataclasses import dataclass, field
+from fractions import Fraction
+from pathlib import Path
+
+from ..paths import ffprobe_bin
+from ..utils.process import WINDOWS_CREATE_FLAGS
+
+
+class UnsupportedMedia(Exception):
+    """M0 范围外的输入（10bit / HDR / VFR / 无视频流等）。"""
+
+
+@dataclass
+class AudioStream:
+    codec: str
+    channels: int
+    sample_rate: int
+
+
+@dataclass
+class MediaInfo:
+    path: Path
+    container: str
+    duration_s: float
+    width: int
+    height: int
+    fps: float
+    fps_str: str  # 原始分数形式，如 "24000/1001"，编码时原样传递避免漂移
+    vfr: bool
+    video_codec: str
+    pix_fmt: str
+    bit_depth: int
+    color_transfer: str
+    audio: list[AudioStream] = field(default_factory=list)
+    subtitle_count: int = 0
+    total_frames: int = 0
+
+    @property
+    def has_audio(self) -> bool:
+        return bool(self.audio)
+
+
+def _ffprobe_json(args: list[str]) -> dict:
+    proc = subprocess.run(
+        [ffprobe_bin(), "-hide_banner", "-loglevel", "error", *args],
+        capture_output=True,
+        creationflags=WINDOWS_CREATE_FLAGS,
+    )
+    if proc.returncode != 0:
+        raise UnsupportedMedia(
+            f"ffprobe 失败: {proc.stderr.decode('utf-8', 'replace').strip()[-500:]}"
+        )
+    return json.loads(proc.stdout)
+
+
+def _bit_depth(pix_fmt: str) -> int:
+    """从 pix_fmt 推断每通道位数：yuv420p=8, yuv420p10le=10, gray10le=10, rgb48le=16。"""
+    pf = pix_fmt.lower()
+    if pf.startswith(("p010",)):
+        return 10
+    if pf.startswith(("p016",)):
+        return 16
+    m = re.search(r"p(\d+)", pf)  # yuv420p10le / gbrp12le
+    if m:
+        return int(m.group(1))
+    m = re.fullmatch(r"[a-z]+(\d+)(?:le|be)?", pf)  # gray10le
+    if m:
+        return int(m.group(1))
+    if "48" in pf:  # rgb48le / bgr48
+        return 16
+    return 8
+
+
+def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(path)
+    data = _ffprobe_json(
+        ["-print_format", "json", "-show_format", "-show_streams", str(path)]
+    )
+    v = next((s for s in data.get("streams", []) if s.get("codec_type") == "video"), None)
+    if v is None:
+        raise UnsupportedMedia(f"{path.name}: 没有视频流")
+
+    r_rate = v.get("r_frame_rate", "0/1")
+    avg_rate = v.get("avg_frame_rate", "0/1")
+    fps = float(Fraction(r_rate)) if Fraction(r_rate) > 0 else float(Fraction(avg_rate))
+    avg = float(Fraction(avg_rate)) if Fraction(avg_rate) > 0 else fps
+    vfr = abs(fps - avg) / max(fps, 1e-6) > 0.02
+
+    duration = float(data.get("format", {}).get("duration", 0) or v.get("duration", 0) or 0)
+    audio = [
+        AudioStream(
+            codec=s.get("codec_name", "?"),
+            channels=int(s.get("channels", 0)),
+            sample_rate=int(s.get("sample_rate", 0)),
+        )
+        for s in data.get("streams", [])
+        if s.get("codec_type") == "audio"
+    ]
+    subs = sum(1 for s in data.get("streams", []) if s.get("codec_type") == "subtitle")
+
+    pix_fmt = v.get("pix_fmt", "yuv420p")
+    info = MediaInfo(
+        path=path,
+        container=data.get("format", {}).get("format_name", "?"),
+        duration_s=duration,
+        width=int(v["width"]),
+        height=int(v["height"]),
+        fps=fps,
+        fps_str=r_rate if Fraction(r_rate) > 0 else avg_rate,
+        vfr=vfr,
+        video_codec=v.get("codec_name", "?"),
+        pix_fmt=pix_fmt,
+        bit_depth=_bit_depth(pix_fmt),
+        color_transfer=v.get("color_transfer", "bt709") or "bt709",
+        audio=audio,
+        subtitle_count=subs,
+    )
+
+    info.total_frames = _count_frames(path) if exact_frames else int(duration * fps)
+    return info
+
+
+def _count_frames(path: Path) -> int:
+    """精确帧数：-count_packets 全量扫描（本地文件可接受）。"""
+    data = _ffprobe_json(
+        [
+            "-select_streams", "v:0", "-count_packets",
+            "-show_entries", "stream=nb_read_packets",
+            "-print_format", "json", str(path),
+        ]
+    )
+    n = int(data["streams"][0].get("nb_read_packets", 0) or 0)
+    return n
+
+
+def validate_m0(info: MediaInfo) -> None:
+    """M0 只接受 SDR 8bit CFR；越界输入给出明确中文原因。"""
+    if info.bit_depth > 8:
+        raise UnsupportedMedia(
+            f"{info.path.name}: 检测到 {info.bit_depth}bit（{info.pix_fmt}），"
+            f"M0 仅支持 8bit SDR，10bit 支持在 M2 提供"
+        )
+    if info.color_transfer in ("smpte2084", "arib-std-b67"):
+        raise UnsupportedMedia(
+            f"{info.path.name}: HDR 片源（{info.color_transfer}），M0 仅支持 SDR"
+        )
+    if info.vfr:
+        raise UnsupportedMedia(
+            f"{info.path.name}: 可变帧率(VFR)片源，M0 仅支持恒定帧率(CFR)"
+        )
+    if info.total_frames <= 0:
+        raise UnsupportedMedia(f"{info.path.name}: 无法确定总帧数")

@@ -1,0 +1,24 @@
+{
+  "id": "realesr-animevideov3",
+  "name": "AnimeVideo v3 (4x)",
+  "vendor": "TencentARC",
+  "license": "BSD-3-Clause",
+  "engine": "onnx",
+  "family": "realesrgan",
+  "scale": [4],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "description": "动漫视频专用紧凑模型，速度最快，适合整部动画批量处理",
+  "io": { "color": "bgr", "range": "0-1", "pad": 4 },
+  "files": [
+    {
+      "name": "RealESR-AnimeVideo-v3_x4.onnx",
+      "url": "https://raw.githubusercontent.com/ntsc-rs-fan/RealESRGAN-AnimeVideo-v3-x4-ONNX/main/RealESR-AnimeVideo-v3_x4.onnx",
+      "size": 2495473,
+      "sha256": "00ece3ac21c43ee31459216b5174b2cea0c5325044c5142aeb840f4890e175ff"
+    }
+  ]
+}

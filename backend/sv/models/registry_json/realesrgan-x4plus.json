@@ -1,0 +1,24 @@
+{
+  "id": "realesrgan-x4plus",
+  "name": "Real-ESRGAN x4plus",
+  "vendor": "xinntao",
+  "license": "BSD-3-Clause",
+  "engine": "onnx",
+  "family": "realesrgan",
+  "scale": [4],
+  "content": ["general"],
+  "temporal": false,
+  "speed": "balanced",
+  "vram_gb": 6,
+  "tile_hint": 64,
+  "description": "通用 4x 超分（RRDBNet），真人实拍表现稳定，大图自动分块",
+  "io": { "color": "bgr", "range": "0-1", "pad": 4 },
+  "files": [
+    {
+      "name": "RealESRGAN_x4plus.onnx",
+      "url": "https://huggingface.co/imgdesignart/realesrgan-x4-onnx/resolve/main/onnx/model.onnx",
+      "size": 67051787,
+      "sha256": "fa18ce70de3a55f3149d0cc898d335d2d69fca29edc0692cb362c856b2942c3f"
+    }
+  ]
+}
