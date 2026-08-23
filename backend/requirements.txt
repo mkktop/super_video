@@ -4,3 +4,5 @@ pillow
 psutil
 rich
 pytest
+fastapi
+uvicorn

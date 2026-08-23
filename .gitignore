@@ -17,3 +17,9 @@ bin/
 ffmpeg.zip
 ffmpeg_tmp/
 *.log
+
+# Electron app
+app/node_modules/
+app/out/
+app/dist/
+app/.vite/

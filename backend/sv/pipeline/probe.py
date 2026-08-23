@@ -124,12 +124,15 @@ def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
         subtitle_count=subs,
     )
 
-    info.total_frames = _count_frames(path) if exact_frames else int(duration * fps)
+    if exact_frames:
+        info.total_frames = max(_count_frames(path), int(round(duration * fps)))
+    else:
+        info.total_frames = int(duration * fps)
     return info
 
 
 def _count_frames(path: Path) -> int:
-    """精确帧数：-count_packets 全量扫描（本地文件可接受）。"""
+    """精确帧数：-count_packets 全量扫描；部分封装会少计 1~2 帧，与 duration×fps 取大。"""
     data = _ffprobe_json(
         [
             "-select_streams", "v:0", "-count_packets",

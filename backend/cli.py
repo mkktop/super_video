@@ -165,6 +165,15 @@ def cmd_run(args):
     )
 
 
+def cmd_serve(args):
+    import uvicorn
+
+    from sv.server.app import app
+
+    console.print(f"[green]sidecar 启动[/green] http://127.0.0.1:{args.port}")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+
+
 def main():
     ap = argparse.ArgumentParser(prog="sv", description="super_video CLI (M0)")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -197,6 +206,11 @@ def main():
     p.add_argument("--tile", type=int, default=0)
     p.add_argument("--device", default="auto", choices=["auto", "cpu"])
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("serve", help="启动 sidecar 服务")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8730)
+    p.set_defaults(func=cmd_serve)
 
     args = ap.parse_args()
     if not getattr(args, "model_id", True) and args.cmd == "models" and args.action != "list":

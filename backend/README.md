@@ -38,6 +38,15 @@ $py cli.py models download realesr-animevideov3
 # 超分（默认输出到输入同目录 *_4x.mp4）
 $py cli.py run ../.tmp/test.mp4 -m realesr-animevideov3
 $py cli.py run xxx.mp4 -m realesrgan-x4plus --tile 64 --crf 17
+
+# 启动 sidecar 服务（M1，Electron 会自动拉起；手动调试用）
+$py cli.py serve --port 8730
+```
+
+## 桌面端（app/，M1）
+
+```bash
+cd app && pnpm install && pnpm build && npx electron .   # 或 pnpm dev
 ```
 
 ## 代码结构

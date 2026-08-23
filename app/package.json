@@ -1,0 +1,21 @@
+{
+  "name": "super-video-app",
+  "version": "0.1.0",
+  "description": "super_video 桌面端 (M1)",
+  "main": "out/main/index.js",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "electron": "^43.4.1",
+    "electron-vite": "^5.0.0"
+  },
+  "dependencies": {
+    "naive-ui": "^2.45.2",
+    "vue": "^3.5.41"
+  }
+}
