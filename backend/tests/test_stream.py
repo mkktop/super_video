@@ -92,6 +92,24 @@ def test_target_scale_downscale(sample_video):
     assert (o.width, o.height) == (320, 240)
 
 
+def test_preview_pair_same_frame(sample_video):
+    """对比预览的源图与输出图必须是同一帧（interval=0 -> 最终为末帧配对）。"""
+    from PIL import Image
+
+    info = probe(sample_video)
+    out = TEMP_DIR / "stream_out_prev.mp4"
+    pv, pv_src = TEMP_DIR / "prev_out.jpg", TEMP_DIR / "prev_src.jpg"
+    run(StreamPipeline(
+        info, out, PassThrough(), EncodeOpts(),
+        preview_path=pv, src_preview_path=pv_src, preview_interval_s=0,
+    ))
+    a = np.asarray(Image.open(pv_src).convert("RGB"), dtype=np.float32)
+    b = np.asarray(Image.open(pv).convert("RGB"), dtype=np.float32)
+    assert a.shape == b.shape
+    diff = np.abs(a - b).mean()
+    assert diff < 10, f"源/输出预览不是同一帧 (mean diff {diff:.1f})"
+
+
 def test_no_audio_input(sample_video):
     info = probe(sample_video)
     silent = TEMP_DIR / "stream_silent.mp4"

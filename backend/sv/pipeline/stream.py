@@ -207,16 +207,14 @@ class StreamPipeline:
                         pending.append(f)
                     if not pending:
                         break  # 干净 EOF
-                    if frames == 0 and self.src_preview_path is not None:
-                        self._save_jpg(pending[0], self.src_preview_path)
                     outs = tx.process_batch(np.stack(pending))  # [N,H',W',3]
+                    srcs = pending
                 else:
                     f = await read_frame()
                     if f is None:
                         break  # 干净 EOF
-                    if frames == 0 and self.src_preview_path is not None:
-                        self._save_jpg(f, self.src_preview_path)
                     outs = tx.process(f)[None]
+                    srcs = [f]
 
                 for i in range(outs.shape[0]):
                     out_frame = outs[i]
@@ -228,8 +226,13 @@ class StreamPipeline:
                     frames += 1
 
                     now = time.perf_counter()
-                    if self.preview_path and now - last_preview >= self.preview_interval_s:
-                        self._save_preview(out_frame)
+                    # 源图与输出图必须同帧成对保存（对比滑块左右一致）
+                    if ((self.preview_path is not None or self.src_preview_path is not None)
+                            and (frames == 1 or now - last_preview >= self.preview_interval_s)):
+                        if self.preview_path is not None:
+                            self._save_preview(out_frame)
+                        if self.src_preview_path is not None:
+                            self._save_jpg(srcs[i], self.src_preview_path)
                         last_preview = now
                     if self.progress_cb and (now - last_cb >= 0.5 or frames == total):
                         elapsed = now - t0

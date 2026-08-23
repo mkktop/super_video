@@ -124,6 +124,7 @@ class Runner:
                 task_id, status="done", out_bytes=final.get("out_bytes", 0),
                 preview_path=final.get("preview"),
                 preview_src=final.get("src_preview"),
+                elapsed_s=final.get("elapsed", 0) or 0,
                 progress_frames=t.get("total_frames", 0),
             )
             self.bus.publish({"type": "task_status", "task_id": task_id, "status": "done"})

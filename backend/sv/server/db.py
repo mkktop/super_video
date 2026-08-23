@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   progress_frames INTEGER DEFAULT 0,
   fps_run REAL DEFAULT 0, eta_sec REAL DEFAULT 0,
   error TEXT, preview_path TEXT,
-  out_bytes INTEGER DEFAULT 0
+  out_bytes INTEGER DEFAULT 0, elapsed_s REAL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at);
 """
@@ -64,6 +64,7 @@ def init_db() -> None:
         # 轻量迁移：老库补列（已存在则忽略）
         for ddl in (
             "ALTER TABLE tasks ADD COLUMN preview_src TEXT",
+            "ALTER TABLE tasks ADD COLUMN elapsed_s REAL DEFAULT 0",
         ):
             try:
                 c.execute(ddl)

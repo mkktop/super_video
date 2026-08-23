@@ -113,6 +113,8 @@ def test_per_task_params(client, clips):
     wait_status(client, t1["id"], ("done",))
     wait_status(client, t2["id"], ("done",))
     assert Path(t1["output_path"]).exists() and Path(t2["output_path"]).exists()
+    d1 = client.get(f"/api/tasks/{t1['id']}").json()
+    assert d1["elapsed_s"] > 0, "完成任务必须记录用时"
 
 
 def test_invalid_input_rejected(client, clips):

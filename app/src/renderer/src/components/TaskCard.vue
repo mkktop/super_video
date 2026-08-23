@@ -48,6 +48,11 @@ function fmtEta(sec: number): string {
   return h ? `${h}时${m}分` : m ? `${m}分${s}秒` : `${s}秒`
 }
 
+function fmtElapsed(sec: number): string {
+  if (!sec || sec < 0) return '--'
+  return sec < 60 ? `${Math.round(sec)}秒` : fmtEta(Math.round(sec))
+}
+
 function fmtBytes(b: number): string {
   return b > 1e9 ? `${(b / 1e9).toFixed(2)}GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)}MB` : `${b}B`
 }
@@ -107,7 +112,7 @@ function onOpenFolder() {
           {{ task.progress_frames }}/{{ task.total_frames }} 帧 · {{ task.fps_run.toFixed(1) }} fps ·
           剩余 {{ fmtEta(task.eta_sec) }}
         </span>
-        <span v-else>{{ fmtBytes(task.out_bytes) }}</span>
+        <span v-else>{{ fmtBytes(task.out_bytes) }} · 用时 {{ fmtElapsed(task.elapsed_s) }}</span>
       </div>
     </div>
 

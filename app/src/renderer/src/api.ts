@@ -68,6 +68,7 @@ export interface Task {
   preview_path: string | null
   preview_src?: string | null
   out_bytes: number
+  elapsed_s: number
   queue_position: number | null
   updated_at: number
 }
