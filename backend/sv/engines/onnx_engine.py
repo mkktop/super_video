@@ -38,6 +38,9 @@ class OnnxSrEngine(BaseEngine):
         self.color = io.get("color", "bgr")
         self.value_range = io.get("range", "0-255")
         self.pad = int(io.get("pad", scale))
+        # "basic"|"disable"：个别老导出模型（如 real-cugan）在 DML 默认扩展优化下
+        # 算子融合会触发 DML 自定义算子崩溃，降级图优化即可稳定运行
+        self.graph_opt = io.get("graph_opt", "all")
         self.device = device
         self.tile = tile
         self.tile_overlap = tile_overlap
@@ -60,8 +63,15 @@ class OnnxSrEngine(BaseEngine):
             chosen = ["CPUExecutionProvider"]
         else:
             chosen = [p for p in _PROVIDER_ORDER if p in available] or ["CPUExecutionProvider"]
+        so = ort.SessionOptions()
+        level = {
+            "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
+            "disable": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
+        }.get(self.graph_opt)
+        if level is not None:
+            so.graph_optimization_level = level
         self.session = ort.InferenceSession(
-            str(self.model_path), providers=chosen
+            str(self.model_path), so, providers=chosen
         )
         self.provider_used = self.session.get_providers()
         inp = self.session.get_inputs()[0]

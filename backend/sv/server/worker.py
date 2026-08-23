@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from sv.engines.onnx_engine import OnnxSrEngine
+from sv.engines.rife import Rife2x
 from sv.models import manager
 from sv.models.fp16 import ensure_fp16_file
 from sv.models.registry import get_model, model_file
@@ -65,6 +66,12 @@ def main(task_id: str) -> int:
     if not (1 <= target <= scale):
         emit({"type": "failed", "error": f"目标倍率 x{target} 无效（1 ~ x{scale}）"})
         return 1
+    interp_mode = params.get("interp", "off")
+    if interp_mode not in ("off", "rife2x"):
+        emit({"type": "failed", "error": f"未知补帧模式 {interp_mode}"})
+        return 1
+    denoise = params.get("denoise")  # real-cugan 降噪档：3 → denoise3 变体
+    variant = f"denoise{int(denoise)}" if denoise else None
 
     try:
         manager.ensure_downloaded(spec)
@@ -72,9 +79,25 @@ def main(task_id: str) -> int:
         emit({"type": "failed", "error": f"模型文件不可用: {e}"})
         return 1
 
+    interp = None
+    if interp_mode == "rife2x":
+        try:
+            rife_spec = get_model("rife-v4.26")
+            manager.ensure_downloaded(rife_spec)
+            precision = settings.load().get("precision", "fp32")
+            rife_weight = model_file(rife_spec, 1, precision)
+            if precision == "fp16" and not rife_weight.stem.endswith("_fp16"):
+                rife_weight = ensure_fp16_file(rife_weight)
+            interp = Rife2x(rife_weight)
+            interp.load()
+        except Exception as e:  # noqa: BLE001 — 补帧是增强项，失败降级为不补帧
+            emit({"type": "log", "line": f"补帧不可用，按无补帧继续: {e}"})
+            interp = None
+
+    out_total = info.total_frames * (2 if interp is not None else 1)
     emit({
         "type": "started",
-        "total_frames": info.total_frames,
+        "total_frames": out_total,
         "src_w": info.width, "src_h": info.height,
         "out_w": info.width * target, "out_h": info.height * target,
         "output": str(output_path),
@@ -87,22 +110,32 @@ def main(task_id: str) -> int:
 
     t0 = time.perf_counter()
     precision = settings.load().get("precision", "fp32")
-    weight = model_file(spec, scale, precision)
+    weight = model_file(spec, scale, precision, variant)
     if precision == "fp16" and not weight.stem.endswith("_fp16"):
         emit({"type": "log", "line": f"生成 fp16 变体: {weight.name}"})
         weight = ensure_fp16_file(weight)  # 惰性补转（一次），失败回退 fp32
     used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
-    engine = OnnxSrEngine(
-        weight, scale, io=spec.io,
-        tile=int(params.get("tile") or spec.tile_hint),
-        batch=batch,
-    )
-    engine.load()
+
+    def _oom(e: Exception) -> bool:
+        t = str(e).lower()
+        return "memory" in t or "alloc" in t or "oom" in t
+
+    tile = int(params.get("tile") or spec.tile_hint)
+    engine = None
+    for _ in range(3):  # 显存不足自动降档：tile 逐步减半
+        try:
+            engine = OnnxSrEngine(weight, scale, io=spec.io, tile=tile, batch=batch)
+            engine.load()
+            import numpy as np
+            engine.process(np.zeros((64, 64, 3), dtype=np.uint8))  # 预热兼显存探测
+            break
+        except Exception as e:  # noqa: BLE001
+            if not _oom(e) or tile in (1,):
+                raise
+            new_tile = 256 if tile == 0 else max(64, tile // 2)
+            emit({"type": "log", "line": f"显存不足，tile {tile or '关'} -> {new_tile} 重试"})
+            tile = new_tile
     emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
-
-    import numpy as np
-
-    engine.process(np.zeros((64, 64, 3), dtype=np.uint8))  # 预热
 
     preview_dir = TEMP_DIR / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
@@ -125,6 +158,7 @@ def main(task_id: str) -> int:
         progress_cb=on_progress, preview_path=preview_path,
         src_preview_path=src_preview_path,
         target_scale=target,
+        interp=interp,
     )
     try:
         stats = asyncio.run(pipeline.run())

@@ -28,5 +28,16 @@
     "target_scale": 4,
     "codec": "h264",
     "crf": 17
+  },
+  {
+    "id": "anime-smooth",
+    "name": "动漫丝滑",
+    "icon": "🌊",
+    "desc": "AnimeVideo x2 + RIFE 补帧 · 帧率翻倍（耗时约×2.2）",
+    "model_id": "realesr-animevideov3",
+    "target_scale": 2,
+    "codec": "h264",
+    "crf": 18,
+    "interp": "rife2x"
   }
 ]

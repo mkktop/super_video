@@ -118,3 +118,57 @@ def test_no_audio_input(sample_video):
     out = TEMP_DIR / "stream_out_silent.mp4"
     run(StreamPipeline(i2, out, Nearest2x(), EncodeOpts()))
     assert not probe(out).has_audio
+
+
+def test_10bit_accepted(sample_video):
+    """M3：10bit 输入接受，解码统一转 8bit，管线正常出片。"""
+    p10 = TEMP_DIR / "stream_in_10bit.mp4"
+    subprocess.run([
+        ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24",
+        "-f", "lavfi", "-i", "sine=frequency=440",
+        "-t", "2", "-c:v", "libx265", "-pix_fmt", "yuv420p10le",
+        "-c:a", "aac", "-shortest",
+        str(p10),
+    ], check=True, creationflags=WINDOWS_CREATE_FLAGS)
+    info = probe(p10)
+    assert info.bit_depth == 10
+    validate_m0(info)  # 不再抛 UnsupportedMedia
+    out = TEMP_DIR / "stream_out_10bit.mp4"
+    stats = run(StreamPipeline(info, out, PassThrough(), EncodeOpts()))
+    assert stats.frames == info.total_frames
+    o = probe(out)
+    assert o.bit_depth == 8 and o.has_audio
+
+
+def test_vfr_accepted_cfr_output(sample_video):
+    """M3：VFR 输入接受，按平均帧率 CFR 化，时长与音轨保持。"""
+    a = TEMP_DIR / "vfr_a.mp4"
+    b = TEMP_DIR / "vfr_b.mp4"
+    concat = TEMP_DIR / "vfr_list.txt"
+    vfr = TEMP_DIR / "stream_in_vfr.mp4"
+    for p, rate in ((a, 30), (b, 12)):
+        subprocess.run([
+            ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", f"testsrc2=size=320x240:rate={rate}",
+            "-t", "2", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p", str(p),
+        ], check=True, creationflags=WINDOWS_CREATE_FLAGS)
+    concat.write_text(
+        f"file '{a.as_posix()}'\nfile '{b.as_posix()}'\n", encoding="utf-8"
+    )
+    subprocess.run([
+        ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "concat", "-safe", "0", "-i", str(concat),
+        "-c", "copy", str(vfr),
+    ], check=True, creationflags=WINDOWS_CREATE_FLAGS)
+    info = probe(vfr)
+    assert info.vfr, "拼接不同帧率应识别为 VFR"
+    validate_m0(info)
+    assert info.total_frames > 0 and 15 < info.fps < 30  # 平均帧率
+    out = TEMP_DIR / "stream_out_vfr.mp4"
+    stats = run(StreamPipeline(info, out, PassThrough(), EncodeOpts()))
+    o = probe(out)
+    assert not o.vfr, "输出必须 CFR"
+    assert abs(o.duration_s - info.duration_s) < 0.5
+    # CFR 化的帧数与 duration×avg 估算有 1~2 帧出入（与 probe 少计同源）
+    assert abs(stats.frames - info.total_frames) <= 2

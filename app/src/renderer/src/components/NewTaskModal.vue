@@ -29,14 +29,25 @@ const modelId = ref('')
 const targetScale = ref(2)
 const codec = ref('h264')
 const crf = ref(18)
+const interp = ref<'off' | 'rife2x'>('off')
+const denoise = ref<number | null>(null)
 const output = ref('')
 const submitting = ref(false)
 
 // ---- 模型 ----
+const srModels = computed(() => store.models.filter((m) => m.kind !== 'interp'))
 const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
 const scaleOptions = computed(() =>
   (selectedModel.value?.scale ?? []).map((s) => ({ label: `x${s}`, value: s })),
 )
+const interpOptions = computed(() => [
+  { label: '关闭', value: 'off' },
+  { label: 'RIFE 2×（帧率翻倍，需下载 23MB 模型）', value: 'rife2x' },
+])
+const denoiseOptions = [
+  { label: '关闭（保守模式，不降噪）', value: 0 },
+  { label: 'denoise 3（去压缩噪，适合老片）', value: 3 },
+]
 const nvencOk = computed(() => store.hardware?.nvenc ?? false)
 const codecOptions = computed(() => [
   { label: 'H.264 · 软编（兼容性好）', value: 'h264' },
@@ -104,6 +115,8 @@ function applyPreset(pid: string) {
   targetScale.value = p.target_scale
   codec.value = p.codec
   crf.value = p.crf
+  interp.value = (p as { interp?: 'off' | 'rife2x' }).interp ?? 'off'
+  denoise.value = null
   autoFillOutput()
   message.success(`已应用预设「${p.name}」`)
   if (step.value === 1 && inputs.value.length) step.value = 3
@@ -121,7 +134,14 @@ async function submit() {
       input,
       output: out,
       model_id: modelId.value,
-      params: { scale: targetScale.value, target_scale: targetScale.value, codec: codec.value, crf: crf.value },
+      params: {
+        scale: targetScale.value,
+        target_scale: targetScale.value,
+        codec: codec.value,
+        crf: crf.value,
+        interp: interp.value,
+        ...(denoise.value !== null ? { denoise: denoise.value } : {}),
+      },
     })
     if (r.ok) ok++
     else lastErr = `${(await r.json()).detail ?? r.status}`
@@ -202,7 +222,7 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
     <div v-else-if="step === 2" class="step-body">
       <div class="model-grid">
         <div
-          v-for="m in store.models"
+          v-for="m in srModels"
           :key="m.id"
           class="model-card"
           :class="{ selected: modelId === m.id, disabled: !m.vram_ok }"
@@ -239,6 +259,15 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
         </NFormItem>
         <NFormItem label="画质 (CRF)">
           <NSlider v-model:value="crf" :min="12" :max="30" :step="1" :marks="{ 14: '近无损', 18: '推荐', 24: '小体积' }" />
+        </NFormItem>
+        <NFormItem label="补帧">
+          <NSelect v-model:value="interp" :options="interpOptions" style="width: 320px" />
+          <NTag v-if="interp === 'rife2x' && probeInfo" size="small" :bordered="false" type="info" style="margin-left: 10px">
+            {{ probeInfo.fps }} → {{ probeInfo.fps * 2 }} fps
+          </NTag>
+        </NFormItem>
+        <NFormItem v-if="modelId === 'real-cugan'" label="降噪">
+          <NSelect v-model:value="denoise" :options="denoiseOptions" style="width: 320px" placeholder="选择降噪档位" />
         </NFormItem>
         <NFormItem v-if="inputs.length === 1" label="输出到">
           <NInput v-model:value="output" placeholder="默认与输入同目录">

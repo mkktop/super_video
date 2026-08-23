@@ -41,14 +41,17 @@ class TaskCanceled(Exception):
     pass
 
 
-def decoder_cmd(input_path: Path) -> list[str]:
-    return [
+def decoder_cmd(input_path: Path, cfr_fps: str | None = None) -> list[str]:
+    cmd = [
         ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-nostdin",
         "-i", str(input_path), "-map", "0:v:0", "-an", "-sn", "-dn",
         "-f", "rawvideo", "-pix_fmt", "rgb24",
         "-sws_flags", "lanczos+accurate_rnd+full_chroma_int",
-        "-",
     ]
+    if cfr_fps:
+        cmd += ["-r", cfr_fps]  # VFR 源按平均帧率 CFR 化（补/丢帧）
+    cmd.append("-")
+    return cmd
 
 
 _VCODECS = {
@@ -57,6 +60,13 @@ _VCODECS = {
     "h264_nvenc": "h264_nvenc",
     "hevc_nvenc": "hevc_nvenc",
 }
+
+
+def fps_double(fps_str: str) -> str:
+    """'30000/1001' -> '60000/1001'（补帧 x2 时编码帧率翻倍）。"""
+    from fractions import Fraction
+
+    return str(Fraction(fps_str) * 2)
 
 
 def encoder_cmd(
@@ -130,6 +140,7 @@ class StreamPipeline:
         src_preview_path: Path | None = None,  # 源首帧截图（对比预览用）
         preview_interval_s: float = 5.0,
         target_scale: int | None = None,  # 目标倍率；小于引擎倍率时编码器缩放
+        interp=None,  # Rife2x 补帧引擎；非 None 时输出帧率 x2
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -141,6 +152,7 @@ class StreamPipeline:
         self.src_preview_path = src_preview_path
         self.preview_interval_s = preview_interval_s
         self.target_scale = target_scale
+        self.interp = interp
 
     async def run(self) -> RunStats:
         info, enc, tx = self.info, self.enc, self.tx
@@ -151,16 +163,17 @@ class StreamPipeline:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         mp4_family = output_path.suffix.lower() in (".mp4", ".m4v", ".mov")
         audio_codec = info.audio[0].codec if info.has_audio else None
+        out_fps_str = fps_double(info.fps_str) if self.interp is not None else info.fps_str
 
         dec = asyncio.create_subprocess_exec(
-            *decoder_cmd(info.path),
+            *decoder_cmd(info.path, cfr_fps=info.fps_str if info.vfr else None),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,
         )
         enc_proc = asyncio.create_subprocess_exec(
             *encoder_cmd(info.path, output_path, frame_w, frame_h, target_w, target_h,
-                         info.fps_str, enc, info.has_audio, audio_codec, mp4_family),
+                         out_fps_str, enc, info.has_audio, audio_codec, mp4_family),
             stdin=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,
@@ -172,7 +185,7 @@ class StreamPipeline:
         drain_enc = asyncio.create_task(self._drain(p_enc.stderr, enc_err))
 
         frame_size = info.width * info.height * 3
-        total = info.total_frames
+        total = info.total_frames * (2 if self.interp is not None else 1)
         t0 = time.perf_counter()
         frames = 0
         last_cb = 0.0
@@ -191,6 +204,30 @@ class StreamPipeline:
                     f"解码流在帧中间截断({len(e.partial)}/{frame_size}字节): {tail}"
                 ) from e
             return np.frombuffer(buf, dtype=np.uint8).reshape(info.height, info.width, 3)
+
+        prev_out: np.ndarray | None = None  # 补帧用：上一张超分输出帧
+
+        def emit_frame(out_frame: np.ndarray, src_frame: np.ndarray | None) -> None:
+            """写一帧到编码器并处理预览/进度（src 仅真实帧有，补帧产物跳过预览）。"""
+            nonlocal frames, last_preview, last_cb
+            p_enc.stdin.write(out_frame.tobytes())
+            frames += 1
+            now = time.perf_counter()
+            # 源图与输出图必须同帧成对保存（对比滑块左右一致）
+            if (src_frame is not None
+                    and (self.preview_path is not None or self.src_preview_path is not None)
+                    and (frames == 1 or now - last_preview >= self.preview_interval_s)):
+                if self.preview_path is not None:
+                    self._save_preview(out_frame)
+                if self.src_preview_path is not None:
+                    self._save_jpg(src_frame, self.src_preview_path)
+                last_preview = now
+            if self.progress_cb and (now - last_cb >= 0.5 or frames == total):
+                elapsed = now - t0
+                fps = frames / elapsed if elapsed > 0 else 0.0
+                eta = (total - frames) / fps if fps > 0 else 0.0
+                self.progress_cb(frames, total, fps, eta)
+                last_cb = now
 
         try:
             assert p_enc.stdin is not None and p_dec.stdout is not None
@@ -222,25 +259,15 @@ class StreamPipeline:
                         raise PipelineError(
                             f"变换输出尺寸 {out_frame.shape} 与预期 {(frame_h, frame_w, 3)} 不符"
                         )
-                    p_enc.stdin.write(out_frame.tobytes())
-                    frames += 1
-
-                    now = time.perf_counter()
-                    # 源图与输出图必须同帧成对保存（对比滑块左右一致）
-                    if ((self.preview_path is not None or self.src_preview_path is not None)
-                            and (frames == 1 or now - last_preview >= self.preview_interval_s)):
-                        if self.preview_path is not None:
-                            self._save_preview(out_frame)
-                        if self.src_preview_path is not None:
-                            self._save_jpg(srcs[i], self.src_preview_path)
-                        last_preview = now
-                    if self.progress_cb and (now - last_cb >= 0.5 or frames == total):
-                        elapsed = now - t0
-                        fps = frames / elapsed if elapsed > 0 else 0.0
-                        eta = (total - frames) / fps if fps > 0 else 0.0
-                        self.progress_cb(frames, total, fps, eta)
-                        last_cb = now
+                    if self.interp is not None and prev_out is not None:
+                        # 两帧之间插一张，帧率翻倍；末尾补一张凑满 2N
+                        emit_frame(self.interp.interpolate(prev_out, out_frame), None)
+                    emit_frame(out_frame, srcs[i])
+                    prev_out = out_frame
                 await p_enc.stdin.drain()
+
+            if self.interp is not None and prev_out is not None:
+                emit_frame(prev_out, None)  # 末帧复制，凑满 2N 保持时长/音画同步
 
             p_enc.stdin.close()
             enc_rc = await p_enc.wait()

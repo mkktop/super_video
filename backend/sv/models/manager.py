@@ -1,4 +1,4 @@
-"""模型下载与校验：流式下载 + sha256 + 原子落盘。"""
+"""模型下载与校验：流式下载 + sha256 + 原子落盘；支持 7z 包内单文件提取。"""
 from __future__ import annotations
 
 import hashlib
@@ -11,6 +11,19 @@ from .registry import BUNDLED_DIR, ModelSpec, model_dir, local_files
 
 class DownloadError(RuntimeError):
     pass
+
+
+def _extract_member(archive_path: Path, member: str, dest: Path) -> None:
+    """从 7z 包提取单个成员到 dest。"""
+    import py7zr
+
+    with py7zr.SevenZipFile(archive_path) as z:
+        z.extract(targets=[member], path=str(dest.parent))
+    extracted = dest.parent / member
+    if not extracted.exists():
+        raise DownloadError(f"{archive_path.name} 中找不到 {member}")
+    if extracted != dest:
+        extracted.replace(dest)
 
 
 def _resolve(spec: ModelSpec, name: str) -> Path | None:
@@ -55,6 +68,7 @@ def download(spec: ModelSpec, progress_cb=None) -> None:
         tmp = d / (name + ".part")
         expect_size = f.get("size")
         expect_sha = f.get("sha256", "")
+        member = f.get("archive")  # 7z 包内成员路径（vs-mlrt 系模型）
 
         if dest.exists() and (not expect_sha or _sha256(dest) == expect_sha):
             done += dest.stat().st_size
@@ -81,14 +95,22 @@ def download(spec: ModelSpec, progress_cb=None) -> None:
             tmp.unlink(missing_ok=True)
             raise DownloadError(f"下载 {name} 失败: {e}") from e
 
-        if expect_size and got != expect_size:
-            tmp.unlink(missing_ok=True)
-            raise DownloadError(f"{name} 大小不符: 期望 {expect_size}, 实际 {got}")
-        if expect_sha:
-            actual = _sha256(tmp)
-            if actual != expect_sha:
+        # 校验/提取中间产物 -> 最终 dest
+        try:
+            if member:
+                inner = d / (name + ".inner")
+                _extract_member(tmp, member, inner)
                 tmp.unlink(missing_ok=True)
-                raise DownloadError(f"{name} sha256 校验失败")
+                tmp = inner
+            if expect_size and tmp.stat().st_size != expect_size:
+                raise DownloadError(f"{name} 大小不符: 期望 {expect_size}, 实际 {tmp.stat().st_size}")
+            if expect_sha:
+                actual = _sha256(tmp)
+                if actual != expect_sha:
+                    raise DownloadError(f"{name} sha256 校验失败")
+        except DownloadError:
+            tmp.unlink(missing_ok=True)
+            raise
         tmp.replace(dest)  # 原子落盘
 
 

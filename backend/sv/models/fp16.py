@@ -65,7 +65,7 @@ def ensure_fp16(spec: ModelSpec) -> list[Path]:
     """
     made: list[Path] = []
     d = model_dir(spec.id)
-    if not d.exists() or spec.engine != "onnx":
+    if not d.exists() or spec.engine != "onnx" or not spec.fp16:
         return made
     for f in spec.files:
         if "name" not in f:

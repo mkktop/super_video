@@ -167,6 +167,7 @@ def get_models() -> list[dict]:
         vram_ok = gpu_vram is None or spec.vram_gb <= gpu_vram
         out.append({
             "id": spec.id, "name": spec.name, "scale": spec.scale,
+            "kind": spec.kind,
             "content": spec.content, "speed": spec.speed,
             "vram_gb": spec.vram_gb, "description": spec.description,
             "tile_hint": spec.tile_hint,
@@ -267,6 +268,14 @@ def create_task(body: TaskCreate) -> dict:
     if codec.endswith("_nvenc") and not hardware_info().get("nvenc"):
         raise HTTPException(400, "本机 NVENC 不可用，请选择软件编码")
     params["codec"] = codec
+    interp = params.get("interp", "off")
+    if interp not in ("off", "rife2x"):
+        raise HTTPException(400, "interp 仅支持 off / rife2x")
+    params["interp"] = interp
+    if params.get("denoise") is not None:
+        if int(params["denoise"]) not in (0, 3):
+            raise HTTPException(400, "denoise 仅支持 0 / 3")
+        params["denoise"] = int(params["denoise"])
     crf = params.get("crf", 18)
     if not (0 <= int(crf) <= 51):
         raise HTTPException(400, "crf 范围 0-51")

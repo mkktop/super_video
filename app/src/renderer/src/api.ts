@@ -14,6 +14,7 @@ export interface ModelInfo {
   id: string
   name: string
   scale: number[]
+  kind?: 'sr' | 'interp'
   content: string[]
   speed: string
   vram_gb: number

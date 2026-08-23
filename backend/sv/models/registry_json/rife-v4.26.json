@@ -1,0 +1,24 @@
+{
+  "id": "rife-v4.26",
+  "name": "RIFE v4.26 补帧",
+  "vendor": "hzwer",
+  "license": "MIT",
+  "engine": "onnx",
+  "kind": "interp",
+  "scale": [1],
+  "content": ["anime", "real"],
+  "temporal": true,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": false,
+  "description": "光流补帧（2×）：输出帧率翻倍，超分后自动串联，音画保持同步",
+  "io": {"color": "rgb", "range": "0-1"},
+  "files": [
+    {"name": "rife_v4.26.onnx",
+     "url": "https://github.com/AmusementClub/vs-mlrt/releases/download/external-models/rife_v4.26.7z",
+     "archive": "rife_v2/rife_v4.26.onnx",
+     "sha256": "af25762dfec02a4bbb949decea63988b01fa56c46c0ff9dc66ac8e2f12cbb661",
+     "size": 22748049}
+  ]
+}

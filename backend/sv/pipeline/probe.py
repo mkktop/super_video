@@ -1,4 +1,4 @@
-"""ffprobe 封装：媒体信息探测 + M0 输入校验（SDR 8bit + CFR）。"""
+"""ffprobe 封装：媒体信息探测 + 输入校验（HDR 拒绝；10bit/VFR 接受并转换）。"""
 from __future__ import annotations
 
 import json
@@ -124,10 +124,18 @@ def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
         subtitle_count=subs,
     )
 
+    if vfr:
+        # VFR 按平均帧率 CFR 化（解码端 -r 重采样），时基与总帧数都用 avg
+        info.fps = avg
+        info.fps_str = avg_rate
+
     if exact_frames:
-        info.total_frames = max(_count_frames(path), int(round(duration * fps)))
+        if vfr:
+            info.total_frames = max(1, int(round(duration * avg)))
+        else:
+            info.total_frames = max(_count_frames(path), int(round(duration * fps)))
     else:
-        info.total_frames = int(duration * fps)
+        info.total_frames = int(duration * info.fps)
     return info
 
 
@@ -145,19 +153,11 @@ def _count_frames(path: Path) -> int:
 
 
 def validate_m0(info: MediaInfo) -> None:
-    """M0 只接受 SDR 8bit CFR；越界输入给出明确中文原因。"""
-    if info.bit_depth > 8:
-        raise UnsupportedMedia(
-            f"{info.path.name}: 检测到 {info.bit_depth}bit（{info.pix_fmt}），"
-            f"M0 仅支持 8bit SDR，10bit 支持在 M2 提供"
-        )
+    """M3 起接受 10bit（解码统一转 8bit SDR）与 VFR（按平均帧率 CFR 化）；HDR 仍拒绝。"""
     if info.color_transfer in ("smpte2084", "arib-std-b67"):
         raise UnsupportedMedia(
-            f"{info.path.name}: HDR 片源（{info.color_transfer}），M0 仅支持 SDR"
-        )
-    if info.vfr:
-        raise UnsupportedMedia(
-            f"{info.path.name}: 可变帧率(VFR)片源，M0 仅支持恒定帧率(CFR)"
+            f"{info.path.name}: HDR 片源（{info.color_transfer}），暂不支持；"
+            f"请先在外部工具转 SDR 后再处理"
         )
     if info.total_frames <= 0:
         raise UnsupportedMedia(f"{info.path.name}: 无法确定总帧数")

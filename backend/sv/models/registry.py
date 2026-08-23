@@ -30,6 +30,8 @@ class ModelSpec:
     description: str = ""
     vendor: str = ""
     license: str = ""
+    kind: str = "sr"  # sr（超分）| interp（补帧）
+    fp16: bool = True  # False = 该模型 fp16 转换不可用（如 DML 加载崩溃）
     files: list[dict] = field(default_factory=list)
 
     @classmethod
@@ -40,6 +42,7 @@ class ModelSpec:
             vram_gb=d.get("vram_gb", 4), io=d.get("io", {}),
             tile_hint=d.get("tile_hint", 0), description=d.get("description", ""),
             vendor=d.get("vendor", ""), license=d.get("license", ""),
+            kind=d.get("kind", "sr"), fp16=d.get("fp16", True),
             files=d.get("files", []),
         )
 
@@ -82,8 +85,15 @@ def local_files(spec: ModelSpec) -> list[Path]:
     return [d / f["name"] for f in spec.files if "name" in f]
 
 
-def file_for_scale(spec: ModelSpec, scale: int) -> dict:
-    """按倍率选权重文件：files 带 scale 字段的精确匹配，无字段的通用于所有倍率。"""
+def file_for_scale(spec: ModelSpec, scale: int, variant: str | None = None) -> dict:
+    """按倍率+变体选权重：先精确匹配（scale+variant），再 scale 无变体，再通用。"""
+    if variant:
+        for f in spec.files:
+            if f.get("scale") == scale and f.get("variant") == variant:
+                return f
+    for f in spec.files:
+        if f.get("scale") == scale and "variant" not in f:
+            return f
     for f in spec.files:
         if f.get("scale") == scale:
             return f
@@ -93,13 +103,14 @@ def file_for_scale(spec: ModelSpec, scale: int) -> dict:
     raise ModelNotFoundError(f"{spec.id} 缺少 x{scale} 权重")
 
 
-def model_file(spec: ModelSpec, scale: int, precision: str = "fp32") -> Path:
+def model_file(spec: ModelSpec, scale: int, precision: str = "fp32",
+               variant: str | None = None) -> Path:
     """权重解析：models_store 优先，其次随包 bundled 目录。
 
-    precision=="fp16" 时优先取 `_fp16` 兄弟文件（转换缓存或随包分发），
-    不存在则回退 fp32 原件。
+    precision=="fp16" 且模型允许 fp16 时优先取 `_fp16` 兄弟文件
+    （转换缓存或随包分发），不存在则回退 fp32 原件。
     """
-    f = file_for_scale(spec, scale)
+    f = file_for_scale(spec, scale, variant)
     in_store = model_dir(spec.id) / f["name"]
     if in_store.exists():
         base = in_store
@@ -107,7 +118,7 @@ def model_file(spec: ModelSpec, scale: int, precision: str = "fp32") -> Path:
         base = BUNDLED_DIR / f["name"]
         if not base.exists():
             return in_store
-    if precision == "fp16":
+    if precision == "fp16" and spec.fp16:
         from .fp16 import fp16_path
 
         alt = fp16_path(base)

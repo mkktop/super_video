@@ -90,6 +90,9 @@ function onOpenFolder() {
         <n-tag size="small" :bordered="false" type="info">
           x{{ task.params?.target_scale ?? task.params?.scale ?? 4 }}
         </n-tag>
+        <n-tag v-if="task.params?.interp === 'rife2x'" size="small" :bordered="false" type="success">
+          补帧2×
+        </n-tag>
         <n-tag size="small" :bordered="false" :type="statusMeta[task.status].type">
           {{ statusMeta[task.status].label }}{{ task.queue_position ? ` #${task.queue_position}` : '' }}
         </n-tag>
