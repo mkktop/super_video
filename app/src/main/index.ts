@@ -161,6 +161,56 @@ if (!gotLock) {
   })
 }
 
+// ---- 自动更新（GitHub Releases，仅打包版；公共仓库无需 token） ----
+let updaterBusy = false
+
+function setupAutoUpdate(): void {
+  if (!app.isPackaged) return
+  import('electron-updater').then(({ autoUpdater }) => {
+    autoUpdater.autoDownload = true
+    autoUpdater.on('update-downloaded', (info) => {
+      dialog
+        .showMessageBox({
+          type: 'info',
+          title: '更新已就绪',
+          message: `新版本 ${info.version} 已下载，重启后生效。`,
+          buttons: ['立即重启', '稍后（退出时自动安装）'],
+          defaultId: 0,
+        })
+        .then((r) => {
+          if (r.response === 0) autoUpdater.quitAndInstall(false, true)
+        })
+    })
+    // 启动后 10s 静默检查一次
+    setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10_000)
+  })
+}
+
+async function checkUpdateManually(): Promise<{
+  status: string
+  current: string
+  version?: string
+  error?: string
+}> {
+  const current = app.getVersion()
+  if (!app.isPackaged) return { status: 'dev', current }
+  const { autoUpdater } = await import('electron-updater')
+  if (updaterBusy) return { status: 'busy', current }
+  updaterBusy = true
+  try {
+    const r = await autoUpdater.checkForUpdates()
+    const newVersion = r?.updateInfo?.version
+    if (newVersion && newVersion !== current) {
+      return { status: 'downloading', current, version: newVersion }
+    }
+    return { status: 'latest', current, version: newVersion }
+  } catch (e) {
+    return { status: 'error', current, error: String(e) }
+  } finally {
+    updaterBusy = false
+  }
+}
+
 app.whenReady().then(async () => {
   try {
     await startOrReuseSidecar()
@@ -170,6 +220,7 @@ app.whenReady().then(async () => {
     return
   }
   createWindow()
+  setupAutoUpdate()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -190,6 +241,10 @@ app.on('before-quit', async (e) => {
 })
 
 ipcMain.handle('backend:info', () => ({ baseUrl }))
+
+ipcMain.handle('app:version', () => app.getVersion())
+
+ipcMain.handle('app:check-update', () => checkUpdateManually())
 
 // ---- 自绘标题栏的窗口控制 ----
 ipcMain.on('win:minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())

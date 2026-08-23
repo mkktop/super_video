@@ -18,6 +18,9 @@ const engine = ref<'auto' | 'cuda' | 'directml'>('auto')
 const precision = ref<'fp16' | 'fp32'>('fp16')
 const logLines = ref<string[]>([])
 const saving = ref(false)
+const appVersion = ref('')
+const checking = ref(false)
+const updateMsg = ref('')
 
 onMounted(async () => {
   const s = (await api.settings()) as {
@@ -26,6 +29,7 @@ onMounted(async () => {
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
+  appVersion.value = await window.sv.appVersion()
   loadLog()
 })
 
@@ -36,6 +40,27 @@ async function loadLog() {
 async function exportLog() {
   const p = await window.sv.saveLog(logLines.value.join('\n') || '(空)')
   if (p) message.success(`日志已导出: ${p}`)
+}
+
+async function checkUpdate() {
+  checking.value = true
+  updateMsg.value = ''
+  try {
+    const r = await window.sv.checkUpdate()
+    if (r.status === 'dev') {
+      updateMsg.value = '开发模式不检查更新（打包版自动检查 GitHub Releases）'
+    } else if (r.status === 'downloading') {
+      updateMsg.value = `发现新版本 ${r.version}，正在后台下载，完成后会弹窗提示重启`
+    } else if (r.status === 'latest') {
+      updateMsg.value = `已是最新版本（${r.current}）`
+    } else if (r.status === 'error') {
+      updateMsg.value = `检查失败：${r.error ?? '未知错误'}（发布前属正常，见 README 发布流程）`
+    } else {
+      updateMsg.value = '检查中，请稍候'
+    }
+  } finally {
+    checking.value = false
+  }
 }
 
 async function saveEngine() {
@@ -82,6 +107,14 @@ async function saveEngine() {
       </div>
     </NCard>
 
+    <NCard title="应用与更新" size="small">
+      <div class="update-row">
+        <span>当前版本 <b>v{{ appVersion }}</b> · 更新源：GitHub Releases</span>
+        <NButton size="small" :loading="checking" @click="checkUpdate">检查更新</NButton>
+      </div>
+      <p v-if="updateMsg" class="hint" style="margin-top: 8px">{{ updateMsg }}</p>
+    </NCard>
+
     <NCard title="本机环境" size="small">
       <NSpace vertical :size="6">
         <div>GPU：{{ store.gpuName }} <span v-if="store.hardware?.gpus?.[0]?.vram_gb">({{ store.hardware.gpus[0].vram_gb }}GB)</span></div>
@@ -106,6 +139,7 @@ async function saveEngine() {
 .settings-page { display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
 h1 { font-size: 20px; font-weight: 700; }
 .hint { color: #9aa0a6; font-size: 12.5px; margin-bottom: 12px; }
+.update-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .log {
   max-height: 300px;
   overflow-y: auto;

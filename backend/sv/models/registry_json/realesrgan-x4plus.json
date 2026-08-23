@@ -10,15 +10,15 @@
   "temporal": false,
   "speed": "balanced",
   "vram_gb": 6,
-  "tile_hint": 64,
-  "description": "通用 4x 超分（RRDBNet），真人实拍表现稳定，大图自动分块",
-  "io": { "color": "bgr", "range": "0-1", "pad": 4 },
+  "tile_hint": 512,
+  "description": "通用 4x 超分（RRDBNet 动态尺寸版，本仓库自官方权重导出），真人实拍表现稳定；fp16 下比固定尺寸社区版快约一个数量级",
+  "io": { "color": "rgb", "range": "0-1", "pad": 4 },
   "files": [
     {
-      "name": "RealESRGAN_x4plus.onnx",
-      "url": "https://huggingface.co/imgdesignart/realesrgan-x4-onnx/resolve/main/onnx/model.onnx",
-      "size": 67051787,
-      "sha256": "fa18ce70de3a55f3149d0cc898d335d2d69fca29edc0692cb362c856b2942c3f"
+      "name": "RealESRGAN_x4plus_dyn.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/RealESRGAN_x4plus_dyn.onnx",
+      "size": 67063454,
+      "sha256": "6ea6125934bebe44ba3dfb737dc4f969dc79a5549b11b9fb548a6a66f4776e75"
     }
   ]
 }

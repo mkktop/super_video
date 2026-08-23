@@ -38,12 +38,26 @@ cd app && pnpm dist
 安装布局：`resources/{sidecar,bin}`；数据目录（models_store/.tmp）也在 resources 下（per-user 安装，可写）。
 打包版 worker 通过 `sidecar.exe worker <task_id>` 复用入口拉起（无解释器依赖）。
 
-### 自动更新（待发布源）
+### 发布与自动更新（GitHub Releases）
 
-electron-updater 未接线：需要先建立 GitHub Releases（或自备 CDN）。
-接入点：`app/package.json` 增加 `"publish": {"provider": "github", "owner": "...", "repo": "..."}`
-后 `pnpm add electron-updater` 并在 main 里 `autoUpdater.checkForUpdates()` 即可；
-国内备胎在模型 manifest 的 `mirror_urls` 机制上同理扩展。
+自动更新已接线 electron-updater（源：`github.com/mkktop/super_video`，公共仓库无需 token）。
+设置页有"检查更新"，打包版启动 10 秒后也会静默检查；下载完成弹窗提示重启。
+
+**发新版本**（仓库推送后）：
+
+```bash
+cd backend && ../.venv/Scripts/pyinstaller.exe sidecar.spec --noconfirm   # 先重打 sidecar
+cd app && pnpm dist                                                        # 再打安装包
+```
+
+到 GitHub → Releases → 新建 Release（tag = 版本号，如 v0.1.1），上传 `dist-app/` 下的三个文件：
+`super_video_0.1.1_setup.exe`、`super_video_0.1.1_setup.exe.blockmap`、`latest.yml`。
+已装用户即会收到更新提示（blockmap 支持增量下载）。
+
+**模型资产**（首次发布需做一次）：新建 Release tag `models-v1`，上传
+`models_store/realesrgan-x4plus/RealESRGAN_x4plus_dyn.onnx`（由
+`backend/scripts/export_onnx_x4plus.py` 从官方权重确定性导出，sha256 见 manifest）。
+此后 x4plus 的下载源即为本仓库 GitHub Release。其余模型已直接使用各官方 GitHub Release。
 
 ## 里程碑
 

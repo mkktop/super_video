@@ -4,6 +4,13 @@ declare global {
   interface Window {
     sv: {
       backendInfo: () => Promise<{ baseUrl: string }>
+      appVersion: () => Promise<string>
+      checkUpdate: () => Promise<{
+        status: string
+        current: string
+        version?: string
+        error?: string
+      }>
       pickVideo: () => Promise<string[]>
       pickOutput: (suggest: string) => Promise<string | null>
       pickModel: () => Promise<string | null>

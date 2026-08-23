@@ -13,19 +13,39 @@
   "build": {
     "appId": "com.supervideo.app",
     "productName": "super_video",
-    "directories": { "output": "../dist-app" },
+    "directories": {
+      "output": "../dist-app"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "mkktop",
+      "repo": "super_video"
+    },
     "files": [
       "out/**",
       "!**/node_modules/*/{CHANGELOG.md,README.md,README_*.md,.md}",
       "package.json"
     ],
     "extraResources": [
-      { "from": "../backend/dist/sidecar", "to": "sidecar" },
-      { "from": "../bin", "to": "bin" }
+      {
+        "from": "../backend/dist/sidecar",
+        "to": "sidecar"
+      },
+      {
+        "from": "../bin",
+        "to": "bin"
+      }
     ],
     "win": {
       "icon": "build/icon.ico",
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,
@@ -42,6 +62,7 @@
     "electron-vite": "^5.0.0"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "naive-ui": "^2.45.2",
     "vue": "^3.5.41"
   }
