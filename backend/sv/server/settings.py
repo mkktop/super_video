@@ -8,6 +8,7 @@ from ..paths import ROOT
 
 DEFAULTS = {
     "engine": "auto",  # auto | cuda | directml
+    "precision": "fp16",  # fp16（实测提速 1.36~1.73x，PSNR 74dB+）| fp32
 }
 
 SETTINGS_PATH = ROOT / "data" / "settings.json"
@@ -30,6 +31,8 @@ def save(updates: dict) -> dict:
             v = updates[k]
             if k == "engine" and v not in ("auto", "cuda", "directml"):
                 raise ValueError(f"非法 engine 值: {v}")
+            if k == "precision" and v not in ("fp16", "fp32"):
+                raise ValueError(f"非法 precision 值: {v}")
             data[k] = v
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

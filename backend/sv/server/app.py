@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 import time
 from contextlib import asynccontextmanager
@@ -23,6 +24,8 @@ from .events import EventBus
 from .hardware import hardware_info
 from .runner import Runner
 from .settings import DEFAULTS, load as load_settings, save as save_settings
+
+log = logging.getLogger("sv.app")
 
 bus = EventBus()
 runner = Runner(bus)
@@ -213,6 +216,15 @@ async def download_model(model_id: str) -> dict:
 
             try:
                 await loop.run_in_executor(None, manager.download, spec, cb)
+                # 下载完成后生成 fp16 变体（bundled 模型随包已有，此处只补下载件）
+                try:
+                    from ..models.fp16 import ensure_fp16
+
+                    await loop.run_in_executor(None, ensure_fp16, spec)
+                except ImportError:
+                    log.warning("fp16 转换依赖缺失（onnx/onnxconverter-common），保持 fp32")
+                except Exception as e:  # noqa: BLE001 — 转换失败不影响使用 fp32
+                    log.warning(f"fp16 转换失败，保持 fp32: {e}")
                 bus.publish({"type": "model_download", "model_id": model_id, "done": True})
             except Exception as e:  # noqa: BLE001
                 bus.publish({"type": "model_download", "model_id": model_id,

@@ -21,11 +21,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from sv.engines.onnx_engine import OnnxSrEngine
 from sv.models import manager
+from sv.models.fp16 import ensure_fp16_file
 from sv.models.registry import get_model, model_file
 from sv.paths import TEMP_DIR
 from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
 from sv.pipeline.stream import EncodeOpts, PipelineError, StreamPipeline, TaskCanceled
-from sv.server import db
+from sv.server import db, settings
 
 
 def emit(obj: dict) -> None:
@@ -85,13 +86,19 @@ def main(task_id: str) -> int:
         batch = 1
 
     t0 = time.perf_counter()
+    precision = settings.load().get("precision", "fp32")
+    weight = model_file(spec, scale, precision)
+    if precision == "fp16" and not weight.stem.endswith("_fp16"):
+        emit({"type": "log", "line": f"生成 fp16 变体: {weight.name}"})
+        weight = ensure_fp16_file(weight)  # 惰性补转（一次），失败回退 fp32
+    used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
     engine = OnnxSrEngine(
-        model_file(spec, scale), scale, io=spec.io,
+        weight, scale, io=spec.io,
         tile=int(params.get("tile") or spec.tile_hint),
         batch=batch,
     )
     engine.load()
-    emit({"type": "loaded", "provider": engine.provider_used})
+    emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
 
     import numpy as np
 

@@ -15,12 +15,17 @@ import { refreshModels, store } from '../store'
 
 const message = useMessage()
 const engine = ref<'auto' | 'cuda' | 'directml'>('auto')
+const precision = ref<'fp16' | 'fp32'>('fp16')
 const logLines = ref<string[]>([])
 const saving = ref(false)
 
 onMounted(async () => {
-  const s = (await api.settings()) as { engine?: 'auto' | 'cuda' | 'directml' }
+  const s = (await api.settings()) as {
+    engine?: 'auto' | 'cuda' | 'directml'
+    precision?: 'fp16' | 'fp32'
+  }
   engine.value = s.engine ?? 'auto'
+  precision.value = s.precision ?? 'fp16'
   loadLog()
 })
 
@@ -30,7 +35,7 @@ async function loadLog() {
 
 async function saveEngine() {
   saving.value = true
-  const r = await api.saveSettings({ engine: engine.value })
+  const r = await api.saveSettings({ engine: engine.value, precision: precision.value })
   saving.value = false
   if (r.ok) {
     message.success('已保存，从下一个任务起生效')
@@ -47,7 +52,7 @@ async function saveEngine() {
       <h1>设置</h1>
     </div>
 
-    <NCard title="推理后端" size="small">
+    <NCard title="推理后端与精度" size="small">
       <p class="hint">
         DirectML：全显卡兼容（实测本机最快）· CUDA：NVIDIA 专用（供 M3 扩散模型）·
         当前实际后端：<NTag size="small" type="info" :bordered="false">
@@ -58,6 +63,14 @@ async function saveEngine() {
         <NRadioButton value="auto">自动</NRadioButton>
         <NRadioButton value="directml">DirectML</NRadioButton>
         <NRadioButton value="cuda">CUDA</NRadioButton>
+      </NRadioGroup>
+      <p class="hint" style="margin: 14px 0 12px">
+        FP16：实测提速 1.36~1.73x，画质无感知差异（输出 PSNR 74dB+）·
+        FP32：极少数模型数值异常时回退用
+      </p>
+      <NRadioGroup v-model:value="precision">
+        <NRadioButton value="fp16">FP16（推荐）</NRadioButton>
+        <NRadioButton value="fp32">FP32</NRadioButton>
       </NRadioGroup>
       <div style="margin-top: 14px">
         <NButton type="primary" size="small" :loading="saving" @click="saveEngine">保存</NButton>

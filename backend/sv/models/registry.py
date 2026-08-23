@@ -93,13 +93,24 @@ def file_for_scale(spec: ModelSpec, scale: int) -> dict:
     raise ModelNotFoundError(f"{spec.id} 缺少 x{scale} 权重")
 
 
-def model_file(spec: ModelSpec, scale: int) -> Path:
-    """权重解析：models_store 优先，其次随包 bundled 目录。"""
+def model_file(spec: ModelSpec, scale: int, precision: str = "fp32") -> Path:
+    """权重解析：models_store 优先，其次随包 bundled 目录。
+
+    precision=="fp16" 时优先取 `_fp16` 兄弟文件（转换缓存或随包分发），
+    不存在则回退 fp32 原件。
+    """
     f = file_for_scale(spec, scale)
     in_store = model_dir(spec.id) / f["name"]
     if in_store.exists():
-        return in_store
-    bundled = BUNDLED_DIR / f["name"]
-    if bundled.exists():
-        return bundled
-    return in_store
+        base = in_store
+    else:
+        base = BUNDLED_DIR / f["name"]
+        if not base.exists():
+            return in_store
+    if precision == "fp16":
+        from .fp16 import fp16_path
+
+        alt = fp16_path(base)
+        if alt.exists():
+            return alt
+    return base

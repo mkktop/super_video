@@ -1,4 +1,6 @@
 numpy
+onnx
+onnxconverter-common
 onnxruntime-directml
 pillow
 psutil
