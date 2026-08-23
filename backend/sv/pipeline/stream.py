@@ -175,41 +175,63 @@ class StreamPipeline:
         frames = 0
         last_cb = 0.0
         last_preview = 0.0
+        batch = max(1, int(getattr(tx, "batch", 1) or 1))
+
+        async def read_frame() -> np.ndarray | None:
+            """读一帧；干净 EOF 返回 None，帧中截断抛错。"""
+            try:
+                buf = await p_dec.stdout.readexactly(frame_size)
+            except asyncio.IncompleteReadError as e:
+                if len(e.partial) == 0:
+                    return None
+                tail = " | ".join(dec_err)
+                raise PipelineError(
+                    f"解码流在帧中间截断({len(e.partial)}/{frame_size}字节): {tail}"
+                ) from e
+            return np.frombuffer(buf, dtype=np.uint8).reshape(info.height, info.width, 3)
 
         try:
             assert p_enc.stdin is not None and p_dec.stdout is not None
             while True:
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise TaskCanceled()
-                try:
-                    buf = await p_dec.stdout.readexactly(frame_size)
-                except asyncio.IncompleteReadError as e:
-                    if len(e.partial) == 0:
-                        break  # 干净 EOF：解码器正常结束
-                    tail = " | ".join(dec_err)
-                    raise PipelineError(
-                        f"解码流在帧中间截断({len(e.partial)}/{frame_size}字节): {tail}"
-                    ) from e
-                frame = np.frombuffer(buf, dtype=np.uint8).reshape(info.height, info.width, 3)
-                out_frame = tx.process(frame)
-                if out_frame.shape != (frame_h, frame_w, 3):
-                    raise PipelineError(
-                        f"变换输出尺寸 {out_frame.shape} 与预期 {(frame_h, frame_w, 3)} 不符"
-                    )
-                p_enc.stdin.write(out_frame.tobytes())
-                await p_enc.stdin.drain()
-                frames += 1
 
-                now = time.perf_counter()
-                if self.preview_path and now - last_preview >= self.preview_interval_s:
-                    self._save_preview(out_frame)
-                    last_preview = now
-                if self.progress_cb and (now - last_cb >= 0.5 or frames == total):
-                    elapsed = now - t0
-                    fps = frames / elapsed if elapsed > 0 else 0.0
-                    eta = (total - frames) / fps if fps > 0 else 0.0
-                    self.progress_cb(frames, total, fps, eta)
-                    last_cb = now
+                if batch > 1:
+                    pending: list[np.ndarray] = []
+                    while len(pending) < batch:
+                        f = await read_frame()
+                        if f is None:
+                            break
+                        pending.append(f)
+                    if not pending:
+                        break  # 干净 EOF
+                    outs = tx.process_batch(np.stack(pending))  # [N,H',W',3]
+                else:
+                    f = await read_frame()
+                    if f is None:
+                        break  # 干净 EOF
+                    outs = tx.process(f)[None]
+
+                for i in range(outs.shape[0]):
+                    out_frame = outs[i]
+                    if out_frame.shape != (frame_h, frame_w, 3):
+                        raise PipelineError(
+                            f"变换输出尺寸 {out_frame.shape} 与预期 {(frame_h, frame_w, 3)} 不符"
+                        )
+                    p_enc.stdin.write(out_frame.tobytes())
+                    frames += 1
+
+                    now = time.perf_counter()
+                    if self.preview_path and now - last_preview >= self.preview_interval_s:
+                        self._save_preview(out_frame)
+                        last_preview = now
+                    if self.progress_cb and (now - last_cb >= 0.5 or frames == total):
+                        elapsed = now - t0
+                        fps = frames / elapsed if elapsed > 0 else 0.0
+                        eta = (total - frames) / fps if fps > 0 else 0.0
+                        self.progress_cb(frames, total, fps, eta)
+                        last_cb = now
+                await p_enc.stdin.drain()
 
             p_enc.stdin.close()
             enc_rc = await p_enc.wait()

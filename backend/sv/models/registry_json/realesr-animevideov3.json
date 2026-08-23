@@ -12,7 +12,7 @@
   "vram_gb": 2,
   "tile_hint": 0,
   "description": "动漫视频专用：x2 原生(RealESRGANv2-animevideo-xsx2)/x4 原生(v3)，1080p→4K 选 x2",
-  "io": { "color": "bgr", "range": "0-1" },
+  "io": { "color": "bgr", "range": "0-1", "batch_hint": 4 },
   "files": [
     {
       "name": "RealESR-AnimeVideo-v3_x4.onnx",

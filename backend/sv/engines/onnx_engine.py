@@ -30,6 +30,7 @@ class OnnxSrEngine(BaseEngine):
         device: str = "auto",
         tile: int = 0,
         tile_overlap: int = 16,
+        batch: int = 1,
     ):
         self.model_path = Path(model_path)
         self.scale = scale
@@ -40,9 +41,11 @@ class OnnxSrEngine(BaseEngine):
         self.device = device
         self.tile = tile
         self.tile_overlap = tile_overlap
+        self.batch = max(1, batch)
         self.session = None
         self.provider_used: list[str] = []
         self.fixed_hw: tuple[int, int] | None = None
+        self.max_batch: int = 0  # 0 = 动态 batch；>0 = 导出时固定
         self._in_name = None
         self._out_names = None
 
@@ -71,6 +74,14 @@ class OnnxSrEngine(BaseEngine):
             self.fixed_hw = (shape[2], shape[3])
         else:
             self.fixed_hw = None
+        # batch 轴：动态(字符串)可批处理；固定 int 则只能按该值
+        if len(shape) >= 1 and isinstance(shape[0], int):
+            self.max_batch = shape[0]
+            self.batch = min(self.batch, self.max_batch) if self.max_batch > 0 else 1
+        else:
+            self.max_batch = 0
+        if self.fixed_hw is not None or self.tile:
+            self.batch = 1  # 固定尺寸/分块路径不批帧（tile 批处理为后续项）
 
     def _infer(self, frame: np.ndarray) -> np.ndarray:
         h, w = frame.shape[:2]
@@ -102,4 +113,35 @@ class OnnxSrEngine(BaseEngine):
             y = y[..., ::-1]
         if ph or pw:
             y = y[: h * self.scale, : w * self.scale]
+        return np.ascontiguousarray(y)
+
+    def process_batch(self, frames: np.ndarray) -> np.ndarray:
+        """[N,H,W,3] -> [N,H*s,W*s,3]，动态尺寸模型单次 run 批量推理。"""
+        if (
+            self.batch <= 1
+            or self.session is None
+            or self.fixed_hw is not None
+            or self.tile
+        ):
+            return super().process_batch(frames)
+        n, h, w, _ = frames.shape
+        ph = (self.pad - h % self.pad) % self.pad
+        pw = (self.pad - w % self.pad) % self.pad
+        x = frames
+        if ph or pw:
+            x = np.pad(x, ((0, 0), (0, ph), (0, pw), (0, 0)), mode="edge")
+        if self.color == "bgr":
+            x = x[..., ::-1]
+        x = np.ascontiguousarray(x.transpose(0, 3, 1, 2).astype(np.float32))  # NCHW
+        if self.value_range == "0-1":
+            x = x / 255.0
+
+        y = self.session.run(self._out_names, {self._in_name: x})[0]  # N,3,H',W'
+        if self.value_range == "0-1":
+            y = y * 255.0
+        y = np.clip(y, 0, 255).astype(np.uint8).transpose(0, 2, 3, 1)  # NHWC
+        if self.color == "bgr":
+            y = y[..., ::-1]
+        if ph or pw:
+            y = y[:, : h * self.scale, : w * self.scale]
         return np.ascontiguousarray(y)

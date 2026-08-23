@@ -79,10 +79,16 @@ def main(task_id: str) -> int:
         "output": str(output_path),
     })
 
+    # 批处理仅对小分辨率有益（≤720p 实测 +6%）；大分辨率单帧已喂饱，批了反而慢 9%
+    batch = int(params.get("batch") or spec.io.get("batch_hint", 1) or 1)
+    if info.width * info.height > 1280 * 720:
+        batch = 1
+
     t0 = time.perf_counter()
     engine = OnnxSrEngine(
         model_file(spec, scale), scale, io=spec.io,
         tile=int(params.get("tile") or spec.tile_hint),
+        batch=batch,
     )
     engine.load()
     emit({"type": "loaded", "provider": engine.provider_used})
