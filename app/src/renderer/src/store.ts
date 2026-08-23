@@ -19,11 +19,17 @@ export const store = reactive({
   },
 })
 
-/** 界面状态：当前页 / 新建任务弹窗 */
+/** 界面状态：当前页 / 新建任务弹窗 / 全页对比 */
 export const ui = reactive({
-  page: 'home' as 'home' | 'tasks' | 'models' | 'settings',
+  page: 'home' as 'home' | 'tasks' | 'models' | 'settings' | 'compare',
   showNewTask: false,
+  compareTaskId: null as string | null,
 })
+
+export function openCompare(taskId: string) {
+  ui.compareTaskId = taskId
+  ui.page = 'compare'
+}
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import {
   NButton,
   NCard,
@@ -10,12 +10,10 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api, type Task } from '../api'
-import { store } from '../store'
-import CompareSlider from './CompareSlider.vue'
+import { openCompare, store } from '../store'
 
 const props = defineProps<{ task: Task }>()
 const message = useMessage()
-const showCompare = ref(false)
 const canCompare = computed(
   () => !!props.task.preview_src && !!props.task.preview_path,
 )
@@ -127,24 +125,17 @@ function onOpenFolder() {
         v-if="task.preview_path || task.status === 'done'"
         :src="api.previewUrl(task.id, task.updated_at)"
         class="preview"
-        @click="canCompare && (showCompare = !showCompare)"
+        @click="canCompare && openCompare(task.id)"
       />
       <div class="spacer" />
-      <NButton v-if="canCompare" size="small" quaternary type="info" @click="showCompare = !showCompare">
-        {{ showCompare ? '收起对比' : '对比预览' }}
+      <NButton v-if="canCompare" size="small" quaternary type="info" @click="openCompare(task.id)">
+        全页对比
       </NButton>
       <NButton v-if="isBusy" size="small" quaternary type="error" @click="onCancel">取消</NButton>
       <NButton v-if="task.status === 'done'" size="small" quaternary type="info" @click="onOpenFolder">
         打开所在文件夹
       </NButton>
       <NButton v-if="!isBusy" size="small" quaternary @click="onDelete">删除</NButton>
-    </div>
-
-    <div v-if="showCompare && canCompare" class="compare-wrap">
-      <CompareSlider
-        :src-url="api.previewUrl(task.id, task.updated_at, true)"
-        :out-url="api.previewUrl(task.id, task.updated_at)"
-      />
     </div>
   </n-card>
 </template>
@@ -167,8 +158,7 @@ function onOpenFolder() {
 .row3 { display: flex; align-items: flex-end; gap: 10px; margin-top: 10px; }
 .preview {
   max-height: 96px; max-width: 45%; border-radius: 6px; border: 1px solid #2a2d31;
-  object-fit: contain;
+  object-fit: contain; cursor: pointer;
 }
 .spacer { flex: 1; }
-.compare-wrap { margin-top: 12px; }
 </style>

@@ -17,6 +17,7 @@ import Home from './pages/Home.vue'
 import Tasks from './pages/Tasks.vue'
 import Models from './pages/Models.vue'
 import Settings from './pages/Settings.vue'
+import Compare from './pages/Compare.vue'
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -54,11 +55,12 @@ onMounted(() => {
       <div class="app">
         <TitleBar />
         <div class="body">
-          <Sidebar />
-          <main class="page">
+          <Sidebar v-if="ui.page !== 'compare'" />
+          <main class="page" :class="{ 'page-full': ui.page === 'compare' }">
             <Home v-if="ui.page === 'home'" />
             <Tasks v-else-if="ui.page === 'tasks'" />
             <Models v-else-if="ui.page === 'models'" />
+            <Compare v-else-if="ui.page === 'compare'" />
             <Settings v-else />
           </main>
         </div>
@@ -84,6 +86,11 @@ body {
   overflow-y: auto;
   padding: 22px 26px;
   min-width: 0;
+}
+.page-full {
+  padding: 12px 14px;
+  overflow: hidden;
+  display: flex;
 }
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-thumb { background: #33363b; border-radius: 5px; }

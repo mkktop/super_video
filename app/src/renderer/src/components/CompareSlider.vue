@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 
 defineProps<{ srcUrl: string; outUrl: string }>()
 const pos = ref(50)
+const root = ref<HTMLElement | null>(null)
 
-function onDrag(e: MouseEvent) {
-  const el = e.currentTarget as HTMLElement
-  const move = (ev: MouseEvent) => {
-    const rect = el.getBoundingClientRect()
-    pos.value = Math.min(100, Math.max(0, ((ev.clientX - rect.left) / rect.width) * 100))
-  }
+function setFromX(clientX: number) {
+  const rect = root.value?.getBoundingClientRect()
+  if (!rect || rect.width === 0) return
+  pos.value = Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100))
+}
+
+function onDown(e: MouseEvent) {
+  e.preventDefault()
+  setFromX(e.clientX)
+  const move = (ev: MouseEvent) => setFromX(ev.clientX)
   const up = () => {
     window.removeEventListener('mousemove', move)
     window.removeEventListener('mouseup', up)
@@ -17,20 +22,33 @@ function onDrag(e: MouseEvent) {
   window.addEventListener('mousemove', move)
   window.addEventListener('mouseup', up)
 }
+
+function onKey(e: KeyboardEvent) {
+  const step = e.shiftKey ? 5 : 1
+  if (e.key === 'ArrowLeft') pos.value = Math.max(0, pos.value - step)
+  else if (e.key === 'ArrowRight') pos.value = Math.min(100, pos.value + step)
+}
+
+onMounted(() => window.addEventListener('keydown', onKey))
+onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
-  <div class="compare" @mousedown="onDrag">
+  <div ref="root" class="compare" @mousedown="onDown">
     <img class="img" :src="outUrl" draggable="false" />
-    <div class="clip" :style="{ width: pos + '%' }">
-      <img class="img" :src="srcUrl" draggable="false" />
-    </div>
+    <img
+      class="img top"
+      :src="srcUrl"
+      draggable="false"
+      :style="{ clipPath: `inset(0 ${100 - pos}% 0 0)` }"
+    />
     <div class="handle" :style="{ left: pos + '%' }">
       <div class="line" />
       <div class="knob">⇄</div>
     </div>
     <span class="label label-l">处理前</span>
     <span class="label label-r">处理后</span>
+    <span class="hint">拖动分割线 · ←/→ 微调（Shift 大步）</span>
   </div>
 </template>
 
@@ -38,30 +56,21 @@ function onDrag(e: MouseEvent) {
 .compare {
   position: relative;
   width: 100%;
-  border-radius: 8px;
+  height: 100%;
   overflow: hidden;
-  border: 1px solid #2a2d31;
   user-select: none;
   cursor: ew-resize;
   background: #0d0e10;
+  border-radius: 8px;
 }
+/* 两层同尺寸 contain，clip-path 裁剪——像素级对齐，letterbox 也一致 */
 .img {
-  display: block;
-  width: 100%;
-  height: auto;
-  max-height: 420px;
-  object-fit: contain;
-}
-.clip {
   position: absolute;
   inset: 0;
-  overflow: hidden;
-}
-.clip .img {
-  width: auto;
+  width: 100%;
   height: 100%;
-  max-width: none;
-  object-fit: cover;
+  object-fit: contain;
+  pointer-events: none;
 }
 .handle {
   position: absolute;
@@ -103,7 +112,19 @@ function onDrag(e: MouseEvent) {
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.55);
   color: #e8eaed;
+  pointer-events: none;
 }
 .label-l { left: 10px; }
 .label-r { right: 10px; }
+.hint {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  font-size: 11.5px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #9aa0a6;
+  pointer-events: none;
+}
 </style>
