@@ -175,8 +175,8 @@ def main():
 
     p = sub.add_parser("gen", help="生成合成测试视频")
     p.add_argument("output")
-    p.add_argument("-w", type=int, default=640)
-    p.add_argument("-h", type=int, default=360)
+    p.add_argument("-w", "--width", type=int, default=640)
+    p.add_argument("--height", type=int, default=360)
     p.add_argument("--duration", type=float, default=10)
     p.add_argument("--fps", type=int, default=24)
     p.set_defaults(func=cmd_gen)
