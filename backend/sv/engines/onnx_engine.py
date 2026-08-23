@@ -70,9 +70,17 @@ class OnnxSrEngine(BaseEngine):
         }.get(self.graph_opt)
         if level is not None:
             so.graph_optimization_level = level
-        self.session = ort.InferenceSession(
-            str(self.model_path), so, providers=chosen
-        )
+        try:
+            self.session = ort.InferenceSession(
+                str(self.model_path), so, providers=chosen
+            )
+        except Exception as e:  # noqa: BLE001 — DML 初始化失败（无显卡机器）回落 CPU
+            if self.device == "cpu" or not (set(chosen) - {"CPUExecutionProvider"}):
+                raise
+            print(f"[engine] {chosen} 初始化失败({e})，回落 CPU")
+            self.session = ort.InferenceSession(
+                str(self.model_path), so, providers=["CPUExecutionProvider"]
+            )
         self.provider_used = self.session.get_providers()
         inp = self.session.get_inputs()[0]
         self._in_name = inp.name

@@ -1,0 +1,39 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: 安装依赖
+        run: pip install -r backend/requirements.txt
+
+      - name: 下载 ffmpeg/ffprobe 到 bin/
+        shell: pwsh
+        run: |
+          curl -L -o ff.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip
+          Expand-Archive ff.zip -DestinationPath ff
+          New-Item -ItemType Directory -Force bin | Out-Null
+          Move-Item ff/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/ffmpeg.exe bin/
+          Move-Item ff/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/ffprobe.exe bin/
+
+      - name: 后端测试
+        working-directory: backend
+        run: python -m pytest tests/ -q
+
+      - name: 测试产物（失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-output
+          path: .tmp/
+          if-no-files-found: ignore

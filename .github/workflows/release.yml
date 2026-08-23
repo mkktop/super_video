@@ -1,0 +1,76 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: 后端依赖
+        run: pip install -r backend/requirements.txt pyinstaller
+
+      - name: 下载 ffmpeg/ffprobe 到 bin/（打进安装包）
+        shell: pwsh
+        run: |
+          curl -L -o ff.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip
+          Expand-Archive ff.zip -DestinationPath ff
+          New-Item -ItemType Directory -Force bin | Out-Null
+          Move-Item ff/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/ffmpeg.exe bin/
+          Move-Item ff/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/ffprobe.exe bin/
+
+      - name: 导出 x4plus 动态 ONNX（官方权重确定性导出 + sha 校验）
+        shell: pwsh
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install onnxscript
+          curl -L -o x4plus.pth https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
+          python backend/scripts/export_onnx_x4plus.py x4plus.pth pack/models_store/realesrgan-x4plus/RealESRGAN_x4plus_dyn.onnx
+          $h = (Get-FileHash pack/models_store/realesrgan-x4plus/RealESRGAN_x4plus_dyn.onnx -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne "6ea6125934bebe44ba3dfb737dc4f969dc79a5549b11b9fb548a6a66f4776e75") {
+            throw "导出确定性被破坏: sha256=$h"
+          }
+
+      - name: PyInstaller 打 sidecar
+        working-directory: backend
+        run: pyinstaller sidecar.spec --noconfirm
+
+      - name: 前端构建
+        working-directory: app
+        run: |
+          pnpm install
+          pnpm build
+
+      - name: 打安装包并发布到 GitHub Release
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --publish always
+
+      - name: 模型资产上传到 models-v1 Release（供重装/旧版本下载）
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create models-v1 --title "模型资产" --notes "x4plus 动态尺寸 ONNX（确定性导出）" 2>$null
+          gh release upload models-v1 pack/models_store/realesrgan-x4plus/RealESRGAN_x4plus_dyn.onnx --clobber

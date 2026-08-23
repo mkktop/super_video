@@ -41,7 +41,10 @@ def maybe_skip(model_id):
 @pytest.mark.parametrize("model_id,scale", [
     ("realesr-animevideov3", 4),
     ("realesr-animevideov3", 2),  # 原生 x2（v2-animevideo-xsx2）
-    ("realesrgan-x4plus", 4),
+    pytest.param("realesrgan-x4plus", 4,
+                 marks=pytest.mark.skipif(
+                     not __import__("conftest").dml_available(),
+                     reason="RRDB 大模型 CPU 回落太慢，仅在有 DML 的机器跑")),
 ])
 def test_e2e_super_resolution(clip, model_id, scale):
     maybe_skip(model_id)
