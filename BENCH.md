@@ -58,3 +58,20 @@ GT > animevideov3 > x4plus > lanczos。animevideov3 线条锐利接近原片、�
 ## 已知小瑕疵（M1 清单）
 
 ffprobe `nb_read_packets` 对部分文件少计 1~2 帧，进度条出现 91/90（cosmetic）；改为与 duration×fps 取 max。
+
+---
+
+# 推理后端对比（2026-08-23，RTX 5080 / 驱动 596.21）
+
+| 场景 | DirectML | CUDA EP (ort-gpu 1.24.4) | 结论 |
+|---|---|---|---|
+| animevideov3 540p x2 | **18.6 fps** | 16.6 fps | DML +12% |
+| animevideov3 1080p x2（出4K） | **5.3 fps** | 4.0 fps | DML +32% |
+| x4plus 480p x4（64-tile） | **0.56 fps** | 0.15 fps | DML +270% |
+
+**结论：当前模型库（SRVGG 小模型 + 小 tile 高频 session.run）是延迟/调度瓶颈而非算力瓶颈，DirectML 在 Blackwell 上全面占优。默认后端 = DirectML；CUDA 基础设施（.venv-cuda + 真会话探测 + SV_ENGINE=cuda 强制开关 + /api/engine）保留，供 M3 扩散模型（PyTorch+CUDA）阶段启用。**
+
+后续真正的提速方向（按预期收益）：
+1. **帧批处理**：模型导出带动态 batch 轴，一次 session.run 喂 4~8 帧，预计 2~4 倍；
+2. 大分辨率输出时 NVENC 硬编（弱 CPU 场景已生效）；
+3. M3 扩散模型走 PyTorch CUDA。

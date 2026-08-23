@@ -85,6 +85,7 @@ def main(task_id: str) -> int:
         tile=int(params.get("tile") or spec.tile_hint),
     )
     engine.load()
+    emit({"type": "loaded", "provider": engine.provider_used})
 
     import numpy as np
 

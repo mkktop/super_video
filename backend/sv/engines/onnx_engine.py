@@ -49,6 +49,9 @@ class OnnxSrEngine(BaseEngine):
     def load(self) -> None:
         import onnxruntime as ort
 
+        from .nvidia_dlls import register_nvidia_dlls
+
+        register_nvidia_dlls()  # CUDA 版 ORT 的 DLL 在 pip 包内，需先挂载
         available = set(ort.get_available_providers())
         if self.device == "cpu":
             chosen = ["CPUExecutionProvider"]

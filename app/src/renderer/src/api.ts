@@ -46,6 +46,9 @@ export const api = {
   async hardware(): Promise<Record<string, unknown>> {
     return (await fetch(`${baseUrl}/api/hardware`)).json()
   },
+  async engine(): Promise<{ backend: string; python: string; detail: string }> {
+    return (await fetch(`${baseUrl}/api/engine`)).json()
+  },
   async tasks(): Promise<Task[]> {
     return (await fetch(`${baseUrl}/api/tasks`)).json()
   },

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ..utils.process import WINDOWS_CREATE_FLAGS, kill_tree
 from . import db
+from .engine_select import EngineChoice, select_engine
 from .events import EventBus
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -22,6 +23,7 @@ class Runner:
         self._cancel_requested: str | None = None  # Windows 硬杀无法优雅上报，靠标记区分取消/崩溃
         self._stopping = asyncio.Event()
         self._loop_task: asyncio.Task | None = None
+        self.engine: EngineChoice | None = None  # worker 解释器/后端（start 时决定）
 
     # ---- 生命周期 ----
 
@@ -29,7 +31,14 @@ class Runner:
         recovered = db.recover_running()
         if recovered:
             self.bus.publish({"type": "recovered", "count": recovered})
-        self._loop_task = asyncio.get_running_loop().create_task(self._loop())
+        # 后端选择（探测 CUDA，耗时最多 2 分钟）放线程里做，不阻塞事件循环
+        loop = asyncio.get_running_loop()
+
+        def _pick():
+            self.engine = select_engine()
+
+        loop.run_in_executor(None, _pick)
+        self._loop_task = loop.create_task(self._loop())
 
     async def stop(self) -> None:
         self._stopping.set()
@@ -61,9 +70,10 @@ class Runner:
         self.current_id = task_id
         self.bus.publish({"type": "task_status", "task_id": task_id, "status": "running"})
 
+        worker_py = self.engine.python_exe if self.engine else sys.executable
         env = {**os.environ, "PYTHONPATH": str(BACKEND_DIR), "PYTHONUNBUFFERED": "1"}
         self.proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "sv.server.worker", task_id,
+            worker_py, "-m", "sv.server.worker", task_id,
             cwd=str(BACKEND_DIR), env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,  # stderr 混入 stdout 按日志行处理

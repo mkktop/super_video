@@ -7,6 +7,7 @@ export const store = reactive({
   tasks: [] as Task[],
   models: [] as ModelInfo[],
   gpuName: '',
+  engine: null as null | { backend: string; python: string; detail: string },
   hardware: null as null | {
     gpus: Array<{ name: string; vram_gb: number | null }>
     cpu: string
@@ -60,6 +61,7 @@ export async function initStore() {
   store.models = await api.models()
   store.hardware = (await api.hardware()) as NonNullable<typeof store.hardware>
   store.gpuName = store.hardware.gpus?.[0]?.name ?? '未知显卡'
+  store.engine = await api.engine()
   await refreshTasks()
   connectWs()
   // 轮询兜底：WS 失效时列表仍然实时（本地服务，开销可忽略）

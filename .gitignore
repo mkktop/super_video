@@ -1,5 +1,6 @@
 # Python
 .venv/
+.venv-cuda/
 __pycache__/
 *.pyc
 .pytest_cache/

@@ -15,6 +15,7 @@ from ..models import manager
 from ..models.registry import ModelNotFoundError, load_registry
 from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
 from . import db
+from .engine_select import select_engine
 from .events import EventBus
 from .hardware import hardware_info
 from .runner import Runner
@@ -56,6 +57,15 @@ def health() -> dict:
 @app.get("/api/hardware")
 def get_hardware() -> dict:
     return hardware_info()
+
+
+@app.get("/api/engine")
+def get_engine() -> dict:
+    """当前推理后端（runner 启动时探测：CUDA 优先，回落 DirectML）。"""
+    if runner.engine is None:
+        runner.engine = select_engine()
+    e = runner.engine
+    return {"backend": e.backend, "python": e.python_exe, "detail": e.detail}
 
 
 @app.get("/api/models")

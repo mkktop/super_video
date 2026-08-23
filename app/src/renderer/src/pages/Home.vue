@@ -112,7 +112,9 @@ const hw = computed(() => store.hardware)
             <NTag v-if="hw?.gpus?.[0]?.vram_gb" type="info" size="small" :bordered="false">
               显存 {{ hw.gpus[0].vram_gb }} GB
             </NTag>
-            <NTag size="small" :bordered="false">DirectML</NTag>
+            <NTag size="small" :bordered="false">
+              {{ store.engine?.backend === 'cuda' ? 'CUDA 加速' : 'DirectML' }}
+            </NTag>
           </div>
         </div>
         <div class="card hw">
