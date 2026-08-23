@@ -22,8 +22,8 @@ const message = useMessage()
 
 const inputs = ref<string[]>([])
 const modelId = ref<string>('')
-const scale = ref<number>(4)
-const codec = ref<'h264' | 'h265'>('h264')
+const targetScale = ref<number>(4)
+const codec = ref<string>('h264')
 const crf = ref(18)
 const output = ref('')
 const submitting = ref(false)
@@ -37,22 +37,37 @@ const modelOptions = computed(() =>
 )
 
 const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
-const scaleOptions = computed(() =>
-  (selectedModel.value?.scale ?? [4]).map((s) => ({ label: `x${s}`, value: s })),
+const nativeScale = computed(() => Math.max(...(selectedModel.value?.scale ?? [4])))
+
+/** 模型原生倍率内的目标倍率；小于原生时"4x 重建后缩放"，避免 1080p 直接被顶到 8K */
+const targetOptions = computed(() =>
+  [2, 3, 4]
+    .filter((t) => t <= nativeScale.value)
+    .map((t) => ({
+      label: t === nativeScale.value ? `x${t}（原生）` : `x${t}（重建后缩放）`,
+      value: t,
+    })),
 )
 
+const nvencOk = computed(() => store.hardware?.nvenc ?? false)
+const codecOptions = computed(() => [
+  { label: 'H.264 · 软编（兼容性好）', value: 'h264' },
+  { label: nvencOk.value ? 'H.264 · 硬编 NVENC（推荐，快）' : 'H.264 · 硬编（本机不可用）', value: 'h264_nvenc', disabled: !nvencOk.value },
+  { label: 'H.265 · 软编（体积小）', value: 'h265' },
+  { label: nvencOk.value ? 'H.265 · 硬编 NVENC（快且小）' : 'H.265 · 硬编（本机不可用）', value: 'hevc_nvenc', disabled: !nvencOk.value },
+])
+
 watch(modelId, () => {
-  const scales = selectedModel.value?.scale ?? []
-  if (scales.length) scale.value = Math.max(...scales)
+  targetScale.value = nativeScale.value
   autoFillOutput()
 })
-watch(scale, autoFillOutput)
+watch(targetScale, autoFillOutput)
 
 function autoFillOutput() {
   if (inputs.value.length === 1) {
     const p = inputs.value[0]
     const m = p.match(/^(.*?)(\.[^.]+)?$/)
-    output.value = `${m?.[1]}_${scale.value}x.mp4`
+    output.value = `${m?.[1]}_${targetScale.value}x.mp4`
   } else if (inputs.value.length > 1) {
     output.value = '' // 多文件时输出自动命名
   }
@@ -84,7 +99,12 @@ async function submit() {
       input,
       output: out,
       model_id: modelId.value,
-      params: { scale: scale.value, codec: codec.value, crf: crf.value },
+      params: {
+        scale: nativeScale.value,
+        target_scale: targetScale.value,
+        codec: codec.value,
+        crf: crf.value,
+      },
     })
     if (r.ok) ok++
     else lastErr = `${(await r.json()).detail ?? r.status}`
@@ -131,17 +151,14 @@ async function submit() {
       </n-form-item>
 
       <n-form-item label="放大倍数">
-        <n-select v-model:value="scale" :options="scaleOptions" style="width: 140px" />
+        <n-select v-model:value="targetScale" :options="targetOptions" style="width: 210px" />
         <n-tag v-if="selectedModel" size="small" :bordered="false" style="margin-left: 10px">
           {{ selectedModel.description }}
         </n-tag>
       </n-form-item>
 
       <n-form-item label="编码器">
-        <n-radio-group v-model:value="codec">
-          <n-radio-button value="h264">H.264（兼容性好）</n-radio-button>
-          <n-radio-button value="h265">H.265（体积小）</n-radio-button>
-        </n-radio-group>
+        <n-select v-model:value="codec" :options="codecOptions" style="width: 300px" />
       </n-form-item>
 
       <n-form-item label="画质 (CRF)">

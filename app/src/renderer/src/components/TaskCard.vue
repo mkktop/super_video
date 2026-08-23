@@ -48,8 +48,8 @@ function fmtBytes(b: number): string {
 }
 
 const scaleLabel = computed(() => {
-  const s = Number(props.task.params?.scale ?? 4)
-  return `${props.task.src_w}x${props.task.src_h} → ${props.task.src_w * s}x${props.task.src_h * s}`
+  const t = Number(props.task.params?.target_scale ?? props.task.params?.scale ?? 4)
+  return `${props.task.src_w}x${props.task.src_h} → ${props.task.src_w * t}x${props.task.src_h * t}`
 })
 
 const isBusy = computed(() => props.task.status === 'running' || props.task.status === 'queued')
@@ -79,7 +79,9 @@ function onOpenFolder() {
       </div>
       <div class="badges">
         <n-tag size="small" :bordered="false">{{ modelName }}</n-tag>
-        <n-tag size="small" :bordered="false" type="info">x{{ task.params?.scale ?? 4 }}</n-tag>
+        <n-tag size="small" :bordered="false" type="info">
+          x{{ task.params?.target_scale ?? task.params?.scale ?? 4 }}
+        </n-tag>
         <n-tag size="small" :bordered="false" :type="statusMeta[task.status].type">
           {{ statusMeta[task.status].label }}{{ task.queue_position ? ` #${task.queue_position}` : '' }}
         </n-tag>

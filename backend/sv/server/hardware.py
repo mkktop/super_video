@@ -61,6 +61,25 @@ def _cpu_name() -> str:
     return platform.processor() or platform.machine()
 
 
+def _nvenc_ok() -> bool:
+    """试编码一帧验证 NVENC 可用（驱动/会话正常才算数）。
+
+    分辨率须 ≥ NVENC H.264 最小宽度 145，否则参数非法误报不可用。
+    """
+    from ..paths import ffmpeg_bin
+
+    try:
+        out = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-loglevel", "error",
+             "-f", "lavfi", "-i", "color=c=black:s=320x240:d=0.2",
+             "-c:v", "h264_nvenc", "-f", "null", "-"],
+            capture_output=True, timeout=20, creationflags=WINDOWS_CREATE_FLAGS,
+        )
+        return out.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def hardware_info() -> dict:
     vm = psutil.virtual_memory()
     return {
@@ -68,4 +87,5 @@ def hardware_info() -> dict:
         "cpu": _cpu_name(),
         "cpu_cores": psutil.cpu_count(logical=False),
         "ram_gb": round(vm.total / 1e9, 1),
+        "nvenc": _nvenc_ok(),
     }

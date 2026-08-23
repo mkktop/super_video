@@ -18,7 +18,7 @@ _MP4_AUDIO_COPY_OK = {"aac", "mp3", "ac3", "eac3", "alac"}
 
 @dataclass
 class EncodeOpts:
-    codec: str = "h264"  # h264 | h265
+    codec: str = "h264"  # h264 | h265 | h264_nvenc | hevc_nvenc
     crf: int = 18
     preset: str = "medium"
     audio_mode: str = "auto"  # auto: 兼容则 copy，否则转 aac；none: 丢弃音轨
@@ -51,11 +51,21 @@ def decoder_cmd(input_path: Path) -> list[str]:
     ]
 
 
+_VCODECS = {
+    "h264": "libx264",
+    "h265": "libx265",
+    "h264_nvenc": "h264_nvenc",
+    "hevc_nvenc": "hevc_nvenc",
+}
+
+
 def encoder_cmd(
     input_path: Path,
     output_path: Path,
-    out_w: int,
-    out_h: int,
+    frame_w: int,
+    frame_h: int,   # 推理输出帧尺寸（rawvideo 输入声明）
+    target_w: int,
+    target_h: int,  # 最终目标尺寸；与 frame 不同则编码器内 lanczos 缩放
     fps_str: str,
     enc: EncodeOpts,
     has_audio: bool,
@@ -65,7 +75,7 @@ def encoder_cmd(
     cmd = [
         ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
         "-f", "rawvideo", "-pix_fmt", "rgb24",
-        "-video_size", f"{out_w}x{out_h}", "-framerate", fps_str, "-i", "pipe:0",
+        "-video_size", f"{frame_w}x{frame_h}", "-framerate", fps_str, "-i", "pipe:0",
     ]
     if has_audio:
         cmd += ["-i", str(input_path)]
@@ -73,11 +83,21 @@ def encoder_cmd(
     if has_audio:
         cmd += ["-map", "1:a:0?"]
 
-    vcodec = "libx264" if enc.codec == "h264" else "libx265"
-    cmd += [
-        "-c:v", vcodec, "-crf", str(enc.crf), "-preset", enc.preset,
-        "-pix_fmt", "yuv420p",
-    ]
+    vcodec = _VCODECS.get(enc.codec, "libx264")
+    if vcodec.endswith("_nvenc"):
+        cmd += [
+            "-c:v", vcodec,
+            "-preset", "p5", "-tune", "hq",
+            "-rc", "vbr", "-cq", str(enc.crf), "-b:v", "0",
+            "-pix_fmt", "yuv420p",
+        ]
+    else:
+        cmd += [
+            "-c:v", vcodec, "-crf", str(enc.crf), "-preset", enc.preset,
+            "-pix_fmt", "yuv420p",
+        ]
+    if (target_w, target_h) != (frame_w, frame_h):
+        cmd += ["-vf", f"scale={target_w}:{target_h}:flags=lanczos"]
 
     if has_audio:
         keep = enc.audio_mode != "none"
@@ -108,6 +128,7 @@ class StreamPipeline:
         cancel_event: asyncio.Event | None = None,
         preview_path: Path | None = None,
         preview_interval_s: float = 5.0,
+        target_scale: int | None = None,  # 目标倍率；小于引擎倍率时编码器缩放
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -117,10 +138,13 @@ class StreamPipeline:
         self.cancel_event = cancel_event
         self.preview_path = preview_path
         self.preview_interval_s = preview_interval_s
+        self.target_scale = target_scale
 
     async def run(self) -> RunStats:
         info, enc, tx = self.info, self.enc, self.tx
-        out_w, out_h = info.width * tx.scale, info.height * tx.scale
+        frame_w, frame_h = info.width * tx.scale, info.height * tx.scale
+        target = self.target_scale or tx.scale
+        target_w, target_h = info.width * target, info.height * target
         output_path = self.output_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
         mp4_family = output_path.suffix.lower() in (".mp4", ".m4v", ".mov")
@@ -133,8 +157,8 @@ class StreamPipeline:
             creationflags=WINDOWS_CREATE_FLAGS,
         )
         enc_proc = asyncio.create_subprocess_exec(
-            *encoder_cmd(info.path, output_path, out_w, out_h, info.fps_str,
-                         enc, info.has_audio, audio_codec, mp4_family),
+            *encoder_cmd(info.path, output_path, frame_w, frame_h, target_w, target_h,
+                         info.fps_str, enc, info.has_audio, audio_codec, mp4_family),
             stdin=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,
@@ -168,9 +192,9 @@ class StreamPipeline:
                     ) from e
                 frame = np.frombuffer(buf, dtype=np.uint8).reshape(info.height, info.width, 3)
                 out_frame = tx.process(frame)
-                if out_frame.shape != (out_h, out_w, 3):
+                if out_frame.shape != (frame_h, frame_w, 3):
                     raise PipelineError(
-                        f"变换输出尺寸 {out_frame.shape} 与预期 {(out_h, out_w, 3)} 不符"
+                        f"变换输出尺寸 {out_frame.shape} 与预期 {(frame_h, frame_w, 3)} 不符"
                     )
                 p_enc.stdin.write(out_frame.tobytes())
                 await p_enc.stdin.drain()

@@ -128,15 +128,23 @@ def create_task(body: TaskCreate) -> dict:
     if scale not in spec.scale:
         raise HTTPException(400, f"模型 {spec.id} 不支持 x{scale}，可选 {spec.scale}")
     params["scale"] = scale
-    if params.get("codec") not in (None, "h264", "h265"):
-        raise HTTPException(400, "codec 仅支持 h264/h265")
+    target = int(params.get("target_scale") or scale)
+    if not (1 <= target <= scale):
+        raise HTTPException(400, f"目标倍率需在 x1 ~ x{scale} 之间")
+    params["target_scale"] = target
+    codec = params.get("codec", "h264")
+    if codec not in ("h264", "h265", "h264_nvenc", "hevc_nvenc"):
+        raise HTTPException(400, "codec 仅支持 h264/h265/h264_nvenc/hevc_nvenc")
+    if codec.endswith("_nvenc") and not hardware_info().get("nvenc"):
+        raise HTTPException(400, "本机 NVENC 不可用，请选择软件编码")
+    params["codec"] = codec
     crf = params.get("crf", 18)
     if not (0 <= int(crf) <= 51):
         raise HTTPException(400, "crf 范围 0-51")
     params["crf"] = int(crf)
 
     out = body.output or str(
-        input_path.with_name(f"{input_path.stem}_{scale}x{input_path.suffix or '.mp4'}")
+        input_path.with_name(f"{input_path.stem}_{target}x{input_path.suffix or '.mp4'}")
     )
     task = db.new_task(
         str(input_path), out, body.model_id, params,

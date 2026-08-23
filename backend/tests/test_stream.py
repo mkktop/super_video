@@ -83,6 +83,15 @@ def test_2x_upscale_resolution(sample_video):
     assert o.has_audio  # 音轨保留
 
 
+def test_target_scale_downscale(sample_video):
+    """引擎 2x + 目标 1x：编码器 lanczos 缩回原尺寸。"""
+    info = probe(sample_video)
+    out = TEMP_DIR / "stream_out_target1x.mp4"
+    run(StreamPipeline(info, out, Nearest2x(), EncodeOpts(), target_scale=1))
+    o = probe(out)
+    assert (o.width, o.height) == (320, 240)
+
+
 def test_no_audio_input(sample_video):
     info = probe(sample_video)
     silent = TEMP_DIR / "stream_silent.mp4"

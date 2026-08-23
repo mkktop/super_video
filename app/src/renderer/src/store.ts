@@ -12,6 +12,7 @@ export const store = reactive({
     cpu: string
     cpu_cores: number
     ram_gb: number
+    nvenc?: boolean
   },
 })
 

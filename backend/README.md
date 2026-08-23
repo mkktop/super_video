@@ -10,11 +10,11 @@ python -m venv .venv            # 已就绪则跳过
 .venv\Scripts\python -m pip install -r backend\requirements.txt
 ```
 
-ffmpeg/ffprobe 不入版本库，首次搭建时下载（BtbN 静态构建，含 ffprobe）：
+ffmpeg/ffprobe 不入版本库，首次搭建时下载（**BtbN 8.1 正式版**，勿用 master 版——master 的 NVENC 要求驱动 ≥610，正式版兼容性好）：
 
 ```bash
-curl -L -o ffmpeg.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
-unzip ffmpeg.zip -d ffmpeg_tmp && cp ffmpeg_tmp/ffmpeg-master-latest-win64-gpl/bin/*.exe ../bin/ && rm -rf ffmpeg_tmp ffmpeg.zip
+curl -L -o ffmpeg.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip
+unzip ffmpeg.zip -d ffmpeg_tmp && cp ffmpeg_tmp/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/*.exe ../bin/ && rm -rf ffmpeg_tmp ffmpeg.zip
 ```
 
 模型权重在 `models_store/`（同样不入库，用 `cli.py models download` 获取）。

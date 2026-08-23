@@ -60,6 +60,10 @@ def main(task_id: str) -> int:
     if scale not in spec.scale:
         emit({"type": "failed", "error": f"模型不支持 x{scale}"})
         return 1
+    target = int(params.get("target_scale") or scale)
+    if not (1 <= target <= scale):
+        emit({"type": "failed", "error": f"目标倍率 x{target} 无效（1 ~ x{scale}）"})
+        return 1
 
     try:
         manager.ensure_downloaded(spec)
@@ -71,7 +75,7 @@ def main(task_id: str) -> int:
         "type": "started",
         "total_frames": info.total_frames,
         "src_w": info.width, "src_h": info.height,
-        "out_w": info.width * scale, "out_h": info.height * scale,
+        "out_w": info.width * target, "out_h": info.height * target,
         "output": str(output_path),
     })
 
@@ -104,6 +108,7 @@ def main(task_id: str) -> int:
             preset=params.get("preset", "medium"),
         ),
         progress_cb=on_progress, preview_path=preview_path,
+        target_scale=target,
     )
     try:
         stats = asyncio.run(pipeline.run())
