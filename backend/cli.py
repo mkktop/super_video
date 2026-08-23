@@ -18,7 +18,7 @@ from rich.table import Table
 
 from sv.engines.onnx_engine import OnnxSrEngine
 from sv.models import manager as model_manager
-from sv.models.registry import get_model, load_registry, local_files
+from sv.models.registry import get_model, load_registry, model_file
 from sv.paths import TEMP_DIR, ffmpeg_bin
 from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
 from sv.pipeline.stream import EncodeOpts, PipelineError, StreamPipeline, TaskCanceled
@@ -107,7 +107,7 @@ def cmd_run(args):
         console.print(f"[red]模型 {spec.id} 不支持 x{scale}，可用: {spec.scale}[/red]")
         sys.exit(2)
 
-    model_path = local_files(spec)[0]
+    model_path = model_file(spec, scale)
     engine = OnnxSrEngine(
         model_path, scale, io=spec.io, device=args.device,
         tile=args.tile or spec.tile_hint,

@@ -6,20 +6,28 @@ import urllib.request
 from pathlib import Path
 
 from ..paths import MODELS_DIR
-from .registry import ModelSpec, model_dir, local_files
+from .registry import BUNDLED_DIR, ModelSpec, model_dir, local_files
 
 
 class DownloadError(RuntimeError):
     pass
 
 
+def _resolve(spec: ModelSpec, name: str) -> Path | None:
+    """文件位置：models_store 或随包 bundled。"""
+    p = model_dir(spec.id) / name
+    if p.exists():
+        return p
+    b = BUNDLED_DIR / name
+    return b if b.exists() else None
+
+
 def is_downloaded(spec: ModelSpec) -> bool:
     if not spec.files:
         return False
-    d = model_dir(spec.id)
     for f in spec.files:
-        p = d / f["name"]
-        if not p.exists():
+        p = _resolve(spec, f["name"])
+        if p is None:
             return False
         if f.get("size") and p.stat().st_size != f["size"]:
             return False
@@ -51,6 +59,10 @@ def download(spec: ModelSpec, progress_cb=None) -> None:
         if dest.exists() and (not expect_sha or _sha256(dest) == expect_sha):
             done += dest.stat().st_size
             continue
+        if not url:
+            raise DownloadError(
+                f"{name} 无下载源（bundled 缺失），见 backend/README.md 模型章节"
+            )
 
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "super-video/0.1"})
@@ -84,12 +96,16 @@ def ensure_downloaded(spec: ModelSpec, progress_cb=None) -> None:
     if not is_downloaded(spec):
         download(spec, progress_cb)
     else:
-        # 大小一致但未校验过 sha 的，做一次完整校验（首次安装时已验，这里兜底）
-        for f, p in zip(spec.files, local_files(spec)):
-            if f.get("sha256") and not p.with_suffix(".verified").exists():
-                if _sha256(p) != f["sha256"]:
-                    raise DownloadError(f"{p.name} 校验失败，请删除后重新下载")
-                p.with_suffix(".verified").touch()
+        # 大小一致但未校验过 sha 的，做一次完整校验（bundled 文件跳过）
+        for f in spec.files:
+            p = _resolve(spec, f["name"])
+            if p is None:
+                continue
+            if f.get("sha256") and BUNDLED_DIR not in p.parents:
+                if not p.with_suffix(".verified").exists():
+                    if _sha256(p) != f["sha256"]:
+                        raise DownloadError(f"{p.name} 校验失败，请删除后重新下载")
+                    p.with_suffix(".verified").touch()
 
 
 def pin_checksums(spec_id: str) -> dict[str, str]:

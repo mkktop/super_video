@@ -8,6 +8,7 @@ from pathlib import Path
 from ..paths import MODELS_DIR, ROOT
 
 REGISTRY_DIR = Path(__file__).parent / "registry_json"
+BUNDLED_DIR = Path(__file__).parent / "bundled"  # 随仓库分发的模型权重（小体积）
 USER_REGISTRY_DIR = MODELS_DIR / "custom"
 
 
@@ -79,3 +80,26 @@ def model_dir(model_id: str) -> Path:
 def local_files(spec: ModelSpec) -> list[Path]:
     d = model_dir(spec.id)
     return [d / f["name"] for f in spec.files if "name" in f]
+
+
+def file_for_scale(spec: ModelSpec, scale: int) -> dict:
+    """按倍率选权重文件：files 带 scale 字段的精确匹配，无字段的通用于所有倍率。"""
+    for f in spec.files:
+        if f.get("scale") == scale:
+            return f
+    for f in spec.files:
+        if "scale" not in f:
+            return f
+    raise ModelNotFoundError(f"{spec.id} 缺少 x{scale} 权重")
+
+
+def model_file(spec: ModelSpec, scale: int) -> Path:
+    """权重解析：models_store 优先，其次随包 bundled 目录。"""
+    f = file_for_scale(spec, scale)
+    in_store = model_dir(spec.id) / f["name"]
+    if in_store.exists():
+        return in_store
+    bundled = BUNDLED_DIR / f["name"]
+    if bundled.exists():
+        return bundled
+    return in_store

@@ -39,14 +39,9 @@ const modelOptions = computed(() =>
 const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
 const nativeScale = computed(() => Math.max(...(selectedModel.value?.scale ?? [4])))
 
-/** 模型原生倍率内的目标倍率；小于原生时"4x 重建后缩放"，避免 1080p 直接被顶到 8K */
+/** 仅展示模型原生倍率（每档对应独立原生权重，无放大再缩小） */
 const targetOptions = computed(() =>
-  [2, 3, 4]
-    .filter((t) => t <= nativeScale.value)
-    .map((t) => ({
-      label: t === nativeScale.value ? `x${t}（原生）` : `x${t}（重建后缩放）`,
-      value: t,
-    })),
+  (selectedModel.value?.scale ?? [4]).map((t) => ({ label: `x${t}`, value: t })),
 )
 
 const nvencOk = computed(() => store.hardware?.nvenc ?? false)
@@ -58,7 +53,8 @@ const codecOptions = computed(() => [
 ])
 
 watch(modelId, () => {
-  targetScale.value = nativeScale.value
+  const scales = selectedModel.value?.scale ?? [4]
+  targetScale.value = Math.min(...scales)
   autoFillOutput()
 })
 watch(targetScale, autoFillOutput)
@@ -100,7 +96,7 @@ async function submit() {
       output: out,
       model_id: modelId.value,
       params: {
-        scale: nativeScale.value,
+        scale: targetScale.value,
         target_scale: targetScale.value,
         codec: codec.value,
         crf: crf.value,

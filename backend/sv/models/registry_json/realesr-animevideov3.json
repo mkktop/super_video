@@ -1,24 +1,32 @@
 {
   "id": "realesr-animevideov3",
-  "name": "AnimeVideo v3 (4x)",
+  "name": "AnimeVideo（动漫·快速）",
   "vendor": "TencentARC",
   "license": "BSD-3-Clause",
   "engine": "onnx",
   "family": "realesrgan",
-  "scale": [4],
+  "scale": [2, 4],
   "content": ["anime"],
   "temporal": false,
   "speed": "fast",
   "vram_gb": 2,
   "tile_hint": 0,
-  "description": "动漫视频专用紧凑模型，速度最快，适合整部动画批量处理",
-  "io": { "color": "bgr", "range": "0-1", "pad": 4 },
+  "description": "动漫视频专用：x2 原生(RealESRGANv2-animevideo-xsx2)/x4 原生(v3)，1080p→4K 选 x2",
+  "io": { "color": "bgr", "range": "0-1" },
   "files": [
     {
       "name": "RealESR-AnimeVideo-v3_x4.onnx",
+      "scale": 4,
       "url": "https://raw.githubusercontent.com/ntsc-rs-fan/RealESRGAN-AnimeVideo-v3-x4-ONNX/main/RealESR-AnimeVideo-v3_x4.onnx",
       "size": 2495473,
       "sha256": "00ece3ac21c43ee31459216b5174b2cea0c5325044c5142aeb840f4890e175ff"
+    },
+    {
+      "name": "RealESRGANv2-animevideo-xsx2.onnx",
+      "scale": 2,
+      "size": 2407691,
+      "sha256": "6fad590f96df553a5cc348a9c5129e7874504a7dcd414e4a15fb0b281fca7e0c",
+      "source": "vs-mlrt v15.16 (AmusementClub)，随仓库 bundled 分发"
     }
   ]
 }

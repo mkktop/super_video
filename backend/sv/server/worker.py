@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from sv.engines.onnx_engine import OnnxSrEngine
 from sv.models import manager
-from sv.models.registry import get_model, local_files
+from sv.models.registry import get_model, model_file
 from sv.paths import TEMP_DIR
 from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
 from sv.pipeline.stream import EncodeOpts, PipelineError, StreamPipeline, TaskCanceled
@@ -81,7 +81,7 @@ def main(task_id: str) -> int:
 
     t0 = time.perf_counter()
     engine = OnnxSrEngine(
-        local_files(spec)[0], scale, io=spec.io,
+        model_file(spec, scale), scale, io=spec.io,
         tile=int(params.get("tile") or spec.tile_hint),
     )
     engine.load()

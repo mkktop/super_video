@@ -5,14 +5,12 @@ from pathlib import Path
 import pytest
 
 from sv.engines.onnx_engine import OnnxSrEngine
-from sv.models.registry import get_model, local_files
+from sv.models.registry import get_model, model_file
 from sv.models import manager
 from sv.paths import TEMP_DIR, ffmpeg_bin
 from sv.pipeline.probe import probe, validate_m0
 from sv.pipeline.stream import EncodeOpts, StreamPipeline
 from sv.utils.process import WINDOWS_CREATE_FLAGS
-
-pytestmark = pytest.mark.parametrize("model_id", ["realesr-animevideov3", "realesrgan-x4plus"])
 
 
 def make_clip(path: Path):
@@ -40,20 +38,25 @@ def maybe_skip(model_id):
         pytest.skip(f"模型 {model_id} 未下载")
 
 
-def test_e2e_super_resolution(clip, model_id):
+@pytest.mark.parametrize("model_id,scale", [
+    ("realesr-animevideov3", 4),
+    ("realesr-animevideov3", 2),  # 原生 x2（v2-animevideo-xsx2）
+    ("realesrgan-x4plus", 4),
+])
+def test_e2e_super_resolution(clip, model_id, scale):
     maybe_skip(model_id)
     spec = get_model(model_id)
     info = probe(clip)
     validate_m0(info)
     engine = OnnxSrEngine(
-        local_files(spec)[0], 4, io=spec.io, tile=spec.tile_hint,
+        model_file(spec, scale), scale, io=spec.io, tile=spec.tile_hint,
     )
     engine.load()
-    out = TEMP_DIR / f"e2e_out_{model_id}.mp4"
+    out = TEMP_DIR / f"e2e_out_{model_id}_x{scale}.mp4"
     stats = __import__("asyncio").run(
         StreamPipeline(info, out, engine, EncodeOpts()).run()
     )
     assert stats.frames == info.total_frames
     o = probe(out)
-    assert (o.width, o.height) == (1280, 720)
+    assert (o.width, o.height) == (320 * scale, 180 * scale)
     assert o.has_audio
