@@ -13,6 +13,7 @@ const items = computed(() => [
   },
   { key: 'models', label: '模型市场', icon: 'cube' },
   { key: 'perf', label: '性能', icon: 'pulse' },
+  { key: 'logs', label: '日志', icon: 'log' },
   { key: 'settings', label: '设置', icon: 'gear' },
 ])
 
@@ -41,7 +42,7 @@ const miniPerf = computed(() => {
           <svg v-if="it.icon === 'home'" width="16" height="16" viewBox="0 0 16 16">
             <path d="M2.5 7L8 2.5 13.5 7v6a1 1 0 0 1-1 1h-3v-4h-3v4h-3a1 1 0 0 1-1-1V7z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
           </svg>
-          <svg v-if="it.icon === 'cut'" width="16" height="16" viewBox="0 0 16 16">
+          <svg v-else-if="it.icon === 'cut'" width="16" height="16" viewBox="0 0 16 16">
             <circle cx="4" cy="12" r="1.9" fill="none" stroke="currentColor" stroke-width="1.3" />
             <circle cx="12" cy="12" r="1.9" fill="none" stroke="currentColor" stroke-width="1.3" />
             <path d="M5.4 10.6L12 2M10.6 10.6L4 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
@@ -54,6 +55,10 @@ const miniPerf = computed(() => {
           </svg>
           <svg v-else-if="it.icon === 'pulse'" width="16" height="16" viewBox="0 0 16 16">
             <path d="M1.5 8h3L6.5 3l3 10 2-5h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <svg v-else-if="it.icon === 'log'" width="16" height="16" viewBox="0 0 16 16">
+            <rect x="2" y="2.5" width="12" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+            <path d="M4.5 6l1.8 1.5L4.5 9M7.8 9.5h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           <svg v-else width="16" height="16" viewBox="0 0 16 16">
             <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3" />

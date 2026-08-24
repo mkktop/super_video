@@ -18,6 +18,7 @@ import Trim from './pages/Trim.vue'
 import Tasks from './pages/Tasks.vue'
 import Models from './pages/Models.vue'
 import Perf from './pages/Perf.vue'
+import Logs from './pages/Logs.vue'
 import Settings from './pages/Settings.vue'
 import Compare from './pages/Compare.vue'
 
@@ -64,6 +65,7 @@ onMounted(() => {
             <Tasks v-else-if="ui.page === 'tasks'" />
             <Models v-else-if="ui.page === 'models'" />
             <Perf v-else-if="ui.page === 'perf'" />
+            <Logs v-else-if="ui.page === 'logs'" />
             <Compare v-else-if="ui.page === 'compare'" />
             <Settings v-else />
           </main>

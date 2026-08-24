@@ -5,8 +5,6 @@ import {
   NCard,
   NInputNumber,
   NProgress,
-  NRadioButton,
-  NRadioGroup,
   NSlider,
   NTag,
   useMessage,
@@ -21,7 +19,6 @@ const probeInfo = ref<ProbeInfo | null>(null)
 const probing = ref(false)
 const startSec = ref(0)
 const endSec = ref(0)
-const mode = ref<'smart' | 'fast' | 'exact'>('smart')
 const output = ref('')
 const job = ref<TrimJob | null>(null)
 const polling = ref<ReturnType<typeof setInterval> | null>(null)
@@ -32,12 +29,6 @@ const videoUrl = computed(() => (input.value ? mediaSrc(input.value) : ''))
 const duration = computed(() => probeInfo.value?.duration_s ?? 0)
 const selDur = computed(() => Math.max(0, endSec.value - startSec.value))
 const busy = computed(() => job.value?.state === 'queued' || job.value?.state === 'running')
-
-const modeHint: Record<string, string> = {
-  smart: '智能剪切：起点不在关键帧时只转码头部，帧精确且快（推荐）',
-  fast: '快速复制：完全无损、秒级完成；起点自动对齐到最近关键帧（可能提前约 1~5 秒）',
-  exact: '精确转码：整段重新编码，任意源都帧精确，但最慢',
-}
 
 const range = computed<[number, number]>({
   get: () => [startSec.value, endSec.value],
@@ -120,11 +111,11 @@ async function startCut(andSr: boolean) {
       input: input.value,
       start_s: startSec.value,
       end_s: endSec.value,
-      mode: mode.value,
+      mode: 'exact',
       output: output.value || undefined,
     })
     job.value = { state: 'queued', progress: 0, input: input.value, start_s: startSec.value,
-      end_s: endSec.value, mode: mode.value, output: r.output, error: null }
+      end_s: endSec.value, mode: 'exact', output: r.output, error: null }
     polling.value = setInterval(async () => {
       try {
         const j = await api.trimStatus(r.job_id)
@@ -165,7 +156,7 @@ function toSr() {
 <template>
   <div class="trim-page">
     <h2 class="title">视频剪切</h2>
-    <p class="subtitle">剪出片段后可直接加入超分队列</p>
+    <p class="subtitle">精确转码 · 帧精确 · 剪出片段后可直接加入超分队列</p>
 
     <NButton v-if="!input" dashed block size="large" @click="pick">
       点击选择视频文件
@@ -227,15 +218,6 @@ function toSr() {
           </NTag>
         </div>
         <div class="row">
-          <span class="lbl">剪切方式</span>
-          <NRadioGroup v-model:value="mode" size="small">
-            <NRadioButton value="smart">智能</NRadioButton>
-            <NRadioButton value="fast">快速无损</NRadioButton>
-            <NRadioButton value="exact">精确转码</NRadioButton>
-          </NRadioGroup>
-        </div>
-        <div class="mode-hint">{{ modeHint[mode] }}</div>
-        <div class="row">
           <span class="lbl">输出到</span>
           <input v-model="output" class="out-input" spellcheck="false" />
           <NButton size="tiny" @click="pickOutputFile">浏览…</NButton>
@@ -260,9 +242,6 @@ function toSr() {
           <div class="res-line ok">✓ 剪切完成（{{ job.duration_s?.toFixed(1) }}s）</div>
           <div class="res-detail">
             {{ job.output }}
-            <NTag v-if="job.mode === 'fast' && job.actual_start_s != null" size="tiny" :bordered="false" type="warning">
-              实际起点 {{ fmt(job.actual_start_s) }}（已对齐关键帧）
-            </NTag>
           </div>
           <div v-for="n in job.notices ?? []" :key="n" class="res-detail warn">{{ n }}</div>
           <div class="res-btns">
@@ -279,14 +258,15 @@ function toSr() {
 </template>
 
 <style scoped>
-.trim-page { max-width: 860px; }
+.trim-page { width: 100%; } /* 全屏铺满,预览跟随窗口放大 */
 .title { font-size: 20px; font-weight: 600; margin-bottom: 2px; }
 .subtitle { font-size: 13px; color: #9aa0a6; margin-bottom: 16px; }
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .preview-wrap { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; position: relative; }
 .preview {
   width: 100%;
-  max-height: 420px;
+  max-height: min(62vh, 760px);
+  min-height: 300px;
   background: #000;
   border-radius: 8px;
   outline: none;
@@ -313,7 +293,6 @@ function toSr() {
 .lbl { width: 64px; flex-shrink: 0; font-size: 13px; color: #9aa0a6; }
 .slider { flex: 1; }
 .dash { color: #9aa0a6; }
-.mode-hint { font-size: 12px; color: #9aa0a6; margin: -4px 0 12px 74px; }
 .out-input {
   flex: 1;
   background: #141517;

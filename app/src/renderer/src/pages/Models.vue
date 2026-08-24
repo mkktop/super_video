@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue'
 import {
   NButton,
-  NCard,
   NEmpty,
   NForm,
   NFormItem,
@@ -107,53 +106,49 @@ async function doImport() {
 
     <NEmpty v-if="!models.length" description="该分类暂无模型" style="margin-top: 12vh" />
 
-    <NSpace vertical :size="14">
-      <NCard v-for="m in models" :key="m.id" size="small" class="model-card">
-        <div class="row">
-          <div class="info">
-            <div class="name-row">
-              <span class="name">{{ m.name }}</span>
-              <NTag v-if="m.bundled" size="small" type="success" :bordered="false">内置</NTag>
-              <NTag v-else-if="m.installed" size="small" type="success" :bordered="false">已安装</NTag>
-              <NTag v-if="!m.vram_ok" size="small" type="warning" :bordered="false">显存不足</NTag>
-            </div>
-            <div class="desc">{{ m.description }}</div>
-            <div class="tags">
-              <NTag size="small" :bordered="false">{{ speedLabel[m.speed as 'fast'] }}</NTag>
-              <NTag size="small" :bordered="false" v-for="c in m.content" :key="c">
-                {{ contentLabel[c as 'anime'] ?? c }}
-              </NTag>
-              <NTag size="small" :bordered="false">原生 x{{ m.scale.join(' / x') }}</NTag>
-              <NTag size="small" :bordered="false">≈{{ m.vram_gb }}GB 显存</NTag>
-              <NTag size="small" :bordered="false">{{ m.size_mb }}MB</NTag>
-            </div>
-            <div v-if="m.vram_note" class="warn">{{ m.vram_note }}</div>
-          </div>
-          <div class="actions">
-            <template v-if="m.bundled">
-              <span class="bundled-note">随软件分发</span>
-            </template>
-            <template v-else-if="store.downloadProgress[m.id] !== undefined">
-              <div class="dl">
-                <NProgress
-                  type="line"
-                  :percentage="Math.round(store.downloadProgress[m.id] * 100)"
-                  :show-indicator="false"
-                  :height="8"
-                />
-                <span class="dl-pct">{{ Math.round(store.downloadProgress[m.id] * 100) }}%</span>
-              </div>
-            </template>
-            <template v-else-if="m.installed">
-              <NButton size="small" quaternary type="error" @click="onDelete(m.id)">删除权重</NButton>
-            </template>
-            <template v-else>
-              <NButton size="small" type="primary" ghost @click="onDownload(m.id)">下载 ({{ m.size_mb }}MB)</NButton>
-            </template>
-          </div>
+    <div class="model-grid">
+      <div v-for="m in models" :key="m.id" class="card mcard">
+        <div class="m-head">
+          <span class="name">{{ m.name }}</span>
+          <NTag v-if="m.bundled" size="small" type="success" :bordered="false">内置</NTag>
+          <NTag v-else-if="m.installed" size="small" type="success" :bordered="false">已安装</NTag>
+          <NTag v-if="!m.vram_ok" size="small" type="warning" :bordered="false">显存不足</NTag>
         </div>
-      </NCard>
-    </NSpace>
+        <div class="desc">{{ m.description }}</div>
+        <div class="tags">
+          <NTag size="small" :bordered="false">{{ speedLabel[m.speed as 'fast'] }}</NTag>
+          <NTag size="small" :bordered="false" v-for="c in m.content" :key="c">
+            {{ contentLabel[c as 'anime'] ?? c }}
+          </NTag>
+          <NTag size="small" :bordered="false">原生 x{{ m.scale.join(' / x') }}</NTag>
+          <NTag size="small" :bordered="false">≈{{ m.vram_gb }}GB 显存</NTag>
+          <NTag size="small" :bordered="false">{{ m.size_mb }}MB</NTag>
+        </div>
+        <div v-if="m.vram_note" class="warn">{{ m.vram_note }}</div>
+        <div class="m-foot">
+          <template v-if="m.bundled">
+            <span class="bundled-note">✓ 随软件分发</span>
+          </template>
+          <template v-else-if="store.downloadProgress[m.id] !== undefined">
+            <div class="dl">
+              <NProgress
+                type="line"
+                :percentage="Math.round(store.downloadProgress[m.id] * 100)"
+                :show-indicator="false"
+                :height="8"
+              />
+              <span class="dl-pct">{{ Math.round(store.downloadProgress[m.id] * 100) }}%</span>
+            </div>
+          </template>
+          <template v-else-if="m.installed">
+            <NButton size="small" quaternary type="error" @click="onDelete(m.id)">删除权重</NButton>
+          </template>
+          <template v-else>
+            <NButton size="small" type="primary" ghost @click="onDownload(m.id)">下载 ({{ m.size_mb }}MB)</NButton>
+          </template>
+        </div>
+      </div>
+    </div>
 
     <NModal
       v-model:show="showImport"
@@ -209,20 +204,50 @@ async function doImport() {
 
 <style scoped>
 .models-page { display: flex; flex-direction: column; gap: 16px; }
-.page-head { display: flex; justify-content: space-between; align-items: center; }
+.page-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 h1 { font-size: 20px; font-weight: 700; }
 .sub { font-size: 12.5px; color: #9aa0a6; margin-top: 4px; }
-.row { display: flex; justify-content: space-between; gap: 20px; }
-.info { min-width: 0; flex: 1; }
-.name-row { display: flex; align-items: center; gap: 8px; }
+
+/* 响应式网格:宽窗多列、窄窗自动落单列 */
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+.card {
+  background: #1e2023;
+  border: 1px solid #26292e;
+  border-radius: 12px;
+}
+.mcard { padding: 16px 18px 14px; display: flex; flex-direction: column; gap: 9px; }
+.m-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .name { font-size: 15px; font-weight: 600; }
-.desc { color: #9aa0a6; font-size: 12.5px; margin: 6px 0; }
+.desc {
+  color: #9aa0a6;
+  font-size: 12.5px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 39px; /* 描述短/长卡片脚对齐 */
+}
 .tags { display: flex; flex-wrap: wrap; gap: 6px; }
-.warn { margin-top: 6px; color: #fbbf24; font-size: 12px; }
-.actions { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 180px; }
+.warn { color: #fbbf24; font-size: 12px; }
+.m-foot {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid #26292e;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 42px;
+}
 .bundled-note { color: #34d399; font-size: 12.5px; }
-.dl { width: 180px; display: flex; align-items: center; gap: 8px; }
-.dl-pct { font-size: 12px; color: #4f8cff; width: 40px; text-align: right; }
+.dl { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dl-pct { font-size: 12px; color: #4f8cff; width: 38px; text-align: right; flex-shrink: 0; }
 .imp-file { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .imp-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9aa0a6; font-size: 12.5px; }
 .imp-hint { margin-left: 10px; font-size: 11.5px; color: #9aa0a6; }

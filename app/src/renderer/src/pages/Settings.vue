@@ -3,7 +3,6 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import {
   NButton,
   NCard,
-  NCode,
   NInput,
   NPopover,
   NProgress,
@@ -21,7 +20,6 @@ import { refreshModels, store } from '../store'
 const message = useMessage()
 const engine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
 const precision = ref<'fp16' | 'fp32'>('fp16')
-const logLines = ref<string[]>([])
 const saving = ref(false)
 const appVersion = ref('')
 const checking = ref(false)
@@ -60,7 +58,6 @@ onMounted(async () => {
     proxyAddr.value = p
   } else proxyMode.value = 'auto'
   appVersion.value = await window.sv.appVersion()
-  loadLog()
   offProgress = window.sv.onUpdateProgress((pct) => {
     downloadPercent.value = pct
   })
@@ -100,15 +97,6 @@ async function savePerfSampling(v: boolean) {
     message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
     perfSampling.value = !v
   }
-}
-
-async function loadLog() {
-  logLines.value = (await api.logTail()).lines
-}
-
-async function exportLog() {
-  const p = await window.sv.saveLog(logLines.value.join('\n') || '(空)')
-  if (p) message.success(`日志已导出: ${p}`)
 }
 
 async function checkUpdate() {
@@ -270,23 +258,28 @@ async function saveEngine() {
         <div>NVENC 硬编：{{ store.hardware?.nvenc ? '可用' : '不可用' }}<template v-if="store.hardware?.av1_nvenc"> · AV1 硬编：可用</template><template v-if="store.hardware?.amf"> · AMF：可用</template><template v-if="store.hardware?.svt_av1"> · SVT-AV1：可用</template></div>
       </NSpace>
     </NCard>
-
-    <NCard size="small">
-      <template #header>
-        服务日志（最近 120 行）
-        <NButton size="tiny" style="margin-left: 10px" @click="loadLog">刷新</NButton>
-        <NButton size="tiny" style="margin-left: 8px" @click="exportLog">导出</NButton>
-      </template>
-      <NCode :code="logLines.join('\n') || '(空)'" language="text" :word-wrap="true" class="log" />
-    </NCard>
   </div>
 </template>
 
 <style scoped>
-.settings-page { display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  min-width: 620px; /* 窄于此宽度改为横向滚动,不挤压内部控件 */
+  max-width: 860px;
+  margin: 0 auto; /* 窗口宽时列居中,窄时随窗口收窄 */
+}
 h1 { font-size: 20px; font-weight: 700; }
 .hint { color: #9aa0a6; font-size: 12.5px; margin-bottom: 12px; }
-.update-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap; /* 窄行时控件换行堆到下一行,不与长文字互相挤 */
+}
 .update-notes-head { font-weight: 600; margin-bottom: 6px; }
 .update-notes-body {
   white-space: pre-wrap;
@@ -295,13 +288,5 @@ h1 { font-size: 20px; font-weight: 700; }
   color: #c9cdd4;
   max-height: 240px;
   overflow-y: auto;
-}
-.log {
-  max-height: 300px;
-  overflow-y: auto;
-  font-size: 11.5px;
-  background: #101113;
-  padding: 10px;
-  border-radius: 6px;
 }
 </style>

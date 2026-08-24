@@ -28,3 +28,4 @@ data/settings.json
 backend/dist/
 dist-app/
 backend/build/
+.zcode/
