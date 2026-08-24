@@ -39,19 +39,7 @@ jobs:
           Move-Item ff/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/ffmpeg.exe bin/
           Move-Item ff/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/ffprobe.exe bin/
 
-      - name: 导出 x4plus 动态 ONNX（官方权重确定性导出 + sha 校验）
-        shell: pwsh
-        run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install onnxscript
-          curl -L -o x4plus.pth https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
-          python backend/scripts/export_onnx_x4plus.py x4plus.pth pack/models_store/realesrgan-x4plus/RealESRGAN_x4plus_dyn.onnx
-          $h = (Get-FileHash pack/models_store/realesrgan-x4plus/RealESRGAN_x4plus_dyn.onnx -Algorithm SHA256).Hash.ToLower()
-          if ($h -ne "6ea6125934bebe44ba3dfb737dc4f969dc79a5549b11b9fb548a6a66f4776e75") {
-            throw "导出确定性被破坏: sha256=$h"
-          }
-
-      - name: PyInstaller 打 sidecar
+      - name: PyInstaller 打 sidecar（bundled 模型随包）
         working-directory: backend
         run: pyinstaller sidecar.spec --noconfirm
 
@@ -72,5 +60,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create models-v1 --title "模型资产" --notes "x4plus 动态尺寸 ONNX（确定性导出）" 2>$null
-          gh release upload models-v1 pack/models_store/realesrgan-x4plus/RealESRGAN_x4plus_dyn.onnx --clobber
+          gh release create models-v1 --title "模型资产" --notes "x4plus 动态尺寸 ONNX" 2>$null
+          gh release upload models-v1 backend/sv/models/bundled/RealESRGAN_x4plus_dyn.onnx --clobber

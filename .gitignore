@@ -29,4 +29,3 @@ backend/dist/
 dist-app/
 app/build/*.ico
 backend/build/
-pack/

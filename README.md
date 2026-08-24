@@ -43,21 +43,19 @@ cd app && pnpm dist
 自动更新已接线 electron-updater（源：`github.com/mkktop/super_video`，公共仓库无需 token）。
 设置页有"检查更新"，打包版启动 10 秒后也会静默检查；下载完成弹窗提示重启。
 
-**发新版本**（仓库推送后）：
+**发新版本**（推送后只需打 tag，其余全自动）：
 
 ```bash
-cd backend && ../.venv/Scripts/pyinstaller.exe sidecar.spec --noconfirm   # 先重打 sidecar
-cd app && pnpm dist                                                        # 再打安装包
+git tag v0.1.1 && git push origin v0.1.1
+# GitHub Actions 自动: PyInstaller sidecar -> electron-builder -> 上传
+# setup.exe / blockmap / latest.yml 到对应 Release，并同步 x4plus 模型资产到 models-v1
 ```
 
-到 GitHub → Releases → 新建 Release（tag = 版本号，如 v0.1.1），上传 `dist-app/` 下的三个文件：
-`super_video_0.1.1_setup.exe`、`super_video_0.1.1_setup.exe.blockmap`、`latest.yml`。
-已装用户即会收到更新提示（blockmap 支持增量下载）。
+本地打包（不走 CI）：`backend` 下 `pyinstaller sidecar.spec --noconfirm`，再 `app` 下 `pnpm dist`。
 
-**模型资产**（首次发布需做一次）：新建 Release tag `models-v1`，上传
-`models_store/realesrgan-x4plus/RealESRGAN_x4plus_dyn.onnx`（由
-`backend/scripts/export_onnx_x4plus.py` 从官方权重确定性导出，sha256 见 manifest）。
-此后 x4plus 的下载源即为本仓库 GitHub Release。其余模型已直接使用各官方 GitHub Release。
+**模型分发**：AnimeVideo x2/x4 与 x4plus 动态版随仓库 `backend/sv/models/bundled/` 分发
+（安装包内置，开箱即用；x4plus 由 `backend/scripts/export_onnx_x4plus.py` 从官方权重导出，
+注意导出非字节级确定，故以仓库内文件为准）；CUGAN/RIFE/torch 模型按需从各官方 GitHub Release 下载。
 
 ## 里程碑
 
