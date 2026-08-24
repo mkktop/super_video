@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('sv', {
     status: string
     current: string
     version?: string
+    notes?: string
     error?: string
   }>,
   pickVideo: () => ipcRenderer.invoke('dialog:pickVideo') as Promise<string[]>,

@@ -164,6 +164,15 @@ if (!gotLock) {
 // ---- 自动更新（GitHub Releases，仅打包版；公共仓库无需 token） ----
 let updaterBusy = false
 
+/** releaseNotes 归一化成字符串（GitHub provider 给 release 正文） */
+function normalizeNotes(raw: unknown): string {
+  if (typeof raw === 'string') return raw.trim()
+  if (Array.isArray(raw)) {
+    return raw.map((x) => (x && typeof x === 'object' ? String((x as any).note ?? '') : String(x ?? ''))).join('\n').trim()
+  }
+  return ''
+}
+
 function setupAutoUpdate(): void {
   if (!app.isPackaged) return
   import('electron-updater').then(({ autoUpdater }) => {
@@ -201,7 +210,12 @@ async function checkUpdateManually(): Promise<{
     const r = await autoUpdater.checkForUpdates()
     const newVersion = r?.updateInfo?.version
     if (newVersion && newVersion !== current) {
-      return { status: 'downloading', current, version: newVersion }
+      return {
+        status: 'downloading',
+        current,
+        version: newVersion,
+        notes: normalizeNotes(r?.updateInfo?.releaseNotes),
+      }
     }
     return { status: 'latest', current, version: newVersion }
   } catch (e) {

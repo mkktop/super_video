@@ -77,6 +77,21 @@ jobs:
           }
           if ($keep.draft) { gh release edit $tag --draft=false --title $tag }
 
+      - name: 以 tag 附注填充 Release 正文（应用内"悬浮查看更新内容"数据源）
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ref = gh api "repos/${{ github.repository }}/git/ref/tags/$tag" | ConvertFrom-Json
+          if ($ref.object.type -ne 'tag') { Write-Host "轻量 tag 无附注，跳过"; exit 0 }
+          $body = (gh api "repos/${{ github.repository }}/git/tags/$($ref.object.sha)" | ConvertFrom-Json).message
+          if ($body) {
+            gh release edit $tag --notes "$body"
+            Write-Host "Release 正文已写入 tag 附注（$($body.Length) 字符）"
+          } else { Write-Host "tag 附注为空，保持默认" }
+
       - name: 模型资产同步到 models-v1 Release（注册表驱动，缺什么补什么）
         shell: pwsh
         env:

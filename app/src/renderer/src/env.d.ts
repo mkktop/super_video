@@ -9,6 +9,7 @@ declare global {
         status: string
         current: string
         version?: string
+        notes?: string
         error?: string
       }>
       pickVideo: () => Promise<string[]>

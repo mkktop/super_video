@@ -4,6 +4,7 @@ import {
   NButton,
   NCard,
   NCode,
+  NPopover,
   NRadioButton,
   NRadioGroup,
   NSpace,
@@ -21,6 +22,7 @@ const saving = ref(false)
 const appVersion = ref('')
 const checking = ref(false)
 const updateMsg = ref('')
+const updateNotes = ref('') // 新版本更新内容（Release 正文），悬浮按钮时展示
 
 onMounted(async () => {
   const s = (await api.settings()) as {
@@ -45,12 +47,16 @@ async function exportLog() {
 async function checkUpdate() {
   checking.value = true
   updateMsg.value = ''
+  updateNotes.value = ''
   try {
     const r = await window.sv.checkUpdate()
     if (r.status === 'dev') {
       updateMsg.value = '开发模式不检查更新（打包版自动检查 GitHub Releases）'
     } else if (r.status === 'downloading') {
-      updateMsg.value = `发现新版本 ${r.version}，正在后台下载，完成后会弹窗提示重启`
+      updateNotes.value = r.notes ?? ''
+      updateMsg.value = `发现新版本 v${r.version}，正在后台下载，完成后会弹窗提示重启${
+        updateNotes.value ? '（悬浮在按钮上可查看本次更新内容）' : ''
+      }`
     } else if (r.status === 'latest') {
       updateMsg.value = `已是最新版本（${r.current}）`
     } else if (r.status === 'error') {
@@ -110,7 +116,15 @@ async function saveEngine() {
     <NCard title="应用与更新" size="small">
       <div class="update-row">
         <span>当前版本 <b>v{{ appVersion }}</b> · 更新源：GitHub Releases</span>
-        <NButton size="small" :loading="checking" @click="checkUpdate">检查更新</NButton>
+        <NPopover trigger="hover" placement="top-end" :disabled="!updateNotes" :width="380" trigger-style="display: inline-flex">
+          <template #trigger>
+            <NButton size="small" :loading="checking" @click="checkUpdate">检查更新</NButton>
+          </template>
+          <div class="update-notes">
+            <div class="update-notes-head">本次更新内容</div>
+            <div class="update-notes-body">{{ updateNotes }}</div>
+          </div>
+        </NPopover>
       </div>
       <p v-if="updateMsg" class="hint" style="margin-top: 8px">{{ updateMsg }}</p>
     </NCard>
@@ -140,6 +154,15 @@ async function saveEngine() {
 h1 { font-size: 20px; font-weight: 700; }
 .hint { color: #9aa0a6; font-size: 12.5px; margin-bottom: 12px; }
 .update-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.update-notes-head { font-weight: 600; margin-bottom: 6px; }
+.update-notes-body {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c9cdd4;
+  max-height: 240px;
+  overflow-y: auto;
+}
 .log {
   max-height: 300px;
   overflow-y: auto;
