@@ -10,6 +10,18 @@ contextBridge.exposeInMainWorld('sv', {
     notes?: string
     error?: string
   }>,
+  downloadUpdate: () => ipcRenderer.invoke('app:download-update') as Promise<{ ok: boolean; error?: string }>,
+  installUpdate: () => ipcRenderer.invoke('app:install-update') as Promise<void>,
+  onUpdateProgress: (cb: (percent: number) => void) => {
+    const fn = (_e: IpcRendererEvent, percent: number) => cb(percent)
+    ipcRenderer.on('app:update-progress', fn)
+    return () => ipcRenderer.removeListener('app:update-progress', fn)
+  },
+  onUpdateReady: (cb: (version: string) => void) => {
+    const fn = (_e: IpcRendererEvent, version: string) => cb(version)
+    ipcRenderer.on('app:update-ready', fn)
+    return () => ipcRenderer.removeListener('app:update-ready', fn)
+  },
   pickVideo: () => ipcRenderer.invoke('dialog:pickVideo') as Promise<string[]>,
   pickOutput: (suggest: string) => ipcRenderer.invoke('dialog:pickOutput', suggest) as Promise<string | null>,
   pickModel: () => ipcRenderer.invoke('dialog:pickModel') as Promise<string | null>,

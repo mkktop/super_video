@@ -41,16 +41,17 @@ cd app && pnpm dist
 ### 发布与自动更新（GitHub Releases）
 
 自动更新已接线 electron-updater（源：`github.com/mkktop/super_video`，公共仓库无需 token）。
-设置页有"检查更新"，打包版启动 10 秒后也会静默检查；下载完成弹窗提示重启。
+设置页"检查更新"发现新版本 → 点"下载更新"（有进度条）→ 点"立即重启"静默安装。
+差分下载（blockmap）刻意禁用：实测会把旧版安装包错拼成"新更新"，全量下载 + sha512 校验更稳。
 
-**发新版本**（推送后只需打附注 tag，其余全自动）：
+**发新版本**（推送后只需打 tag，其余全自动）：
 
 ```bash
-git tag -a v0.1.1 -m "修复：连接灯闪烁/模型内置状态误显/可选安装目录/图标"
-git push origin v0.1.1
+git tag v0.1.5
+git push origin v0.1.5
+# 先编辑仓库根 RELEASE_NOTES.md，按 "## vX.Y.Z" 新增一节（应用内"检查更新"悬浮显示该节内容）
 # GitHub Actions 自动: PyInstaller sidecar -> electron-builder -> 上传
-# setup.exe / blockmap / latest.yml 到对应 Release，tag 附注写入 Release 正文
-# （应用内"检查更新"发现新版本时，悬浮按钮可看到这些内容），并同步模型资产到 models-v1
+# setup.exe / latest.yml 到对应 Release（正文 = RELEASE_NOTES.md），并同步模型资产到 models-v1
 ```
 
 本地打包（不走 CI）：`backend` 下 `pyinstaller sidecar.spec --noconfirm`，再 `app` 下 `pnpm dist`。

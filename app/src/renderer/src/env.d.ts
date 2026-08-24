@@ -12,6 +12,10 @@ declare global {
         notes?: string
         error?: string
       }>
+      downloadUpdate: () => Promise<{ ok: boolean; error?: string }>
+      installUpdate: () => Promise<void>
+      onUpdateProgress: (cb: (percent: number) => void) => () => void
+      onUpdateReady: (cb: (version: string) => void) => () => void
       pickVideo: () => Promise<string[]>
       pickOutput: (suggest: string) => Promise<string | null>
       pickModel: () => Promise<string | null>

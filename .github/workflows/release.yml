@@ -49,50 +49,20 @@ jobs:
           pnpm install
           pnpm build
 
-      - name: 打安装包并发布到 GitHub Release
+      - name: 打安装包（不发布，资产由 softprops 统一上传）
         working-directory: app
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis --publish always
+        run: npx electron-builder --win nsis --publish never
 
-      - name: 发布收敛（electron-builder 偶发双草稿/资产拆分）
+      - name: 上传到 GitHub Release（正文取自仓库根 RELEASE_NOTES.md）
         if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist-app/*.exe
+            dist-app/latest.yml
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $ver = $tag.TrimStart('v')
-          $rels = gh api "repos/${{ github.repository }}/releases?per_page=20" | ConvertFrom-Json
-          $same = @($rels | Where-Object { $_.tag_name -eq $tag })
-          $keep = @($same | Where-Object { @($_.assets | Where-Object { $_.name -like "*setup.exe" }).Count -gt 0 })[0]
-          if (-not $keep) { Write-Host "没有可收敛的 Release"; exit 0 }
-          foreach ($r in $same) {
-            if ($r.id -ne $keep.id) { gh api -X DELETE "repos/${{ github.repository }}/releases/$($r.id)" | Out-Null }
-          }
-          $have = @($keep.assets.name)
-          # blockmap(差分更新索引)刻意不发布: electron-updater 差分下载曾把旧版
-          # 安装包错拼成新更新(v0.1.1 两次复现), 无 blockmap 时自动回落全量+sha512 校验
-          foreach ($a in @($keep.assets | Where-Object { $_.name -like "*.blockmap" })) {
-            gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$($a.id)" | Out-Null
-            Write-Host "已删除 blockmap 资产 $($a.name)"
-          }
-          if ($keep.draft) { gh release edit $tag --draft=false --title $tag }
-
-      - name: 以 tag 附注填充 Release 正文（应用内"悬浮查看更新内容"数据源）
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $ref = gh api "repos/${{ github.repository }}/git/ref/tags/$tag" | ConvertFrom-Json
-          if ($ref.object.type -ne 'tag') { Write-Host "轻量 tag 无附注，跳过"; exit 0 }
-          $body = (gh api "repos/${{ github.repository }}/git/tags/$($ref.object.sha)" | ConvertFrom-Json).message
-          if ($body) {
-            gh release edit $tag --notes "$body"
-            Write-Host "Release 正文已写入 tag 附注（$($body.Length) 字符）"
-          } else { Write-Host "tag 附注为空，保持默认" }
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 模型资产同步到 models-v1 Release（注册表驱动，缺什么补什么）
         shell: pwsh

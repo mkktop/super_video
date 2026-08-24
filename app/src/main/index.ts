@@ -213,7 +213,10 @@ if (!gotLock) {
 }
 
 // ---- 自动更新（GitHub Releases，仅打包版；公共仓库无需 token） ----
+// 交互模型：检查 -> 用户点"下载更新"（有进度条）-> 用户点"立即重启"。
+// 不自动下载：全量包 241MB，静默下载既耗流量又会在用户不知情时弹窗打断。
 let updaterBusy = false
+let downloadBusy = false
 
 /** electron-updater 懒加载。打包后动态 import 的 CJS 互操作可能拿到
  * undefined（v0.1.1 实测手动检查报 TypeError），require 直取最稳。 */
@@ -234,30 +237,27 @@ function normalizeNotes(raw: unknown): string {
   return ''
 }
 
+/** Release 正文是仓库根 RELEASE_NOTES.md 全量，按 "## vX.Y.Z" 分节，只取目标版本那一节 */
+function sliceNotes(notes: string, version: string): string {
+  const section = notes.split('\n## ').find((s) => s.startsWith(`v${version}`))
+  if (!section) return notes
+  return section.slice(`v${version}`.length).trim()
+}
+
+function broadcast(channel: string, payload: unknown): void {
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
+}
+
 function setupAutoUpdate(): void {
   if (!app.isPackaged) return
   try {
     const autoUpdater = getAutoUpdater()
-    autoUpdater.autoDownload = true
+    autoUpdater.autoDownload = false
     // 差分下载实测会把旧版安装包错拼成"新更新"(v0.1.0→v0.1.1 两次复现)，
     // 禁用后走全量下载 + sha512 校验，241MB 一次性代价换正确性
     autoUpdater.disableDifferentialDownload = true
-    autoUpdater.on('update-downloaded', (info) => {
-      dialog
-        .showMessageBox({
-          type: 'info',
-          title: '更新已就绪',
-          message: `新版本 ${info.version} 已下载，重启后生效。`,
-          buttons: ['立即重启', '稍后（退出时自动安装）'],
-          defaultId: 0,
-        })
-        .then((r) => {
-          // 静默安装 + 装完自动拉起：辅助安装器(可选目录版)带 UI 运行会卡住更新流程
-          if (r.response === 0) autoUpdater.quitAndInstall(true, true)
-        })
-    })
-    // 启动后 10s 静默检查一次
-    setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10_000)
+    autoUpdater.on('download-progress', (p) => broadcast('app:update-progress', Math.round(p.percent)))
+    autoUpdater.on('update-downloaded', (info) => broadcast('app:update-ready', info.version))
   } catch (e) {
     console.error('[updater] 初始化失败:', e)
   }
@@ -279,10 +279,10 @@ async function checkUpdateManually(): Promise<{
     const newVersion = r?.updateInfo?.version
     if (newVersion && newVersion !== current) {
       return {
-        status: 'downloading',
+        status: 'available',
         current,
         version: newVersion,
-        notes: normalizeNotes(r?.updateInfo?.releaseNotes),
+        notes: sliceNotes(normalizeNotes(r?.updateInfo?.releaseNotes), newVersion),
       }
     }
     return { status: 'latest', current, version: newVersion }
@@ -291,6 +291,24 @@ async function checkUpdateManually(): Promise<{
   } finally {
     updaterBusy = false
   }
+}
+
+async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
+  if (downloadBusy) return { ok: false, error: '下载已在进行' }
+  downloadBusy = true
+  try {
+    await getAutoUpdater().downloadUpdate()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  } finally {
+    downloadBusy = false
+  }
+}
+
+function installUpdate(): void {
+  // 静默安装 + 装完自动拉起：辅助安装器(可选目录版)带 UI 运行会卡住更新流程
+  getAutoUpdater().quitAndInstall(true, true)
 }
 
 app.whenReady().then(async () => {
@@ -324,6 +342,10 @@ ipcMain.handle('backend:info', () => ({ baseUrl }))
 ipcMain.handle('app:version', () => app.getVersion())
 
 ipcMain.handle('app:check-update', () => checkUpdateManually())
+
+ipcMain.handle('app:download-update', () => downloadUpdate())
+
+ipcMain.handle('app:install-update', () => installUpdate())
 
 // ---- 自绘标题栏的窗口控制 ----
 ipcMain.on('win:minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())

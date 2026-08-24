@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import {
   NButton,
   NCard,
   NCode,
   NPopover,
+  NProgress,
   NRadioButton,
   NRadioGroup,
   NSpace,
@@ -21,8 +22,14 @@ const logLines = ref<string[]>([])
 const saving = ref(false)
 const appVersion = ref('')
 const checking = ref(false)
+const downloading = ref(false)
+const downloadPercent = ref(0)
 const updateMsg = ref('')
 const updateNotes = ref('') // 新版本更新内容（Release 正文），悬浮按钮时展示
+const updateVersion = ref('') // 发现的新版本（待下载）
+const readyVersion = ref('') // 已下载完成、待重启安装的版本
+let offProgress: (() => void) | null = null
+let offReady: (() => void) | null = null
 
 onMounted(async () => {
   const s = (await api.settings()) as {
@@ -33,6 +40,20 @@ onMounted(async () => {
   precision.value = s.precision ?? 'fp16'
   appVersion.value = await window.sv.appVersion()
   loadLog()
+  offProgress = window.sv.onUpdateProgress((p) => {
+    downloadPercent.value = p
+  })
+  offReady = window.sv.onUpdateReady((v) => {
+    readyVersion.value = v
+    downloading.value = false
+    updateMsg.value = `新版本 v${v} 已下载完成，点击"立即重启"生效`
+  })
+  checkUpdate() // 静默检查：打开设置页即感知新版本，无需先点按钮
+})
+
+onUnmounted(() => {
+  offProgress?.()
+  offReady?.()
 })
 
 async function loadLog() {
@@ -51,13 +72,18 @@ async function checkUpdate() {
   try {
     const r = await window.sv.checkUpdate()
     if (r.status === 'dev') {
+      updateVersion.value = ''
+      readyVersion.value = ''
       updateMsg.value = '开发模式不检查更新（打包版自动检查 GitHub Releases）'
-    } else if (r.status === 'downloading') {
+    } else if (r.status === 'available') {
+      updateVersion.value = r.version ?? ''
       updateNotes.value = r.notes ?? ''
-      updateMsg.value = `发现新版本 v${r.version}，正在后台下载，完成后会弹窗提示重启${
-        updateNotes.value ? '（悬浮在按钮上可查看本次更新内容）' : ''
+      updateMsg.value = `发现新版本 v${updateVersion.value}，点击"下载更新"获取（全量安装包）${
+        updateNotes.value ? '（悬浮在"检查更新"上可查看更新内容）' : ''
       }`
     } else if (r.status === 'latest') {
+      updateVersion.value = ''
+      readyVersion.value = ''
       updateMsg.value = `已是最新版本（${r.current}）`
     } else if (r.status === 'error') {
       updateMsg.value = `检查失败：${r.error ?? '未知错误'}（发布前属正常，见 README 发布流程）`
@@ -67,6 +93,22 @@ async function checkUpdate() {
   } finally {
     checking.value = false
   }
+}
+
+async function doDownload() {
+  downloading.value = true
+  downloadPercent.value = 0
+  updateMsg.value = '正在下载更新…（下载完成后可点击"立即重启"）'
+  const r = await window.sv.downloadUpdate()
+  if (!r.ok) {
+    downloading.value = false
+    updateMsg.value = `下载失败：${r.error ?? '未知错误'}`
+  }
+  // 成功时 update-downloaded 事件会把 downloading 置 false 并提示重启
+}
+
+function doInstall() {
+  void window.sv.installUpdate() // 静默安装后自动拉起新版本
 }
 
 async function saveEngine() {
@@ -116,16 +158,30 @@ async function saveEngine() {
     <NCard title="应用与更新" size="small">
       <div class="update-row">
         <span>当前版本 <b>v{{ appVersion }}</b> · 更新源：GitHub Releases</span>
-        <NPopover trigger="hover" placement="top-end" :disabled="!updateNotes" :width="380" trigger-style="display: inline-flex">
-          <template #trigger>
-            <NButton size="small" :loading="checking" @click="checkUpdate">检查更新</NButton>
-          </template>
-          <div class="update-notes">
-            <div class="update-notes-head">本次更新内容</div>
-            <div class="update-notes-body">{{ updateNotes }}</div>
-          </div>
-        </NPopover>
+        <NSpace :size="8">
+          <NPopover trigger="hover" placement="top-end" :disabled="!updateNotes" :width="380" trigger-style="display: inline-flex">
+            <template #trigger>
+              <NButton size="small" :loading="checking" @click="checkUpdate">检查更新</NButton>
+            </template>
+            <div class="update-notes">
+              <div class="update-notes-head">本次更新内容</div>
+              <div class="update-notes-body">{{ updateNotes }}</div>
+            </div>
+          </NPopover>
+          <NButton
+            v-if="updateVersion && !readyVersion"
+            type="primary"
+            size="small"
+            :loading="downloading"
+            :disabled="downloading"
+            @click="doDownload"
+          >
+            下载更新 v{{ updateVersion }}
+          </NButton>
+          <NButton v-if="readyVersion" type="primary" size="small" @click="doInstall">立即重启 v{{ readyVersion }}</NButton>
+        </NSpace>
       </div>
+      <NProgress v-if="downloading" :percentage="downloadPercent" :height="6" style="margin-top: 10px" />
       <p v-if="updateMsg" class="hint" style="margin-top: 8px">{{ updateMsg }}</p>
     </NCard>
 
