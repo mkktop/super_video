@@ -4,7 +4,7 @@
  * 有任务运行时退出 UI 不杀 sidecar，重启后自动复用。
  */
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -115,12 +115,55 @@ async function hasActiveTasks(): Promise<boolean> {
   }
 }
 
+/** 启动兜底：清理上次异常退出可能残留的 sidecar 进程（自杀自清） */
+async function reapStaleSidecars(): Promise<void> {
+  const root = findRoot()
+  const own = path.join(root, 'sidecar', 'sidecar.exe')
+  // 杀掉指向本安装目录 sidecar.exe 的所有进程（含端口已释放的孤儿）
+  const { execFile } = await import('node:child_process')
+  try {
+    const ps = `Get-CimInstance Win32_Process -Filter "Name='sidecar.exe'" | ` +
+      `Where-Object { $_.ExecutablePath -eq '${own.replace(/'/g, "''")}' } | ` +
+      `ForEach-Object { Stop-Process -Id $_.ProcessId -Force; "killed $($_.ProcessId)" }`
+    const out = await new Promise<string>((resolve, reject) => {
+      execFile('powershell.exe', ['-NoProfile', '-Command', ps], {
+        windowsHide: true, timeout: 15000,
+      }, (err, stdout) => (err ? reject(err) : resolve(stdout)))
+    })
+    if (out.trim()) console.log(`[sidecar] 残留清理: ${out.trim()}`)
+  } catch (e) {
+    console.warn('[sidecar] 残留清理跳过:', e)
+  }
+}
+
 function killSidecar() {
-  if (!sidecar?.pid) return
+  try {
+    fs.appendFileSync(
+      path.join(findRoot(), '.tmp', 'quit.log'),
+      `killSidecar called ${Date.now()} sidecar=${sidecar?.pid ?? 'null'}\n`
+    )
+  } catch { /* 日志失败不影响清理 */ }
+  // 同步执行：Electron 退出瞬间会经 job object 带走刚 spawn 的异步子进程，
+  // 异步 taskkill/powershell 根本来不及跑（实测残留），必须 spawnSync 阻塞到杀完
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(sidecar.pid), '/T', '/F'], { windowsHide: true })
+    if (sidecar?.pid) {
+      try {
+        spawnSync('taskkill', ['/pid', String(sidecar.pid), '/T', '/F'],
+          { windowsHide: true, timeout: 8000 })
+      } catch { /* 进程可能已退出 */ }
+    }
+    const root = findRoot()
+    const own = path.join(root, 'sidecar', 'sidecar.exe').replace(/'/g, "''")
+    const ps =
+      `Get-CimInstance Win32_Process -Filter "Name='sidecar.exe'" | ` +
+      `Where-Object { $_.ExecutablePath -eq '${own}' } | ` +
+      `ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`
+    try {
+      spawnSync('powershell.exe', ['-NoProfile', '-Command', ps],
+        { windowsHide: true, timeout: 15000 })
+    } catch { /* 兜底失败则交给下次启动的残留清理 */ }
   } else {
-    sidecar.kill('SIGTERM')
+    sidecar?.kill('SIGTERM')
   }
   sidecar = null
 }
@@ -252,6 +295,7 @@ async function checkUpdateManually(): Promise<{
 
 app.whenReady().then(async () => {
   try {
+    await reapStaleSidecars()
     await startOrReuseSidecar()
   } catch (e) {
     dialog.showErrorBox('sidecar 启动失败', String(e))
@@ -269,13 +313,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', async (e) => {
-  // 有任务在跑：不杀 sidecar（验收要求"杀 UI 任务不丢"），下次启动复用
-  if (sidecar && (await hasActiveTasks())) {
-    console.log('[sidecar] 有任务运行中，保留后台服务')
-    sidecar = null
-    return
-  }
+app.on('before-quit', () => {
+  // 任何情况下退出都连带关掉 sidecar（用户明确要求）；
+  // 若真有任务在跑，由 worker 的停止信号自行收尾
   killSidecar()
 })
 

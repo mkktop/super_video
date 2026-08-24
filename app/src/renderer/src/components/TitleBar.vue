@@ -2,14 +2,16 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 
 const maximized = ref(false)
+const version = ref('')
 let off: (() => void) | null = null
 
 const minimize = () => window.sv.win.minimize()
 const toggleMax = () => window.sv.win.toggleMaximize()
 const close = () => window.sv.win.close()
 
-onMounted(() => {
+onMounted(async () => {
   off = window.sv.win.onMaximized((m) => (maximized.value = m))
+  version.value = await window.sv.appVersion()
 })
 onUnmounted(() => off?.())
 </script>
@@ -19,6 +21,7 @@ onUnmounted(() => off?.())
     <div class="brand">
       <span class="mark">⬆</span>
       <span class="name">super_video</span>
+      <span class="ver">v{{ version }}</span>
     </div>
     <div class="controls">
       <button class="ctl" title="最小化" @click="minimize">
@@ -79,6 +82,17 @@ onUnmounted(() => off?.())
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+.ver {
+  font-size: 11px;
+  font-weight: 500;
+  color: #7a8087;
+  background: #1e2126;
+  border: 1px solid #2a2e34;
+  border-radius: 8px;
+  padding: 1px 8px;
+  margin-left: 2px;
+  letter-spacing: 0.3px;
 }
 .controls {
   display: flex;
