@@ -51,6 +51,43 @@ def test_settings_roundtrip(client):
     assert client.get("/api/settings").json()["engine"] == "auto"
 
 
+def test_download_proxy_setting(client):
+    """下载代理设置：自定义地址/直连/非法值 的存取与校验。"""
+    r = client.put("/api/settings", json={"download_proxy": "http://127.0.0.1:7890"})
+    assert r.status_code == 200
+    assert client.get("/api/settings").json()["download_proxy"] == "http://127.0.0.1:7890"
+    r = client.put("/api/settings", json={"download_proxy": "direct"})
+    assert r.status_code == 200
+    assert client.get("/api/settings").json()["download_proxy"] == "direct"
+    r = client.put("/api/settings", json={"download_proxy": "socks5://127.0.0.1:1080"})
+    assert r.status_code == 400  # urllib 只支持 http(s) 代理
+    r = client.put("/api/settings", json={"download_proxy": "bogus"})
+    assert r.status_code == 400
+    client.put("/api/settings", json={"download_proxy": ""})  # 还原默认
+
+
+def test_download_opener_modes():
+    """下载 opener 三态：直连/自定义代理（默认态跟随系统，不做断言）。"""
+    import urllib.request
+
+    from sv.models.manager import _opener
+    from sv.server.settings import save as save_settings
+
+    def has_proxy(o) -> bool:
+        # 空映射的 ProxyHandler 不注册进 handlers（=强制直连），带映射的才算有代理
+        return any(isinstance(h, urllib.request.ProxyHandler) and h.proxies for h in o.handlers)
+
+    # 直连：不得携带任何代理
+    save_settings({"download_proxy": "direct"})
+    assert not has_proxy(_opener()), "direct 模式不得有代理"
+    # 自定义
+    save_settings({"download_proxy": "http://127.0.0.1:7890"})
+    o = _opener()
+    ph = [h for h in o.handlers if isinstance(h, urllib.request.ProxyHandler) and h.proxies]
+    assert ph and ph[0].proxies.get("https") == "http://127.0.0.1:7890"
+    save_settings({"download_proxy": ""})  # 还原默认
+
+
 def test_models_adaptability(client):
     models = {m["id"]: m for m in client.get("/api/models").json()}
     m = models["realesr-animevideov3"]

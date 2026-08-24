@@ -4,10 +4,12 @@ import {
   NButton,
   NCard,
   NCode,
+  NInput,
   NPopover,
   NProgress,
   NRadioButton,
   NRadioGroup,
+  NSelect,
   NSpace,
   NTag,
   useMessage,
@@ -28,6 +30,14 @@ const updateMsg = ref('')
 const updateNotes = ref('') // 新版本更新内容（Release 正文），悬浮按钮时展示
 const updateVersion = ref('') // 发现的新版本（待下载）
 const readyVersion = ref('') // 已下载完成、待重启安装的版本
+const proxyMode = ref<'auto' | 'direct' | 'custom'>('auto')
+const proxyAddr = ref('')
+const savingProxy = ref(false)
+const proxyOptions = [
+  { label: '跟随系统代理', value: 'auto' },
+  { label: '直连（不走代理）', value: 'direct' },
+  { label: '自定义代理', value: 'custom' },
+]
 let offProgress: (() => void) | null = null
 let offReady: (() => void) | null = null
 
@@ -35,13 +45,20 @@ onMounted(async () => {
   const s = (await api.settings()) as {
     engine?: 'auto' | 'cuda' | 'directml'
     precision?: 'fp16' | 'fp32'
+    download_proxy?: string
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
+  const p = s.download_proxy ?? ''
+  if (p === 'direct') proxyMode.value = 'direct'
+  else if (p.startsWith('http')) {
+    proxyMode.value = 'custom'
+    proxyAddr.value = p
+  } else proxyMode.value = 'auto'
   appVersion.value = await window.sv.appVersion()
   loadLog()
-  offProgress = window.sv.onUpdateProgress((p) => {
-    downloadPercent.value = p
+  offProgress = window.sv.onUpdateProgress((pct) => {
+    downloadPercent.value = pct
   })
   offReady = window.sv.onUpdateReady((v) => {
     readyVersion.value = v
@@ -55,6 +72,23 @@ onUnmounted(() => {
   offProgress?.()
   offReady?.()
 })
+
+async function saveProxy() {
+  const v = proxyMode.value === 'direct' ? 'direct'
+    : proxyMode.value === 'custom' ? proxyAddr.value.trim() : ''
+  if (proxyMode.value === 'custom' && !/^https?:\/\//.test(v)) {
+    message.error('代理地址需以 http:// 或 https:// 开头')
+    return
+  }
+  savingProxy.value = true
+  const r = await api.saveSettings({ download_proxy: v })
+  savingProxy.value = false
+  if (r.ok) {
+    message.success('已保存，新的模型下载立即生效')
+  } else {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+  }
+}
 
 async function loadLog() {
   logLines.value = (await api.logTail()).lines
@@ -153,6 +187,25 @@ async function saveEngine() {
       <div style="margin-top: 14px">
         <NButton type="primary" size="small" :loading="saving" @click="saveEngine">保存</NButton>
       </div>
+    </NCard>
+
+    <NCard title="模型下载" size="small">
+      <p class="hint">
+        下载源为 GitHub Releases（models-v1）。代理软件开了"系统代理"但下载仍慢时，
+        多半是 PAC 模式不生效或代理规则没覆盖 GitHub CDN 域名——选"自定义代理"填本地
+        代理地址（如 Clash 的 http://127.0.0.1:7890）最稳。
+      </p>
+      <NSpace :size="8" align="center">
+        <NSelect v-model:value="proxyMode" :options="proxyOptions" size="small" style="width: 170px" />
+        <NInput
+          v-if="proxyMode === 'custom'"
+          v-model:value="proxyAddr"
+          size="small"
+          placeholder="http://127.0.0.1:7890"
+          style="width: 230px"
+        />
+        <NButton size="small" type="primary" :loading="savingProxy" @click="saveProxy">保存</NButton>
+      </NSpace>
     </NCard>
 
     <NCard title="应用与更新" size="small">

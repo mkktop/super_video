@@ -13,6 +13,41 @@ class DownloadError(RuntimeError):
     pass
 
 
+def _opener() -> urllib.request.OpenerDirector:
+    """按设置构造下载 opener：
+    - ""（默认）：urllib 默认行为（环境变量 + Windows 注册表系统代理）
+    - "direct"：强制直连，忽略一切代理
+    - "http://host:port"：显式走该代理（Clash 等本地代理最稳）
+    """
+    from ..server.settings import load as load_settings
+
+    proxy = (load_settings().get("download_proxy") or "").strip()
+    if proxy == "direct":
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    if proxy.startswith("http://") or proxy.startswith("https://"):
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
+    return urllib.request.build_opener()
+
+
+def _download_to(url: str, dest: Path, opener: urllib.request.OpenerDirector,
+                 progress_cb=None, done: int = 0, total: int = 0, label: str = "") -> None:
+    """流式下载 url 到 dest，实时回调进度（bytes_done, bytes_total, label）。"""
+    req = urllib.request.Request(url, headers={"User-Agent": "super-video/0.1"})
+    with opener.open(req, timeout=60) as resp, open(dest, "wb") as out:
+        got = 0
+        while True:
+            chunk = resp.read(1 << 20)
+            if not chunk:
+                break
+            out.write(chunk)
+            got += len(chunk)
+            done += len(chunk)
+            if progress_cb:
+                progress_cb(done, total, label)
+
+
 def _extract_member(archive_path: Path, member: str, dest: Path) -> None:
     """从 7z 包提取单个成员到 dest。"""
     import py7zr
@@ -79,18 +114,9 @@ def download(spec: ModelSpec, progress_cb=None) -> None:
             )
 
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "super-video/0.1"})
-            with urllib.request.urlopen(req, timeout=60) as resp, open(tmp, "wb") as out:
-                got = 0
-                while True:
-                    chunk = resp.read(1 << 20)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    got += len(chunk)
-                    done += len(chunk)
-                    if progress_cb:
-                        progress_cb(done, total, name)
+            done_at_file = done  # 镜像重试时进度回退，避免重复累计
+            opener = _opener()
+            _download_to(url, tmp, opener, progress_cb, done, total, name)
         except (urllib.error.URLError, OSError) as e:
             mirrors = [u for u in f.get("mirror_urls", []) if u]
             if not mirrors:
@@ -100,10 +126,7 @@ def download(spec: ModelSpec, progress_cb=None) -> None:
             ok = False
             for m in mirrors:
                 try:
-                    req = urllib.request.Request(m, headers={"User-Agent": "super-video/0.1"})
-                    with urllib.request.urlopen(req, timeout=60) as resp, open(tmp, "wb") as out:
-                        while chunk := resp.read(1 << 20):
-                            out.write(chunk)
+                    _download_to(m, tmp, opener, progress_cb, done_at_file, total, name)
                     ok = True
                     break
                 except (urllib.error.URLError, OSError):
