@@ -1,10 +1,19 @@
 import { reactive } from 'vue'
-import { api, initBase, wsUrl, type Task, type ModelInfo, type Preset } from './api'
+import {
+  api,
+  initBase,
+  wsUrl,
+  type Task,
+  type ModelInfo,
+  type Preset,
+  type Stats,
+} from './api'
 
 export const store = reactive({
   ready: false,
   connected: false,
   tasks: [] as Task[],
+  stats: { total: 0, done: 0, frames: 0, bytes: 0 } as Stats,
   models: [] as ModelInfo[],
   presets: [] as Preset[],
   downloadProgress: {} as Record<string, number>, // model_id -> 0~1
@@ -39,10 +48,34 @@ export function openCompare(taskId: string) {
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+let wsOk = false
+
+/** 任务逐字段相等（params 深比较）。相等时保留旧对象引用，TaskCard 的 props
+ *  不变即可整体跳过重渲染——高频轮询下只有真正变化的卡片会重新渲染。 */
+function sameTask(a: Task, b: Task): boolean {
+  if (a === b) return true
+  const keys = Object.keys(a) as (keyof Task)[]
+  if (keys.length !== Object.keys(b).length) return false
+  for (const k of keys) {
+    if (a[k] !== b[k]) {
+      if (k !== 'params' || JSON.stringify(a.params) !== JSON.stringify(b.params)) return false
+    }
+  }
+  return true
+}
+
+function mergeTasks(incoming: Task[]): void {
+  const old = new Map(store.tasks.map((t) => [t.id, t]))
+  store.tasks = incoming.map((t) => {
+    const o = old.get(t.id)
+    return o && sameTask(o, t) ? o : t
+  })
+}
 
 export async function refreshTasks() {
   try {
-    store.tasks = await api.tasks()
+    mergeTasks(await api.tasks())
     store.connected = true
   } catch {
     store.connected = false
@@ -55,6 +88,24 @@ function scheduleRefresh() {
     refreshTimer = null
     refreshTasks()
   }, 250)
+}
+
+export async function refreshStats() {
+  try {
+    store.stats = await api.stats()
+  } catch {
+    /* 统计失败不致命，下次事件再刷新 */
+  }
+}
+
+/** 兜底轮询：WS 健康时事件推送是主通道，降频到 8s；WS 断开回到 1.5s 保实时。
+ *  页面隐藏时跳过刷新（visibilitychange 恢复时立即刷一次）。 */
+function schedulePoll() {
+  if (pollTimer) clearTimeout(pollTimer)
+  pollTimer = setTimeout(async () => {
+    if (!document.hidden) await refreshTasks()
+    schedulePoll()
+  }, wsOk ? 8000 : 1500)
 }
 
 export async function refreshModels() {
@@ -79,6 +130,8 @@ function handleWsEvent(raw: MessageEvent) {
       }
       return
     }
+    // 统计只在状态切换时刷新（低频）；progress 高频事件只驱动列表刷新
+    if (ev.type === 'task_status') refreshStats()
   } catch {
     /* 非 JSON 事件按任务刷新处理 */
   }
@@ -86,13 +139,17 @@ function handleWsEvent(raw: MessageEvent) {
 }
 
 function connectWs() {
-  // WS 只做事件推送；连接灯由 HTTP 轮询单独判定，避免单通道失败时来回闪
+  // WS 是事件推送主通道；连接灯由 HTTP 轮询单独判定，避免单通道失败时来回闪
   const ws = new WebSocket(wsUrl())
   ws.onopen = () => {
+    wsOk = true
     refreshTasks()
+    schedulePoll()
   }
   ws.onmessage = handleWsEvent
   ws.onclose = () => {
+    wsOk = false
+    schedulePoll()
     setTimeout(connectWs, 2000)
   }
   ws.onerror = () => ws.close()
@@ -105,9 +162,11 @@ export async function initStore() {
   store.hardware = (await api.hardware()) as NonNullable<typeof store.hardware>
   store.gpuName = store.hardware.gpus?.[0]?.name ?? '未知显卡'
   store.engine = await api.engine()
-  await refreshTasks()
+  await Promise.all([refreshTasks(), refreshStats()])
   connectWs()
-  // 轮询兜底：WS 失效时列表仍然实时（本地服务，开销可忽略）
-  setInterval(refreshTasks, 1500)
+  schedulePoll()
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshTasks()
+  })
   store.ready = true
 }

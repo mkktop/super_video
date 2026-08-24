@@ -421,6 +421,11 @@ def get_tasks() -> list[dict]:
     return _with_queue_pos(db.list_tasks())
 
 
+@app.get("/api/stats")
+def get_stats() -> dict:
+    return db.stats()
+
+
 @app.get("/api/tasks/{task_id}")
 def get_task(task_id: str) -> dict:
     t = db.get_task(task_id)

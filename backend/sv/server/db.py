@@ -107,16 +107,34 @@ def get_task(task_id: str) -> dict | None:
     return _row2dict(r) if r else None
 
 
-def list_tasks() -> list[dict]:
-    """任务列表：运行/排队在前（按 queue_order），其余按创建时间倒序（最新在上）。"""
+def list_tasks(history_limit: int = 100) -> list[dict]:
+    """任务列表：运行/排队任务全量在前（按 queue_order），历史（done/failed/canceled）
+    只取最近 history_limit 条（按创建时间倒序）——列表渲染成本不随使用时间增长。
+    首页统计要全量数字，走 stats() 聚合，别数这里。"""
     with db_conn() as c:
-        rows = c.execute(
-            "SELECT * FROM tasks"
-            " ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,"
-            "          CASE WHEN status = 'queued' THEN queue_order END ASC,"
-            "          created_at DESC"
+        active = c.execute(
+            "SELECT * FROM tasks WHERE status IN ('running','queued')"
+            " ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, queue_order ASC"
         ).fetchall()
-    return [_row2dict(r) for r in rows]
+        history = c.execute(
+            "SELECT * FROM tasks WHERE status NOT IN ('running','queued')"
+            " ORDER BY created_at DESC LIMIT ?",
+            (history_limit,),
+        ).fetchall()
+    return [_row2dict(r) for r in [*active, *history]]
+
+
+def stats() -> dict:
+    """全量聚合统计（首页四宫格），不受 list_tasks 历史上限影响。"""
+    with db_conn() as c:
+        r = c.execute(
+            "SELECT COUNT(*) AS total,"
+            " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END), 0) AS done,"
+            " COALESCE(SUM(CASE WHEN status='done' THEN total_frames ELSE 0 END), 0) AS frames,"
+            " COALESCE(SUM(CASE WHEN status='done' THEN out_bytes ELSE 0 END), 0) AS bytes"
+            " FROM tasks"
+        ).fetchone()
+    return {"total": r["total"], "done": r["done"], "frames": r["frames"], "bytes": r["bytes"]}
 
 
 def next_queued() -> dict | None:

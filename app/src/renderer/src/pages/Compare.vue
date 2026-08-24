@@ -90,6 +90,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .compare-page {
   display: flex;
   flex-direction: column;
+  width: 100%; /* page-full 是横向 flex 容器，舞台内容全为绝对定位不撑宽，不显式给宽会塌缩成头部行宽 */
   height: 100%;
   gap: 10px;
 }

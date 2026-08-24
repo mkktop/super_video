@@ -3,18 +3,9 @@ import { computed } from 'vue'
 import { NButton, NProgress, NTag } from 'naive-ui'
 import { store, ui } from '../store'
 
-const doneTasks = computed(() => store.tasks.filter((t) => t.status === 'done'))
-const activeTasks = computed(
-  () => store.tasks.filter((t) => t.status === 'running' || t.status === 'queued'),
-)
 const running = computed(() => store.tasks.find((t) => t.status === 'running'))
-
-const stats = computed(() => ({
-  total: store.tasks.length,
-  done: doneTasks.value.length,
-  frames: doneTasks.value.reduce((s, t) => s + (t.total_frames || 0), 0),
-  bytes: doneTasks.value.reduce((s, t) => s + (t.out_bytes || 0), 0),
-}))
+// 统计走 /api/stats 全量聚合：任务列表有历史上限，直接数列表会漏旧任务
+const stats = computed(() => store.stats)
 
 function fmtBytes(b: number): string {
   return b > 1e9 ? `${(b / 1e6 / 1024).toFixed(2)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${b} B`

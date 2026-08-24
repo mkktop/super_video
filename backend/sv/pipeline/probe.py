@@ -77,10 +77,22 @@ def _bit_depth(pix_fmt: str) -> int:
     return 8
 
 
+# 探测缓存：向导选文件 probe 一次、提交任务再 probe 一次（含 -count_packets 全量
+# 扫包），同一文件第二次就是纯浪费。按 路径+mtime+size+模式 失效，本地文件足够可靠。
+# 返回对象只读共享（下游无变异），容量到顶整体清空（探测热点就几个文件，不值得 LRU）。
+_probe_cache: dict[tuple[str, int, int, bool], MediaInfo] = {}
+_PROBE_CACHE_MAX = 64
+
+
 def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(path)
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size, exact_frames)
+    cached = _probe_cache.get(key)
+    if cached is not None:
+        return cached
     data = _ffprobe_json(
         ["-print_format", "json", "-show_format", "-show_streams", str(path)]
     )
@@ -136,6 +148,9 @@ def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
             info.total_frames = max(_count_frames(path), int(round(duration * fps)))
     else:
         info.total_frames = int(duration * info.fps)
+    if len(_probe_cache) >= _PROBE_CACHE_MAX:
+        _probe_cache.clear()
+    _probe_cache[key] = info
     return info
 
 

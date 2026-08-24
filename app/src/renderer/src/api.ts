@@ -52,6 +52,14 @@ export interface Preset {
   crf: number
 }
 
+/** 任务总量统计（首页四宫格）：不受任务列表历史上限影响的全量聚合 */
+export interface Stats {
+  total: number
+  done: number
+  frames: number
+  bytes: number
+}
+
 export interface ProbeInfo {
   ok: boolean
   error: string | null
@@ -158,6 +166,9 @@ export const api = {
   },
   async tasks(): Promise<Task[]> {
     return (await fetch(`${baseUrl}/api/tasks`)).json()
+  },
+  async stats(): Promise<Stats> {
+    return (await fetch(`${baseUrl}/api/stats`)).json()
   },
   async createTask(body: {
     input: string

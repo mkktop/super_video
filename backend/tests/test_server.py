@@ -268,3 +268,55 @@ def test_resume_api(client, clips):
     rr = client.post(f"/api/tasks/{gid}/resume")
     assert rr.status_code == 409
     assert "续跑数据已不存在" in rr.json()["detail"]
+
+
+def _insert_done_rows(ids: list[str], base_ts: float) -> None:
+    """直接写 done 行（不经 new_task 的 queued 中间态，runner 不会抢走）。"""
+    from sv.server.db import db_conn
+
+    with db_conn() as c:
+        for i, tid in enumerate(ids):
+            c.execute(
+                "INSERT INTO tasks (id, created_at, updated_at, input_path, output_path,"
+                " model_id, params, status, total_frames, out_bytes, queue_order)"
+                " VALUES (?,?,?,?,?,?,?,'done',100,2048,0)",
+                (tid, base_ts + i, base_ts + i, "in.mp4", "out.mp4", "m", "{}"),
+            )
+
+
+def test_stats_endpoint(client):
+    """/api/stats 与库内直接聚合一致（首页四宫格不受列表上限影响）。"""
+    s = client.get("/api/stats").json()
+    assert set(s) == {"total", "done", "frames", "bytes"}
+    from sv.server.db import db_conn
+
+    with db_conn() as c:
+        total, done, frames, out_bytes = c.execute(
+            "SELECT COUNT(*),"
+            " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END), 0),"
+            " COALESCE(SUM(CASE WHEN status='done' THEN total_frames ELSE 0 END), 0),"
+            " COALESCE(SUM(CASE WHEN status='done' THEN out_bytes ELSE 0 END), 0)"
+            " FROM tasks"
+        ).fetchone()
+    assert s == {"total": total, "done": done, "frames": frames, "bytes": out_bytes}
+
+
+def test_task_history_cap(client):
+    """/api/tasks 历史上限 100 条：只保留最新，聚合统计仍全量。"""
+    ids = [f"caphist{i:03d}" for i in range(120)]
+    _insert_done_rows(ids, time.time() + 1000)  # 时间戳晚于所有真实任务
+    try:
+        tasks = client.get("/api/tasks").json()
+        junk = [t for t in tasks if t["id"].startswith("caphist")]
+        assert len(junk) == 100  # 120 条 junk 只显示最新 100 条
+        assert len(tasks) == 100  # 更旧的真实历史行被挤出
+        assert junk[0]["id"] == "caphist119"  # 最新在前（倒序）
+        assert junk[-1]["id"] == "caphist020"
+        s = client.get("/api/stats").json()
+        assert s["total"] >= 120  # 聚合不受列表上限影响
+        assert s["frames"] >= 120 * 100  # 仅 junk 行就贡献 12000 帧
+    finally:
+        from sv.server.db import db_conn
+
+        with db_conn() as c:
+            c.executemany("DELETE FROM tasks WHERE id=?", [(i,) for i in ids])
