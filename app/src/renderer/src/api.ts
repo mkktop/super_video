@@ -5,6 +5,20 @@ export function wsUrl(): string {
   return baseUrl.replace('http', 'ws') + '/ws'
 }
 
+/** 本地视频的 file:// 源地址（webSecurity:false 下 <video> 原生加载，
+ * Chromium 文件加载器自带 Range 与 moov 尾部索引处理）。
+ * 盘符段原样，其余逐段编码（#、?、中文路径安全）。 */
+export function mediaSrc(p: string): string {
+  return (
+    'file:///' +
+    p
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((s, i) => (i === 0 ? s : encodeURIComponent(s)))
+      .join('/')
+  )
+}
+
 export async function initBase(): Promise<void> {
   const info = await window.sv.backendInfo()
   baseUrl = info.baseUrl

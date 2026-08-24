@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NSlider } from 'naive-ui'
+import { mediaSrc } from '../api'
 
 const props = defineProps<{ srcPath: string; outPath: string }>()
 
-const srcUrl = `svvideo:///${encodeURIComponent(props.srcPath)}`
-const outUrl = `svvideo:///${encodeURIComponent(props.outPath)}`
+const srcUrl = mediaSrc(props.srcPath)
+const outUrl = mediaSrc(props.outPath)
 
 const srcV = ref<HTMLVideoElement | null>(null)
 const outV = ref<HTMLVideoElement | null>(null)

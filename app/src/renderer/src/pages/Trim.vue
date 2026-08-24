@@ -11,7 +11,7 @@ import {
   NTag,
   useMessage,
 } from 'naive-ui'
-import { api, type ProbeInfo, type TrimJob } from '../api'
+import { api, mediaSrc, type ProbeInfo, type TrimJob } from '../api'
 import { openWizardWith } from '../store'
 
 const message = useMessage()
@@ -26,10 +26,9 @@ const output = ref('')
 const job = ref<TrimJob | null>(null)
 const polling = ref<ReturnType<typeof setInterval> | null>(null)
 const videoEl = ref<HTMLVideoElement | null>(null)
+const previewBroken = ref(false) // 浏览器解不了的格式（AVI/WMV 等）：无预览但剪切不受影响
 
-const videoUrl = computed(() =>
-  input.value ? `svvideo:///${encodeURIComponent(input.value)}` : '',
-)
+const videoUrl = computed(() => (input.value ? mediaSrc(input.value) : ''))
 const duration = computed(() => probeInfo.value?.duration_s ?? 0)
 const selDur = computed(() => Math.max(0, endSec.value - startSec.value))
 const busy = computed(() => job.value?.state === 'queued' || job.value?.state === 'running')
@@ -64,6 +63,7 @@ async function load(path: string) {
   input.value = path
   probeInfo.value = null
   job.value = null
+  previewBroken.value = false
   probing.value = true
   const r = await api.probe(path)
   probing.value = false
@@ -186,12 +186,21 @@ function toSr() {
           controls
           preload="metadata"
           class="preview"
+          :style="{ visibility: previewBroken ? 'hidden' : 'visible' }"
+          @error="previewBroken = true"
         />
+        <div v-if="previewBroken" class="preview-broken">
+          <div class="pb-title">无法预览：该视频的容器/编码浏览器不支持</div>
+          <div class="pb-desc">
+            常见于 AVI/WMV/FLV/TS，或本机无 HEVC 硬解码。剪切不受任何影响——
+            可用下方滑条和入点/出点数字设置区间（时长、帧率信息正常），产物完整无损。
+          </div>
+        </div>
         <div class="mark-btns">
-          <NButton size="tiny" @click="seekTo(startSec)">← 入点</NButton>
-          <NButton size="tiny" type="primary" @click="markStart">设为入点</NButton>
-          <NButton size="tiny" type="primary" @click="markEnd">设为出点</NButton>
-          <NButton size="tiny" @click="seekTo(endSec)">出点 →</NButton>
+          <NButton size="tiny" :disabled="previewBroken" @click="seekTo(startSec)">← 入点</NButton>
+          <NButton size="tiny" type="primary" :disabled="previewBroken" @click="markStart">设为入点</NButton>
+          <NButton size="tiny" type="primary" :disabled="previewBroken" @click="markEnd">设为出点</NButton>
+          <NButton size="tiny" :disabled="previewBroken" @click="seekTo(endSec)">出点 →</NButton>
         </div>
       </div>
 
@@ -274,7 +283,7 @@ function toSr() {
 .title { font-size: 20px; font-weight: 600; margin-bottom: 2px; }
 .subtitle { font-size: 13px; color: #9aa0a6; margin-bottom: 16px; }
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.preview-wrap { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.preview-wrap { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; position: relative; }
 .preview {
   width: 100%;
   max-height: 420px;
@@ -282,6 +291,21 @@ function toSr() {
   border-radius: 8px;
   outline: none;
 }
+.preview-broken {
+  position: absolute;
+  inset: 0 0 46px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #0d0e10;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+}
+.pb-title { font-size: 14px; font-weight: 600; color: #fbbf24; }
+.pb-desc { font-size: 12.5px; color: #9aa0a6; max-width: 520px; line-height: 1.7; }
 .mark-btns { display: flex; gap: 8px; justify-content: center; }
 .panel { background: #1a1c1f; }
 .row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }

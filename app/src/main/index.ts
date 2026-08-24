@@ -3,18 +3,15 @@
  * 关键策略：sidecar detached 拉起 —— UI 崩溃/退出时任务进程不受影响；
  * 有任务运行时退出 UI 不杀 sidecar，重启后自动复用。
  */
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
 import fs from 'node:fs'
-import { Readable } from 'node:stream'
 
-// 本地视频预览协议：渲染进程 <video src="svvideo:///D%3A%2F...">。
-// 必须在 app ready 前注册 scheme（stream 特权支持视频随读随解）
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'svvideo', privileges: { stream: true, bypassCSP: true } },
-])
+// 本地视频预览：webSecurity:false 下 <video> 直接 file:// 加载（见 createWindow 注释），
+// 渲染进程用 api.ts 的 mediaSrc() 构造地址
+
 
 let mainWindow: BrowserWindow | null = null
 let sidecar: ChildProcess | null = null
@@ -190,6 +187,10 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // 关闭同源限制：允许 <video> 直接用 file:// 播本地视频——Chromium 原生文件
+      // 加载器自带 Range 与 moov 尾部索引处理（自定义协议不做尾部探测，moov 在尾的
+      // 大 MP4 直接黑屏；转 faststart 影子文件又要吃磁盘）。纯本地单用户工具，风险可控
+      webSecurity: false,
     },
   })
   mainWindow.once('ready-to-show', () => mainWindow?.show())
@@ -251,6 +252,45 @@ function sliceNotes(notes: string, version: string): string {
   return section.slice(`v${version}`.length).trim()
 }
 
+/** electron-updater 的 GitHub provider 把 release 正文渲染成 HTML（<h1>/<ul>…），
+ * 设置页按纯文本展示会直接露出标签；无依赖地转成干净文本行。 */
+function htmlToText(html: string): string {
+  const s = html
+    .replace(/>\s+</g, '><') // 去掉标签间源码换行，避免块级标签换行后叠加出空行
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|li|h1|h2|h3|h4|ul|ol|div)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '- ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&amp;/gi, '&')
+  return s
+    .split('\n')
+    .map((l) => l.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** 正文清洗：HTML→文本（去掉文档标题/版本号行，弹窗已单独显示版本）；markdown 则按版本分节 */
+function cleanNotes(raw: unknown, version: string): string {
+  const notes = normalizeNotes(raw)
+  if (/<\/(p|li|ul|h\d|div)>/i.test(notes)) {
+    const lines = htmlToText(notes).split('\n')
+    while (
+      lines.length &&
+      (!lines[0] || lines[0] === '更新说明' || /^v?\d+\.\d+\.\d+$/.test(lines[0]))
+    ) {
+      lines.shift()
+    }
+    return lines.join('\n')
+  }
+  return sliceNotes(notes, version)
+}
+
 function broadcast(channel: string, payload: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
 }
@@ -289,7 +329,7 @@ async function checkUpdateManually(): Promise<{
         status: 'available',
         current,
         version: newVersion,
-        notes: sliceNotes(normalizeNotes(r?.updateInfo?.releaseNotes), newVersion),
+        notes: cleanNotes(r?.updateInfo?.releaseNotes, newVersion),
       }
     }
     return { status: 'latest', current, version: newVersion }
@@ -318,49 +358,7 @@ function installUpdate(): void {
   getAutoUpdater().quitAndInstall(true, true)
 }
 
-/** svvideo:/// -> 本地视频文件流（剪切页预览、对比页双视频播放用）。
- * Range/206 必须自己实现：net.fetch(file://) 实测会丢失 Content-Length 且把
- * Range 请求当 200 全量返回（Electron 43 验证），<video> 拿不到字节范围响应
- * 就无法拖动进度条。URL 里盘符前的 "/" 需剥掉，否则路径被拼成 D:/D:/。 */
-const SV_MIME: Record<string, string> = {
-  '.mp4': 'video/mp4',
-  '.m4v': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.webm': 'video/webm',
-  '.mkv': 'video/x-matroska',
-}
-
-async function serveSvVideo(req: Request): Promise<Response> {
-  const p = decodeURIComponent(new URL(req.url).pathname).replace(/^\/([A-Za-z]:[\\/])/, '$1')
-  const stat = await fs.promises.stat(p).catch(() => null)
-  if (!stat?.isFile()) return new Response('not found', { status: 404 })
-  const size = stat.size
-  const mime = SV_MIME[path.extname(p).toLowerCase()] ?? 'application/octet-stream'
-  const m = /bytes=(\d+)-(\d+)?/.exec(req.headers.get('range') ?? '')
-  if (m) {
-    const start = Math.min(Number(m[1]), Math.max(size - 1, 0))
-    const end = Math.min(m[2] ? Number(m[2]) : size - 1, size - 1)
-    return new Response(Readable.toWeb(fs.createReadStream(p, { start, end })) as unknown as BodyInit, {
-      status: 206,
-      headers: {
-        'Content-Type': mime,
-        'Content-Length': String(end - start + 1),
-        'Content-Range': `bytes ${start}-${end}/${size}`,
-        'Accept-Ranges': 'bytes',
-      },
-    })
-  }
-  return new Response(Readable.toWeb(fs.createReadStream(p)) as unknown as BodyInit, {
-    headers: {
-      'Content-Type': mime,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': String(size),
-    },
-  })
-}
-
 app.whenReady().then(async () => {
-  protocol.handle('svvideo', serveSvVideo)
   try {
     await reapStaleSidecars()
     await startOrReuseSidecar()
