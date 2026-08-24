@@ -9,3 +9,4 @@ pytest
 fastapi
 httpx2
 uvicorn
+websockets

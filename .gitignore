@@ -27,5 +27,4 @@ app/.vite/
 data/settings.json
 backend/dist/
 dist-app/
-app/build/*.ico
 backend/build/

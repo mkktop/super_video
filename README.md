@@ -53,10 +53,11 @@ git tag v0.1.1 && git push origin v0.1.1
 
 本地打包（不走 CI）：`backend` 下 `pyinstaller sidecar.spec --noconfirm`，再 `app` 下 `pnpm dist`。
 
-**模型分发**：AnimeVideo x2/x4 与 x4plus 动态版随仓库 `backend/sv/models/bundled/` 分发
-（安装包内置，开箱即用；x4plus 由 `backend/scripts/export_onnx_x4plus.py` 从官方权重导出，
-注意导出非字节级确定，故以仓库内文件为准）；模型市场全部下载源统一为本仓库
-`models-v1` Release（CUGAN/RIFE/pth 一次性人工上传，其余由发布流水线自动同步），不依赖第三方直链。
+**模型分发**：只内置小模型（AnimeVideo x2/x4 约 7MB，随仓库 `backend/sv/models/bundled/`
+分发，安装包瘦身且开箱即用）；x4plus 等大模型按需从 models-v1 下载。模型市场全部下载源
+统一为本仓库 `models-v1` Release（CUGAN/RIFE/pth 一次性人工上传，其余由发布流水线自动
+同步），不依赖第三方直链。x4plus ONNX 由 `backend/scripts/export_onnx_x4plus.py` 从官方
+权重导出（导出非字节级确定，故以仓库 models-v1 上的资产为准）。
 
 ## 里程碑
 

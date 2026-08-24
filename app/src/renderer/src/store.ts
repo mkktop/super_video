@@ -79,14 +79,13 @@ function handleWsEvent(raw: MessageEvent) {
 }
 
 function connectWs() {
+  // WS 只做事件推送；连接灯由 HTTP 轮询单独判定，避免单通道失败时来回闪
   const ws = new WebSocket(wsUrl())
   ws.onopen = () => {
-    store.connected = true
     refreshTasks()
   }
   ws.onmessage = handleWsEvent
   ws.onclose = () => {
-    store.connected = false
     setTimeout(connectWs, 2000)
   }
   ws.onerror = () => ws.close()

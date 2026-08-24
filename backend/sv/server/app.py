@@ -177,8 +177,8 @@ def get_models() -> list[dict]:
     )
     out = []
     for spec in load_registry().values():
-        bundled = all(
-            (BUNDLED_DIR / f["name"]).exists() for f in spec.files if "url" not in f
+        bundled = bool(spec.files) and all(
+            (BUNDLED_DIR / f["name"]).exists() for f in spec.files
         )
         size_mb = round(sum(f.get("size", 0) for f in spec.files) / 1e6, 1)
         vram_ok = gpu_vram is None or spec.vram_gb <= gpu_vram
