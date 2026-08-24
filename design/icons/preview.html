@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>super_video 图标方案</title>
+<style>
+  body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:#121826;color:#E8EDF6;margin:0;padding:36px 40px}
+  h1{font-size:20px;margin:0 0 6px}
+  .sub{color:#8C99B5;font-size:13px;margin:0 0 28px;line-height:1.7}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:20px}
+  .card{background:#1C2436;border:1px solid #2A3550;border-radius:16px;padding:20px}
+  .card h2{font-size:15px;margin:16px 0 4px}
+  .card p{margin:0;color:#8C99B5;font-size:12.5px;line-height:1.6}
+  .tag{display:inline-block;background:#4F8CFF;color:#fff;border-radius:6px;padding:0 8px;font-size:12px;margin-right:8px;font-weight:600}
+  .stage{display:flex;align-items:center;justify-content:center;height:230px;border-radius:12px;
+    background:repeating-conic-gradient(#1A2133 0% 25%, #202942 0% 50%) 50%/24px 24px}
+  .row{display:flex;align-items:flex-end;gap:16px;border-radius:10px;padding:12px 14px;margin-top:10px}
+  .light{background:#F3F6FB}
+  .dark{background:#0A0E18}
+  .row span{font-size:11px;color:#8892A6;align-self:center;margin-left:auto}
+  img{display:block}
+</style>
+<h1>super_video — 应用图标方案（6 选 1）</h1>
+<p class="sub">每张卡片：大图 220px 预览 + 浅色/深色背景下的 64 / 32 / 16px 效果（小尺寸即任务栏实际观感，棋盘格代表透明背景）。<br>
+选定后回复编号（例如「选 B」），我会生成完整 icon.ico / PNG 套件并接入构建、窗口与安装程序。</p>
+<div class="grid">
+
+  <div class="card">
+    <div class="stage"><img src="A-sparkle.svg" width="220" height="220"></div>
+    <div class="row light"><img src="A-sparkle.svg" width="64" height="64"><img src="A-sparkle.svg" width="32" height="32"><img src="A-sparkle.svg" width="16" height="16"><span>浅色任务栏 64/32/16</span></div>
+    <div class="row dark"><img src="A-sparkle.svg" width="64" height="64"><img src="A-sparkle.svg" width="32" height="32"><img src="A-sparkle.svg" width="16" height="16"><span>深色任务栏</span></div>
+    <h2><span class="tag">A</span>星芒播放</h2>
+    <p>蓝→紫渐变圆角块，白色播放键 + 双星芒点缀。现代 AI 应用气质，小尺寸辨识度最高，最稳妥的一档。</p>
+  </div>
+
+  <div class="card">
+    <div class="stage"><img src="B-evolution.svg" width="220" height="220"></div>
+    <div class="row light"><img src="B-evolution.svg" width="64" height="64"><img src="B-evolution.svg" width="32" height="32"><img src="B-evolution.svg" width="16" height="16"><span>浅色任务栏 64/32/16</span></div>
+    <div class="row dark"><img src="B-evolution.svg" width="64" height="64"><img src="B-evolution.svg" width="32" height="32"><img src="B-evolution.svg" width="16" height="16"><span>深色任务栏</span></div>
+    <h2><span class="tag">B</span>画质进化</h2>
+    <p>对角线分割：左下粗糙像素格 → 右上明亮渐变，一个图标讲完「超分前后对比」的故事，最切题。</p>
+  </div>
+
+  <div class="card">
+    <div class="stage"><img src="C-lens.svg" width="220" height="220"></div>
+    <div class="row light"><img src="C-lens.svg" width="64" height="64"><img src="C-lens.svg" width="32" height="32"><img src="C-lens.svg" width="16" height="16"><span>浅色任务栏 64/32/16</span></div>
+    <div class="row dark"><img src="C-lens.svg" width="64" height="64"><img src="C-lens.svg" width="32" height="32"><img src="C-lens.svg" width="16" height="16"><span>深色任务栏</span></div>
+    <h2><span class="tag">C</span>超清放大镜</h2>
+    <p>放大镜 + 播放键，透明底不锁形状。「放大 / 提升」含义最直白，一眼能懂，但同类应用用得多。</p>
+  </div>
+
+  <div class="card">
+    <div class="stage"><img src="D-expand.svg" width="220" height="220"></div>
+    <div class="row light"><img src="D-expand.svg" width="64" height="64"><img src="D-expand.svg" width="32" height="32"><img src="D-expand.svg" width="16" height="16"><span>浅色任务栏 64/32/16</span></div>
+    <div class="row dark"><img src="D-expand.svg" width="64" height="64"><img src="D-expand.svg" width="32" height="32"><img src="D-expand.svg" width="16" height="16"><span>深色任务栏</span></div>
+    <h2><span class="tag">D</span>放大播放</h2>
+    <p>青→蓝渐变 + 四角外扩括号包住播放键，借「全屏放大」手势表达「放大看」，几何感强、干净利落。</p>
+  </div>
+
+  <div class="card">
+    <div class="stage"><img src="E-gem.svg" width="220" height="220"></div>
+    <div class="row light"><img src="E-gem.svg" width="64" height="64"><img src="E-gem.svg" width="32" height="32"><img src="E-gem.svg" width="16" height="16"><span>浅色任务栏 64/32/16</span></div>
+    <div class="row dark"><img src="E-gem.svg" width="64" height="64"><img src="E-gem.svg" width="32" height="32"><img src="E-gem.svg" width="16" height="16"><span>深色任务栏</span></div>
+    <h2><span class="tag">E</span>晶莹清晰</h2>
+    <p>浅底 + 蓝色宝石切面内嵌播放键，主打「清晰、焕新」的质感路线，六款里唯一浅色底，风格最独特。</p>
+  </div>
+
+  <div class="card">
+    <div class="stage"><img src="F-pixel.svg" width="220" height="220"></div>
+    <div class="row light"><img src="F-pixel.svg" width="64" height="64"><img src="F-pixel.svg" width="32" height="32"><img src="F-pixel.svg" width="16" height="16"><span>浅色任务栏 64/32/16</span></div>
+    <div class="row dark"><img src="F-pixel.svg" width="64" height="64"><img src="F-pixel.svg" width="32" height="32"><img src="F-pixel.svg" width="16" height="16"><span>深色任务栏</span></div>
+    <h2><span class="tag">F</span>像素进化</h2>
+    <p>深蓝底 + 8-bit 像素风播放键 + 像素星花。主打 ACG/动漫老片修复的复古趣味，与 Real-CUGAN 等动漫模型气质契合。</p>
+  </div>
+
+</div>
