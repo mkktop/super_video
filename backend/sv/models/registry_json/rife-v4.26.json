@@ -16,8 +16,7 @@
   "io": {"color": "rgb", "range": "0-1"},
   "files": [
     {"name": "rife_v4.26.onnx",
-     "url": "https://github.com/AmusementClub/vs-mlrt/releases/download/external-models/rife_v4.26.7z",
-     "archive": "rife_v2/rife_v4.26.onnx",
+     "url": "https://github.com/mkktop/super_video/releases/download/models-v1/rife_v4.26.onnx",
      "sha256": "af25762dfec02a4bbb949decea63988b01fa56c46c0ff9dc66ac8e2f12cbb661",
      "size": 22748049}
   ]

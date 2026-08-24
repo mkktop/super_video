@@ -77,10 +77,22 @@ jobs:
           }
           if ($keep.draft) { gh release edit $tag --draft=false --title $tag }
 
-      - name: 模型资产上传到 models-v1 Release（供重装/旧版本下载）
+      - name: 模型资产同步到 models-v1 Release（注册表驱动，缺什么补什么）
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create models-v1 --title "模型资产" --notes "x4plus 动态尺寸 ONNX" 2>$null
-          gh release upload models-v1 backend/sv/models/bundled/RealESRGAN_x4plus_dyn.onnx --clobber
+          gh release create models-v1 --title "模型资产" --notes "应用内模型市场全部下载源" 2>$null
+          $existing = gh release view models-v1 --json assets --jq '.assets[].name'
+          # 注册表 url 指向 models-v1 且随仓库 bundled 的文件才需要同步；
+          # CUGAN/RIFE/pth 等外部模型已上传过，仓库里没有副本，自然跳过
+          $want = Get-ChildItem backend/sv/models/registry_json/*.json | ForEach-Object {
+            (Get-Content $_ -Raw | ConvertFrom-Json).files | Where-Object { $_.url -match 'models-v1' } | ForEach-Object { $_.name }
+          }
+          foreach ($name in $want) {
+            $p = "backend/sv/models/bundled/$name"
+            if (-not (Test-Path $p)) { continue }
+            if ($existing -contains $name) { Write-Host "已存在，跳过 $name"; continue }
+            gh release upload models-v1 $p
+            Write-Host "已上传 $name"
+          }

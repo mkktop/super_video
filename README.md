@@ -48,14 +48,15 @@ cd app && pnpm dist
 ```bash
 git tag v0.1.1 && git push origin v0.1.1
 # GitHub Actions 自动: PyInstaller sidecar -> electron-builder -> 上传
-# setup.exe / blockmap / latest.yml 到对应 Release，并同步 x4plus 模型资产到 models-v1
+# setup.exe / blockmap / latest.yml 到对应 Release，并同步模型资产到 models-v1
 ```
 
 本地打包（不走 CI）：`backend` 下 `pyinstaller sidecar.spec --noconfirm`，再 `app` 下 `pnpm dist`。
 
 **模型分发**：AnimeVideo x2/x4 与 x4plus 动态版随仓库 `backend/sv/models/bundled/` 分发
 （安装包内置，开箱即用；x4plus 由 `backend/scripts/export_onnx_x4plus.py` 从官方权重导出，
-注意导出非字节级确定，故以仓库内文件为准）；CUGAN/RIFE/torch 模型按需从各官方 GitHub Release 下载。
+注意导出非字节级确定，故以仓库内文件为准）；模型市场全部下载源统一为本仓库
+`models-v1` Release（CUGAN/RIFE/pth 一次性人工上传，其余由发布流水线自动同步），不依赖第三方直链。
 
 ## 里程碑
 
