@@ -39,6 +39,7 @@ class MediaInfo:
     color_transfer: str
     audio: list[AudioStream] = field(default_factory=list)
     subtitle_count: int = 0
+    subtitles: list[str] = field(default_factory=list)  # 字幕流编码名（subrip/hdmv_pgs_subtitle…）
     total_frames: int = 0
 
     @property
@@ -116,7 +117,7 @@ def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
         for s in data.get("streams", [])
         if s.get("codec_type") == "audio"
     ]
-    subs = sum(1 for s in data.get("streams", []) if s.get("codec_type") == "subtitle")
+    subs = [s for s in data.get("streams", []) if s.get("codec_type") == "subtitle"]
 
     pix_fmt = v.get("pix_fmt", "yuv420p")
     info = MediaInfo(
@@ -133,7 +134,8 @@ def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
         bit_depth=_bit_depth(pix_fmt),
         color_transfer=v.get("color_transfer", "bt709") or "bt709",
         audio=audio,
-        subtitle_count=subs,
+        subtitle_count=len(subs),
+        subtitles=[s.get("codec_name", "?") for s in subs],
     )
 
     if vfr:

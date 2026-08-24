@@ -1,0 +1,33 @@
+{
+  "vendor": "the-database",
+  "license": "上游发布包自由分发（mpv-AnimeJaNai）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [
+    2
+  ],
+  "content": [
+    "anime"
+  ],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 4
+  },
+  "id": "animejanai-v3-hd-l2",
+  "name": "AnimeJaNai V3 HD L2（均衡）",
+  "description": "V3 HD UltraCompact：速度画质均衡主力档",
+  "files": [
+    {
+      "name": "2x_AnimeJaNai_HD_V3_UltraCompact.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3_UltraCompact.onnx",
+      "sha256": "1d270c7f7d9a09bb3af59cca4f79e1554c429c804255dccef0963d263f843c22",
+      "size": 1223259
+    }
+  ]
+}

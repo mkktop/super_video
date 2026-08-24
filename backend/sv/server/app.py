@@ -33,6 +33,7 @@ from . import db
 from .engine_select import select_engine
 from .events import EventBus
 from .hardware import hardware_info
+from .perf import INTERVAL_S, PerfSampler
 from .runner import Runner
 from .settings import DEFAULTS, load as load_settings, save as save_settings
 
@@ -40,6 +41,7 @@ log = logging.getLogger("sv.app")
 
 bus = EventBus()
 runner = Runner(bus)
+perf = PerfSampler(bus, runner)
 _download_lock = asyncio.Lock()
 
 # 硬件探测含 nvidia-smi/NVENC 试编码，按 60s 缓存
@@ -66,8 +68,10 @@ def _presets() -> list[dict]:
 async def lifespan(app: FastAPI):
     db.init_db()
     runner.start()
+    perf.start()
     yield
     await runner.stop()
+    perf.stop()
 
 
 app = FastAPI(title="super_video sidecar", version="0.1.0", lifespan=lifespan)
@@ -105,6 +109,12 @@ def health() -> dict:
 @app.get("/api/hardware")
 def get_hardware() -> dict:
     return cached_hardware()
+
+
+@app.get("/api/perf/history")
+def perf_history() -> dict:
+    """性能采样快照:本次启动内的全部历史(环形缓冲最近 1 小时)。"""
+    return {"interval_s": INTERVAL_S, "samples": perf.snapshot()}
 
 
 @app.get("/api/engine")
@@ -149,6 +159,7 @@ def probe_media(body: ProbeBody) -> dict:
         "total_frames": info.total_frames,
         "codec": info.video_codec, "pix_fmt": info.pix_fmt,
         "has_audio": info.has_audio,
+        "subtitles": info.subtitles,
     }
 
 
@@ -187,6 +198,12 @@ def get_models() -> list[dict]:
         )
         size_mb = round(sum(f.get("size", 0) for f in spec.files) / 1e6, 1)
         vram_ok = gpu_vram is None or spec.vram_gb <= gpu_vram
+        # denoise 档位：registry files 里 variant=denoiseN 的集合（real-cugan 专属概念）
+        denoise_levels = sorted({
+            int(f["variant"][7:]) for f in spec.files
+            if str(f.get("variant", "")).startswith("denoise")
+            and str(f["variant"])[7:].isdigit()
+        })
         out.append({
             "id": spec.id, "name": spec.name, "scale": spec.scale,
             "kind": spec.kind,
@@ -200,6 +217,7 @@ def get_models() -> list[dict]:
             "vram_note": None if vram_ok else (
                 f"需要约 {spec.vram_gb}GB 显存，本机 {gpu_vram}GB"
             ),
+            "denoise_levels": denoise_levels,
         })
     return out
 
@@ -319,6 +337,17 @@ async def download_model(model_id: str) -> dict:
 # ---- 任务 ----
 
 
+# codec → 硬件能力位（None = 软编总是可用）
+_CODECS = {
+    "h264": None, "h265": None,
+    "h264_nvenc": "nvenc", "hevc_nvenc": "nvenc", "av1_nvenc": "av1_nvenc",
+    "h264_amf": "amf", "hevc_amf": "amf",
+    "av1_svt": "svt_av1",
+}
+_AUDIO_MODES = ("auto", "copy", "aac", "flac", "none")
+_CONTAINERS = ("mp4", "mkv", "mov")
+
+
 @app.post("/api/tasks", status_code=201)
 def create_task(body: TaskCreate) -> dict:
     input_path = Path(body.input)
@@ -368,18 +397,33 @@ def create_task(body: TaskCreate) -> dict:
         raise HTTPException(400, "out_kind 仅支持 video / png / jpg")
     params["out_kind"] = out_kind
     codec = params.get("codec", "h264")
-    if codec not in ("h264", "h265", "h264_nvenc", "hevc_nvenc"):
-        raise HTTPException(400, "codec 仅支持 h264/h265/h264_nvenc/hevc_nvenc")
-    if codec.endswith("_nvenc") and not hardware_info().get("nvenc"):
-        raise HTTPException(400, "本机 NVENC 不可用，请选择软件编码")
+    if codec not in _CODECS:
+        raise HTTPException(400, f"codec 仅支持 {' / '.join(_CODECS)}")
+    hw_flag = _CODECS[codec]
+    if hw_flag and not cached_hardware().get(hw_flag):
+        raise HTTPException(400, f"本机 {hw_flag} 不可用，请选择软件编码")
     params["codec"] = codec
+    container = params.get("container", "mp4")
+    if container not in _CONTAINERS:
+        raise HTTPException(400, "container 仅支持 mp4 / mkv / mov")
+    params["container"] = container
+    audio_mode = params.get("audio_mode", "auto")
+    if audio_mode not in _AUDIO_MODES:
+        raise HTTPException(400, f"audio_mode 仅支持 {' / '.join(_AUDIO_MODES)}")
+    if audio_mode == "flac" and container != "mkv":
+        raise HTTPException(400, "FLAC 音轨仅支持 mkv 容器（mp4 请选 aac）")
+    params["audio_mode"] = audio_mode
+    subtitle_mode = params.get("subtitle_mode", "none")
+    if subtitle_mode not in ("none", "auto"):
+        raise HTTPException(400, "subtitle_mode 仅支持 none / auto")
+    params["subtitle_mode"] = subtitle_mode
     interp = params.get("interp", "off")
     if interp not in ("off", "rife2x"):
         raise HTTPException(400, "interp 仅支持 off / rife2x")
     params["interp"] = interp
     if params.get("denoise") is not None:
-        if int(params["denoise"]) not in (0, 3):
-            raise HTTPException(400, "denoise 仅支持 0 / 3")
+        if int(params["denoise"]) not in (0, 1, 2, 3):
+            raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
         params["denoise"] = int(params["denoise"])
     crf = params.get("crf", 18)
     if not (0 <= int(crf) <= 51):
@@ -389,7 +433,7 @@ def create_task(body: TaskCreate) -> dict:
     res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
     if out_kind == "video":
         out = body.output or str(
-            input_path.with_name(f"{input_path.stem}_{res_label}{input_path.suffix or '.mp4'}")
+            input_path.with_name(f"{input_path.stem}_{res_label}.{container}")
         )
     else:
         # 图片序列：输出是文件夹，帧图按 000001.png 起逐帧编号

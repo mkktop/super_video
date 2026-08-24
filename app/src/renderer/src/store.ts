@@ -7,6 +7,7 @@ import {
   type ModelInfo,
   type Preset,
   type Stats,
+  type PerfSample,
 } from './api'
 
 export const store = reactive({
@@ -19,18 +20,25 @@ export const store = reactive({
   downloadProgress: {} as Record<string, number>, // model_id -> 0~1
   gpuName: '',
   engine: null as null | { backend: string; python: string; detail: string },
+  perf: {
+    latest: null as PerfSample | null,
+    samples: [] as PerfSample[], // 最近 1 小时,与后端环形缓冲同步
+  },
   hardware: null as null | {
     gpus: Array<{ name: string; vram_gb: number | null }>
     cpu: string
     cpu_cores: number
     ram_gb: number
     nvenc?: boolean
+    av1_nvenc?: boolean
+    amf?: boolean
+    svt_av1?: boolean
   },
 })
 
 /** 界面状态：当前页 / 新建任务弹窗 / 全页对比 */
 export const ui = reactive({
-  page: 'home' as 'home' | 'trim' | 'tasks' | 'models' | 'settings' | 'compare',
+  page: 'home' as 'home' | 'trim' | 'tasks' | 'models' | 'perf' | 'settings' | 'compare',
   showNewTask: false,
   compareTaskId: null as string | null,
   pendingInput: null as string | null, // 打开向导时预填的输入（剪切→超分衔接）
@@ -98,6 +106,17 @@ export async function refreshStats() {
   }
 }
 
+/** 拉性能历史快照(整段替换);断线期间服务端继续缓冲,重连后由此补齐 */
+export async function refreshPerf() {
+  try {
+    const h = await api.perfHistory()
+    store.perf.samples = h.samples
+    store.perf.latest = h.samples[h.samples.length - 1] ?? null
+  } catch {
+    /* 性能历史失败不致命,WS 推送会继续补点 */
+  }
+}
+
 /** 兜底轮询：WS 健康时事件推送是主通道，降频到 8s；WS 断开回到 1.5s 保实时。
  *  页面隐藏时跳过刷新（visibilitychange 恢复时立即刷一次）。 */
 function schedulePoll() {
@@ -119,6 +138,14 @@ export async function refreshModels() {
 function handleWsEvent(raw: MessageEvent) {
   try {
     const ev = JSON.parse(String(raw.data))
+    // 性能采样 2s 一拍就地入库,必须 return:落入末尾兜底会每拍触发一次全量任务刷新
+    if (ev.type === 'perf') {
+      const s = ev as PerfSample
+      store.perf.latest = s
+      store.perf.samples.push(s)
+      if (store.perf.samples.length > 1800) store.perf.samples.shift()
+      return
+    }
     if (ev.type === 'model_download') {
       const id: string = ev.model_id
       if (ev.done || ev.failed) {
@@ -144,6 +171,7 @@ function connectWs() {
   ws.onopen = () => {
     wsOk = true
     refreshTasks()
+    refreshPerf()
     schedulePoll()
   }
   ws.onmessage = handleWsEvent
@@ -162,7 +190,7 @@ export async function initStore() {
   store.hardware = (await api.hardware()) as NonNullable<typeof store.hardware>
   store.gpuName = store.hardware.gpus?.[0]?.name ?? '未知显卡'
   store.engine = await api.engine()
-  await Promise.all([refreshTasks(), refreshStats()])
+  await Promise.all([refreshTasks(), refreshStats(), refreshPerf()])
   connectWs()
   schedulePoll()
   document.addEventListener('visibilitychange', () => {

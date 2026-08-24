@@ -31,6 +31,19 @@ from sv.pipeline.stream import EncodeOpts, PipelineError, TaskCanceled
 from sv.server import db, settings
 
 
+def _encode_opts(params: dict, out_kind: str) -> EncodeOpts:
+    """任务参数 → 编码选项（app.py 已做过白名单校验，此处 defensive 再夹一层默认值）。"""
+    return EncodeOpts(
+        codec=params.get("codec", "h264"),
+        crf=int(params.get("crf", 18)),
+        preset=params.get("preset", "medium"),
+        audio_mode=params.get("audio_mode", "auto"),
+        subtitle_mode=params.get("subtitle_mode", "none"),
+        container=params.get("container", "mp4"),
+        out_kind=out_kind,
+    )
+
+
 def emit(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 
@@ -91,11 +104,13 @@ def main(task_id: str) -> int:
     if out_kind not in ("video", "png", "jpg"):
         emit({"type": "failed", "error": f"未知输出类型 {out_kind}"})
         return 1
-    denoise = params.get("denoise")  # real-cugan 降噪档：3 → denoise3 变体
-    variant = f"denoise{int(denoise)}" if denoise else None
+    denoise = params.get("denoise")  # real-cugan 降噪档：0/1/2/3 → 对应变体权重
+    variant = f"denoise{int(denoise)}" if denoise is not None else None
 
     try:
-        manager.ensure_downloaded(spec)
+        from sv.models.registry import file_for_scale
+        need = file_for_scale(spec, scale, variant)  # 只下本任务用到的权重
+        manager.ensure_files(spec, [need])
     except Exception as e:  # 下载/校验失败
         emit({"type": "failed", "error": f"模型文件不可用: {e}"})
         return 1
@@ -155,12 +170,7 @@ def main(task_id: str) -> int:
 
         pipeline = ChunkedPipeline(
             info, output_path, engine,
-            EncodeOpts(
-                codec=params.get("codec", "h264"),
-                crf=int(params.get("crf", 18)),
-                preset=params.get("preset", "medium"),
-                out_kind=out_kind,
-            ),
+            _encode_opts(params, out_kind),
             task_id=task_id, chunk=int(params.get("chunk") or 32),
             progress_cb=on_progress,
             preview_path=preview_dir / f"{task_id}.jpg",
@@ -188,9 +198,11 @@ def main(task_id: str) -> int:
         return 0
 
     weight = model_file(spec, scale, precision, variant)
-    if precision == "fp16" and not weight.stem.endswith("_fp16"):
+    # 惰性补转 fp16（一次），失败回退 fp32；spec.fp16=False 的模型（如 real-cugan，
+    # 转换后 ShapeInference 崩）直接用 fp32 原件
+    if precision == "fp16" and spec.fp16 and not weight.stem.endswith("_fp16"):
         emit({"type": "log", "line": f"生成 fp16 变体: {weight.name}"})
-        weight = ensure_fp16_file(weight)  # 惰性补转（一次），失败回退 fp32
+        weight = ensure_fp16_file(weight)
     used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
 
     def _oom(e: Exception) -> bool:
@@ -198,10 +210,14 @@ def main(task_id: str) -> int:
         return "memory" in t or "alloc" in t or "oom" in t
 
     tile = int(params.get("tile") or spec.tile_hint)
+    # 推理后端：设置 engine=trt 时走 TensorRT 链（TRT 不可用引擎层自动回退）
+    ort_device = "trt" if settings.load().get("engine") == "trt" else "auto"
     engine = None
     for _ in range(3):  # 显存不足自动降档：tile 逐步减半
         try:
-            engine = OnnxSrEngine(weight, scale, io=spec.io, tile=tile, batch=batch)
+            engine = OnnxSrEngine(
+                weight, scale, io=spec.io, tile=tile, batch=batch,
+                device=ort_device)
             engine.load()
             import numpy as np
             engine.process(np.zeros((64, 64, 3), dtype=np.uint8))  # 预热兼显存探测
@@ -228,12 +244,7 @@ def main(task_id: str) -> int:
     # 分段管线：取消/崩溃后"继续"可跳过已完成段（checkpoint 在 .tmp/segmented/<task_id>）
     pipeline = SegmentedPipeline(
         info, output_path, engine,
-        EncodeOpts(
-            codec=params.get("codec", "h264"),
-            crf=int(params.get("crf", 18)),
-            preset=params.get("preset", "medium"),
-            out_kind=out_kind,
-        ),
+        _encode_opts(params, out_kind),
         task_id=task_id,
         progress_cb=on_progress, preview_path=preview_path,
         src_preview_path=src_preview_path,

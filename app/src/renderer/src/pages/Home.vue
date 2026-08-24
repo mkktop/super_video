@@ -21,6 +21,14 @@ const runPercent = computed(() => {
   return Math.min(100, Math.round((r.progress_frames / r.total_frames) * 100))
 })
 
+function fmtEta(sec: number): string {
+  if (!sec || sec < 0) return '—'
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = Math.floor(sec % 60)
+  return h ? `${h}时${m}分` : m ? `${m}分${s}秒` : `${s}秒`
+}
+
 const hw = computed(() => store.hardware)
 </script>
 
@@ -53,7 +61,9 @@ const hw = computed(() => store.hardware)
       </div>
       <div class="run-progress">
         <NProgress type="line" :percentage="runPercent" :show-indicator="false" :height="10" processing />
-        <span class="run-pct">{{ runPercent }}% · {{ running.progress_frames }}/{{ running.total_frames }} 帧</span>
+        <span class="run-pct">
+          {{ runPercent }}% · {{ running.progress_frames }}/{{ running.total_frames }} 帧<template v-if="running.fps_run"> · {{ running.fps_run.toFixed(1) }} 帧/秒 · 剩余 {{ fmtEta(running.eta_sec) }}</template>
+        </span>
       </div>
     </section>
 

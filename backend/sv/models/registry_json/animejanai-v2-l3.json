@@ -1,0 +1,33 @@
+{
+  "vendor": "the-database",
+  "license": "上游发布包自由分发（mpv-AnimeJaNai）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [
+    2
+  ],
+  "content": [
+    "anime"
+  ],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": false,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 4
+  },
+  "id": "animejanai-v2-l3",
+  "name": "AnimeJaNai V2 L3（画质）",
+  "description": "Compact 36k：V2 画质最高档，动漫社区口碑模型（比 AnimeVideo 更锐）",
+  "files": [
+    {
+      "name": "2x_AnimeJaNai_V2_Compact_36k.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_V2_Compact_36k.onnx",
+      "sha256": "b9e0c4bb78a1e621d52f9801a63fff079709e8a561fe7661a5b720746aef6db0",
+      "size": 1206372
+    }
+  ]
+}

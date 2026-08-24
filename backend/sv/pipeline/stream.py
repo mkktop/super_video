@@ -16,14 +16,30 @@ from .probe import MediaInfo
 
 _MP4_AUDIO_COPY_OK = {"aac", "mp3", "ac3", "eac3", "alac"}
 
+# 文本字幕（可转 mov_text 进 mp4）；图形字幕（PGS/DVB 等）只能进 mkv 原样保留
+_TEXT_SUBS = {
+    "subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "sami",
+    "microdvd", "subviewer", "vplayer", "realtext", "stl", "pjs", "jacosub",
+    "mpl2", "subviewer1", "pjs",
+}
+
+CONTAINERS = ("mp4", "mkv", "mov")
+
 
 @dataclass
 class EncodeOpts:
-    codec: str = "h264"  # h264 | h265 | h264_nvenc | hevc_nvenc
+    codec: str = "h264"  # h264 | h265 | h264_nvenc | hevc_nvenc | av1_nvenc |
+    #                    # h264_amf | hevc_amf | av1_svt
     crf: int = 18
     preset: str = "medium"
-    audio_mode: str = "auto"  # auto: 兼容则 copy，否则转 aac；none: 丢弃音轨
+    audio_mode: str = "auto"  # auto: 兼容则 copy 否则 aac | copy | aac | flac(仅mkv) | none
+    subtitle_mode: str = "none"  # none | auto（mkv 原样保留；mp4/mov 仅全文本字幕时转 mov_text）
+    container: str = "mp4"  # mp4 | mkv | mov
     out_kind: str = "video"  # video | png | jpg——图片序列=整视频逐帧导出（无音轨）
+
+    @property
+    def mp4_family(self) -> bool:
+        return self.container in ("mp4", "mov")
 
 
 @dataclass
@@ -91,7 +107,41 @@ _VCODECS = {
     "h265": "libx265",
     "h264_nvenc": "h264_nvenc",
     "hevc_nvenc": "hevc_nvenc",
+    "av1_nvenc": "av1_nvenc",
+    "h264_amf": "h264_amf",
+    "hevc_amf": "hevc_amf",
+    "av1_svt": "libsvtav1",
 }
+
+# x264 preset 名 → SVT-AV1 preset 数字（0-13，大=快）；未知按 medium=6
+_SVT_PRESET = {
+    "veryslow": "4", "slower": "5", "slow": "5", "medium": "6",
+    "fast": "8", "faster": "9", "veryfast": "10",
+}
+
+
+def video_codec_args(enc: EncodeOpts) -> list[str]:
+    """视频编码器参数（三家硬编 + 两款软编 + SVT-AV1），CRF 统一语义。"""
+    vcodec = _VCODECS.get(enc.codec, "libx264")
+    if vcodec.endswith("_nvenc"):
+        args = ["-c:v", vcodec, "-preset", "p5", "-rc", "vbr",
+                "-cq", str(enc.crf), "-b:v", "0"]
+        if vcodec != "av1_nvenc":  # av1_nvenc 无 hq tune
+            args += ["-tune", "hq"]
+        return args + ["-pix_fmt", "yuv420p"]
+    if vcodec.endswith("_amf"):
+        # AMF 无 CRF，用 cqp 近似：I 帧取 crf、P 帧略高保持码率效率
+        return ["-c:v", vcodec, "-quality", "balanced", "-rc", "cqp",
+                "-qp_i", str(enc.crf), "-qp_p", str(min(51, enc.crf + 2)),
+                "-pix_fmt", "yuv420p"]
+    if vcodec == "libsvtav1":
+        # SVT-AV1 的 CRF 量程 0-63（x264 是 0-51），等比映射保持 UI 单一滑杆
+        svt_crf = min(63, round(enc.crf * 63 / 51))
+        return ["-c:v", vcodec, "-crf", str(svt_crf),
+                "-preset", _SVT_PRESET.get(enc.preset, "6"),
+                "-pix_fmt", "yuv420p"]
+    return ["-c:v", vcodec, "-crf", str(enc.crf), "-preset", enc.preset,
+            "-pix_fmt", "yuv420p"]
 
 
 def fps_double(fps_str: str) -> str:
@@ -102,13 +152,31 @@ def fps_double(fps_str: str) -> str:
 
 
 def audio_args(enc: EncodeOpts, mp4_family: bool, audio_codec: str | None) -> list[str]:
-    """音轨参数：mp4 家族且编码可拷则 copy，否则转 aac 192k；audio_mode=none 不带。"""
+    """音轨参数：auto=mp4 家族且编码可拷则 copy 否则 aac；显式 copy/aac/flac/none 直取。"""
     if enc.audio_mode == "none":
         return []
-    copyable = mp4_family and audio_codec in _MP4_AUDIO_COPY_OK
-    if copyable and enc.audio_mode in ("auto", "copy"):
+    if enc.audio_mode == "copy":
         return ["-c:a", "copy"]
-    return ["-c:a", "aac", "-b:a", "192k"]
+    if enc.audio_mode == "flac":
+        return ["-c:a", "flac"]
+    if enc.audio_mode == "aac":
+        return ["-c:a", "aac", "-b:a", "192k"]
+    copyable = mp4_family and audio_codec in _MP4_AUDIO_COPY_OK
+    return ["-c:a", "copy"] if copyable else ["-c:a", "aac", "-b:a", "192k"]
+
+
+def subtitle_args(enc: EncodeOpts, sub_codecs: list[str]) -> list[str]:
+    """字幕轨映射（源文件=第二输入，下标 1）：
+    - mkv：全部字幕流原样保留（含图形字幕 PGS/DVB）
+    - mp4/mov：仅当全部为文本字幕时转 mov_text，否则整体丢弃（避免 PGS 混流失败）
+    """
+    if enc.subtitle_mode != "auto" or not sub_codecs:
+        return []
+    if enc.mp4_family:
+        if all(c in _TEXT_SUBS for c in sub_codecs):
+            return ["-map", "1:s?", "-c:s", "mov_text"]
+        return []
+    return ["-map", "1:s?", "-c:s", "copy"]
 
 
 def encoder_cmd(
@@ -120,9 +188,9 @@ def encoder_cmd(
     target_h: int,  # 最终目标尺寸；与 frame 不同则编码器内 lanczos 缩放
     fps_str: str,
     enc: EncodeOpts,
-    has_audio: bool,
+    with_audio: bool,  # 挂第二输入（源文件，取音轨/字幕）
     audio_codec: str | None,
-    mp4_family: bool,
+    sub_codecs: list[str] | None = None,
     start_number: int = 1,  # 图片序列：本段首帧的全局帧号（分段续跑全局编号）
 ) -> list[str]:
     if enc.out_kind != "video":
@@ -138,36 +206,31 @@ def encoder_cmd(
             cmd += ["-c:v", "mjpeg", "-q:v", "2"]  # qscale 2 ≈ 高质量
         cmd += ["-start_number", str(start_number), "-f", "image2", str(output_path)]
         return cmd
+    subs = sub_codecs or []
+    mux_source = with_audio and (bool(audio_codec) or bool(subs))
     cmd = [
         ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
         "-f", "rawvideo", "-pix_fmt", "rgb24",
         "-video_size", f"{frame_w}x{frame_h}", "-framerate", fps_str, "-i", "pipe:0",
     ]
-    if has_audio:
+    if mux_source:
         cmd += ["-i", str(input_path)]
     cmd += ["-map", "0:v:0"]
-    if has_audio:
-        cmd += ["-map", "1:a:0?"]
+    if mux_source:
+        if audio_codec:
+            cmd += ["-map", "1:a:0?"]
+        cmd += subtitle_args(enc, subs)
 
-    vcodec = _VCODECS.get(enc.codec, "libx264")
-    if vcodec.endswith("_nvenc"):
-        cmd += [
-            "-c:v", vcodec,
-            "-preset", "p5", "-tune", "hq",
-            "-rc", "vbr", "-cq", str(enc.crf), "-b:v", "0",
-            "-pix_fmt", "yuv420p",
-        ]
-    else:
-        cmd += [
-            "-c:v", vcodec, "-crf", str(enc.crf), "-preset", enc.preset,
-            "-pix_fmt", "yuv420p",
-        ]
+    cmd += video_codec_args(enc)
     if (target_w, target_h) != (frame_w, frame_h):
         cmd += ["-vf", f"scale={target_w}:{target_h}:flags=lanczos"]
 
-    if has_audio:
-        cmd += audio_args(enc, mp4_family, audio_codec)
-    if mp4_family:
+    if mux_source:
+        if audio_codec:
+            cmd += audio_args(enc, enc.mp4_family, audio_codec)
+        else:
+            cmd += ["-an"]
+    if enc.mp4_family:
         cmd += ["-movflags", "+faststart"]
     cmd += [str(output_path)]
     return cmd
@@ -228,8 +291,8 @@ class StreamPipeline:
             target_w, target_h = info.width * target, info.height * target
         output_path = self.output_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        mp4_family = output_path.suffix.lower() in (".mp4", ".m4v", ".mov")
         audio_codec = info.audio[0].codec if info.has_audio else None
+        sub_codecs = list(getattr(info, "subtitles", []) or [])
         out_fps_str = fps_double(info.fps_str) if self.interp is not None else info.fps_str
 
         dec = asyncio.create_subprocess_exec(
@@ -241,8 +304,8 @@ class StreamPipeline:
         )
         enc_proc = asyncio.create_subprocess_exec(
             *encoder_cmd(info.path, output_path, frame_w, frame_h, target_w, target_h,
-                         out_fps_str, enc, self.with_audio and info.has_audio,
-                         audio_codec, mp4_family, start_number=self.frame_start),
+                         out_fps_str, enc, self.with_audio,
+                         audio_codec, sub_codecs, start_number=self.frame_start),
             stdin=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,

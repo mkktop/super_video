@@ -18,6 +18,7 @@ import {
   NSpace,
   NStep,
   NSteps,
+  NSwitch,
   NTag,
   useMessage,
 } from 'naive-ui'
@@ -40,6 +41,9 @@ const tileChoice = ref(0) // 0 = 模型默认
 const outKind = ref<'video' | 'png' | 'jpg'>('video')
 const codec = ref('h264')
 const crf = ref(18)
+const container = ref<'mp4' | 'mkv' | 'mov'>('mp4')
+const audioMode = ref('auto')
+const keepSubtitles = ref(false)
 const interp = ref<'off' | 'rife2x'>('off')
 const denoise = ref<number | null>(null)
 const output = ref('')
@@ -55,17 +59,55 @@ const interpOptions = computed(() => [
   { label: '关闭', value: 'off' },
   { label: 'RIFE 2×（帧率翻倍，需下载 23MB 模型）', value: 'rife2x' },
 ])
-const denoiseOptions = [
-  { label: '关闭（保守模式，不降噪）', value: 0 },
-  { label: 'denoise 3（去压缩噪，适合老片）', value: 3 },
-]
+// 降噪档位随模型注册表动态出（real-cugan 专属；缺省回退保守/3 两档）
+const denoiseLabel = {
+  0: '不降噪（no-denoise）',
+  1: '轻度 denoise 1',
+  2: '中度 denoise 2',
+  3: 'denoise 3（去压缩噪，适合老片）',
+} as Record<number, string>
+const denoiseOptions = computed(() => {
+  const levels = selectedModel.value?.denoise_levels ?? [0, 3]
+  return levels.map((n) => ({ label: denoiseLabel[n] ?? `denoise ${n}`, value: n }))
+})
+const hasDenoiseVariants = computed(
+  () => (selectedModel.value?.denoise_levels?.length ?? 0) > 0,
+)
 const nvencOk = computed(() => store.hardware?.nvenc ?? false)
+const av1NvencOk = computed(() => store.hardware?.av1_nvenc ?? false)
+const amfOk = computed(() => store.hardware?.amf ?? false)
+const svtOk = computed(() => store.hardware?.svt_av1 ?? false)
 const codecOptions = computed(() => [
   { label: 'H.264 · 软编（兼容性好）', value: 'h264' },
   { label: nvencOk.value ? 'H.264 · 硬编 NVENC（快）' : 'H.264 · 硬编（本机不可用）', value: 'h264_nvenc', disabled: !nvencOk.value },
   { label: 'H.265 · 软编（体积小）', value: 'h265' },
   { label: nvencOk.value ? 'H.265 · 硬编 NVENC（快且小）' : 'H.265 · 硬编（本机不可用）', value: 'hevc_nvenc', disabled: !nvencOk.value },
+  { label: av1NvencOk.value ? 'AV1 · 硬编 NVENC（RTX 40+，最小体积）' : 'AV1 · 硬编（本机不可用）', value: 'av1_nvenc', disabled: !av1NvencOk.value },
+  { label: amfOk.value ? 'H.264 · 硬编 AMF（A 卡）' : 'H.264 · 硬编 AMF（需 A 卡）', value: 'h264_amf', disabled: !amfOk.value },
+  { label: amfOk.value ? 'H.265 · 硬编 AMF（A 卡）' : 'H.265 · 硬编 AMF（需 A 卡）', value: 'hevc_amf', disabled: !amfOk.value },
+  { label: svtOk.value ? 'AV1 · 软编 SVT（体积小，速度中等）' : 'AV1 · 软编 SVT（本 ffmpeg 不含）', value: 'av1_svt', disabled: !svtOk.value },
 ])
+const containerOptions = [
+  { label: 'MP4（兼容性最好）', value: 'mp4' },
+  { label: 'MKV（字幕/音频全兼容）', value: 'mkv' },
+  { label: 'MOV（QuickTime）', value: 'mov' },
+]
+const audioOptions = computed(() => [
+  { label: '自动（兼容则原样保留）', value: 'auto' },
+  { label: '原样保留（copy，需容器兼容）', value: 'copy' },
+  { label: '转 AAC 192k（最兼容）', value: 'aac' },
+  { label: container.value === 'mkv' ? 'FLAC 无损（仅 MKV）' : 'FLAC 无损（切到 MKV 可用）', value: 'flac', disabled: container.value !== 'mkv' },
+  { label: '不保留音轨', value: 'none' },
+])
+watch(container, (c) => {
+  if (c !== 'mkv' && audioMode.value === 'flac') audioMode.value = 'auto'
+})
+const srcSubs = computed(() => probeInfo.value?.subtitles ?? [])
+const subHint = computed(() => {
+  if (!srcSubs.value.length) return ''
+  if (container.value === 'mkv') return `MKV 将原样保留全部 ${srcSubs.value.length} 条字幕轨`
+  return 'MP4/MOV 仅支持文本字幕（转 mov_text），图形字幕（PGS 等）会被丢弃'
+})
 
 const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
 
@@ -148,7 +190,7 @@ async function setInput(files: string[]) {
       probeInfo.value = {
         ok: false, error: e.detail ?? `HTTP ${r.status}`,
         width: 0, height: 0, fps: 0, duration_s: 0, total_frames: 0,
-        codec: '', pix_fmt: '', has_audio: false,
+        codec: '', pix_fmt: '', has_audio: false, subtitles: [],
       }
     }
     autoFillOutput()
@@ -179,11 +221,11 @@ function autoFillOutput() {
       resMode.value === 'custom' ? `${effW.value}x${effH.value}` : `${targetScale.value}x`
     output.value = isImage.value
       ? `${m?.[1]}_${suffix}_frames`
-      : `${m?.[1]}_${suffix}.mp4`
+      : `${m?.[1]}_${suffix}.${container.value}`
   }
 }
 
-watch([targetScale, resMode, effW, effH, outKind], autoFillOutput)
+watch([targetScale, resMode, effW, effH, outKind, container], autoFillOutput)
 
 async function pickOutputFile() {
   if (isImage.value) {
@@ -206,6 +248,9 @@ function applyPreset(pid: string) {
   outKind.value = 'video'
   codec.value = p.codec
   crf.value = p.crf
+  container.value = 'mp4'
+  audioMode.value = 'auto'
+  keepSubtitles.value = false
   interp.value = (p as { interp?: 'off' | 'rife2x' }).interp ?? 'off'
   denoise.value = null
   autoFillOutput()
@@ -236,7 +281,13 @@ async function submit() {
         ...(resMode.value === 'custom' ? { target_w: effW.value, target_h: effH.value } : {}),
         ...(isImage.value
           ? { out_kind: outKind.value }
-          : { codec: codec.value, crf: crf.value }),
+          : {
+              codec: codec.value,
+              crf: crf.value,
+              container: container.value,
+              audio_mode: audioMode.value,
+              subtitle_mode: keepSubtitles.value ? 'auto' : 'none',
+            }),
         interp: interp.value,
         ...(denoise.value !== null ? { denoise: denoise.value } : {}),
         ...(tileChoice.value ? { tile: tileChoice.value } : {}),
@@ -392,6 +443,18 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
         <NFormItem v-if="outKind === 'video'" label="编码器">
           <NSelect v-model:value="codec" :options="codecOptions" style="width: 300px" />
         </NFormItem>
+        <NFormItem v-if="outKind === 'video'" label="封装容器">
+          <NSelect v-model:value="container" :options="containerOptions" style="width: 300px" />
+        </NFormItem>
+        <NFormItem v-if="outKind === 'video'" label="音轨">
+          <NSelect v-model:value="audioMode" :options="audioOptions" style="width: 300px" />
+        </NFormItem>
+        <NFormItem v-if="outKind === 'video' && srcSubs.length" label="字幕">
+          <div class="sub-row">
+            <NSwitch v-model:value="keepSubtitles" size="small" />
+            <span class="sub-hint">{{ subHint }}</span>
+          </div>
+        </NFormItem>
         <NFormItem v-if="outKind === 'video'" label="画质 (CRF)">
           <NSlider v-model:value="crf" :min="12" :max="30" :step="1" :marks="{ 14: '近无损', 18: '推荐', 24: '小体积' }" />
         </NFormItem>
@@ -401,8 +464,8 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
             {{ probeInfo.fps }} → {{ probeInfo.fps * 2 }} fps
           </NTag>
         </NFormItem>
-        <NFormItem v-if="modelId === 'real-cugan'" label="降噪">
-          <NSelect v-model:value="denoise" :options="denoiseOptions" style="width: 320px" placeholder="选择降噪档位" />
+        <NFormItem v-if="hasDenoiseVariants" label="降噪">
+          <NSelect v-model:value="denoise" :options="denoiseOptions" style="width: 320px" placeholder="选择降噪档位（默认保守模式）" />
         </NFormItem>
         <NCollapse class="adv-collapse" :default-expanded-names="[]">
           <NCollapseItem title="高级选项" name="adv">
@@ -516,6 +579,8 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
 .batch-note { font-size: 12.5px; color: #9aa0a6; }
 
 .res-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sub-row { display: flex; align-items: center; gap: 10px; }
+.sub-hint { font-size: 12px; color: #9aa0a6; }
 .img-hint { margin-left: 12px; font-size: 12px; color: #9aa0a6; }
 .res-x { color: #9aa0a6; }
 .res-hints { font-size: 12px; margin: -6px 0 2px 102px; min-height: 16px; }

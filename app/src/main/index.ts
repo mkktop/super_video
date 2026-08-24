@@ -182,6 +182,10 @@ function createWindow() {
     backgroundColor: '#141517',
     show: false,
     title: 'super_video',
+    // dev 下显示应用图标（打包后窗口自动用 exe 图标；build/ 不进 asar，故判存在）
+    icon: fs.existsSync(path.join(__dirname, '../../build/icon.ico'))
+      ? path.join(__dirname, '../../build/icon.ico')
+      : undefined,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

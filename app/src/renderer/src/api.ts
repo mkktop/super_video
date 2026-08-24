@@ -39,6 +39,7 @@ export interface ModelInfo {
   size_mb?: number
   vram_ok?: boolean
   vram_note?: string | null
+  denoise_levels?: number[]
 }
 
 export interface Preset {
@@ -71,6 +72,7 @@ export interface ProbeInfo {
   codec: string
   pix_fmt: string
   has_audio: boolean
+  subtitles?: string[]
 }
 
 export interface Task {
@@ -108,6 +110,30 @@ export interface TrimJob {
   actual_start_s?: number
   duration_s?: number
   notices?: string[]
+}
+
+/** 性能采样:sidecar 2s 一拍,环形缓冲最近 1 小时(重启清零)。
+ *  GPU 仅 NVIDIA 可采集,非 N 卡 gpus 为空数组。 */
+export interface PerfGpu {
+  util: number | null
+  mem_used_mb: number
+  mem_total_mb: number
+}
+
+export interface PerfTaskUsage {
+  task_id: string
+  cpu_pct: number
+  mem_gb: number
+  n_proc: number
+}
+
+export interface PerfSample {
+  t: number
+  cpu: number
+  mem_pct: number
+  mem_used_gb: number
+  gpus: PerfGpu[]
+  task: PerfTaskUsage | null
 }
 
 export const api = {
@@ -169,6 +195,9 @@ export const api = {
   },
   async stats(): Promise<Stats> {
     return (await fetch(`${baseUrl}/api/stats`)).json()
+  },
+  async perfHistory(): Promise<{ interval_s: number; samples: PerfSample[] }> {
+    return (await fetch(`${baseUrl}/api/perf/history`)).json()
   },
   async createTask(body: {
     input: string

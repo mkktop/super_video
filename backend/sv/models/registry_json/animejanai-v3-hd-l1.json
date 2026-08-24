@@ -1,0 +1,33 @@
+{
+  "vendor": "the-database",
+  "license": "上游发布包自由分发（mpv-AnimeJaNai）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [
+    2
+  ],
+  "content": [
+    "anime"
+  ],
+  "temporal": false,
+  "speed": "fastest",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 4
+  },
+  "id": "animejanai-v3-hd-l1",
+  "name": "AnimeJaNai V3 HD L1（极速）",
+  "description": "V3 HD SuperUltraCompact：新一代极速档，1080p→4K 实时级",
+  "files": [
+    {
+      "name": "2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx",
+      "sha256": "f6bbfbed502b8d300ee9d678d2c277d4b56235c36d053c3a1a41be060c54c0e6",
+      "size": 184990
+    }
+  ]
+}

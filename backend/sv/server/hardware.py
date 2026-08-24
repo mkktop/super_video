@@ -61,21 +61,35 @@ def _cpu_name() -> str:
     return platform.processor() or platform.machine()
 
 
-def _nvenc_ok() -> bool:
-    """试编码一帧验证 NVENC 可用（驱动/会话正常才算数）。
+def _try_encode(encoder: str, min_w: int = 320) -> bool:
+    """试编码一帧验证硬编码器可用（驱动/会话正常才算数）。
 
-    分辨率须 ≥ NVENC H.264 最小宽度 145，否则参数非法误报不可用。
+    分辨率须 ≥ 硬编最小宽度（NVENC H.264 为 145），否则参数非法误报不可用。
     """
     from ..paths import ffmpeg_bin
 
     try:
         out = subprocess.run(
             [ffmpeg_bin(), "-hide_banner", "-loglevel", "error",
-             "-f", "lavfi", "-i", "color=c=black:s=320x240:d=0.2",
-             "-c:v", "h264_nvenc", "-f", "null", "-"],
+             "-f", "lavfi", "-i", f"color=c=black:s={min_w}x240:d=0.2",
+             "-c:v", encoder, "-f", "null", "-"],
             capture_output=True, timeout=20, creationflags=WINDOWS_CREATE_FLAGS,
         )
         return out.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _has_encoder(name: str) -> bool:
+    """ffmpeg 构建是否带某软编（如 libsvtav1），纯列表查询不试编码。"""
+    from ..paths import ffmpeg_bin
+
+    try:
+        out = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-encoders"],
+            capture_output=True, timeout=15, creationflags=WINDOWS_CREATE_FLAGS,
+        )
+        return name in out.stdout.decode("utf-8", "replace")
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -87,5 +101,8 @@ def hardware_info() -> dict:
         "cpu": _cpu_name(),
         "cpu_cores": psutil.cpu_count(logical=False),
         "ram_gb": round(vm.total / 1e9, 1),
-        "nvenc": _nvenc_ok(),
+        "nvenc": _try_encode("h264_nvenc"),
+        "av1_nvenc": _try_encode("av1_nvenc"),
+        "amf": _try_encode("h264_amf"),
+        "svt_av1": _has_encoder("libsvtav1"),
     }

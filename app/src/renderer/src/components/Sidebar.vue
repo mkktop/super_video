@@ -12,8 +12,19 @@ const items = computed(() => [
     badge: store.tasks.filter((t) => t.status === 'running' || t.status === 'queued').length,
   },
   { key: 'models', label: '模型市场', icon: 'cube' },
+  { key: 'perf', label: '性能', icon: 'pulse' },
   { key: 'settings', label: '设置', icon: 'gear' },
 ])
+
+// 侧栏底部迷你占用指示:任何页面都能瞄一眼当前负载
+const miniPerf = computed(() => {
+  const l = store.perf.latest
+  if (!l) return ''
+  const gpu = l.gpus?.[0]?.util
+  return gpu == null
+    ? `CPU ${Math.round(l.cpu)}% · 内存 ${Math.round(l.mem_pct)}%`
+    : `CPU ${Math.round(l.cpu)}% · GPU ${gpu}%`
+})
 </script>
 
 <template>
@@ -41,6 +52,9 @@ const items = computed(() => [
           <svg v-else-if="it.icon === 'cube'" width="16" height="16" viewBox="0 0 16 16">
             <path d="M8 1.8l5.5 3v6.4L8 14.2 2.5 11.2V4.8L8 1.8zM2.5 4.8L8 7.8l5.5-3M8 7.8v6.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
           </svg>
+          <svg v-else-if="it.icon === 'pulse'" width="16" height="16" viewBox="0 0 16 16">
+            <path d="M1.5 8h3L6.5 3l3 10 2-5h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
           <svg v-else width="16" height="16" viewBox="0 0 16 16">
             <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3" />
             <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
@@ -50,9 +64,12 @@ const items = computed(() => [
         <span v-if="it.badge" class="badge">{{ it.badge }}</span>
       </button>
     </nav>
-    <div class="foot">
-      <span class="dot" :class="store.connected ? 'on' : 'off'" />
-      <span class="foot-text">{{ store.connected ? '后端已连接' : '连接中断' }}</span>
+    <div class="foot-col">
+      <div v-if="miniPerf" class="foot-perf">{{ miniPerf }}</div>
+      <div class="foot">
+        <span class="dot" :class="store.connected ? 'on' : 'off'" />
+        <span class="foot-text">{{ store.connected ? '后端已连接' : '连接中断' }}</span>
+      </div>
     </div>
   </aside>
 </template>
@@ -130,6 +147,18 @@ const items = computed(() => [
   border: 1px solid #3a3f45;
   border-radius: 4px;
   padding: 1px 4px;
+}
+.foot-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.foot-perf {
+  font-size: 11px;
+  color: #6b7280;
+  padding: 0 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .foot {
   display: flex;

@@ -11,6 +11,7 @@ import {
   NRadioGroup,
   NSelect,
   NSpace,
+  NSwitch,
   NTag,
   useMessage,
 } from 'naive-ui'
@@ -18,7 +19,7 @@ import { api } from '../api'
 import { refreshModels, store } from '../store'
 
 const message = useMessage()
-const engine = ref<'auto' | 'cuda' | 'directml'>('auto')
+const engine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
 const precision = ref<'fp16' | 'fp32'>('fp16')
 const logLines = ref<string[]>([])
 const saving = ref(false)
@@ -33,6 +34,7 @@ const readyVersion = ref('') // 已下载完成、待重启安装的版本
 const proxyMode = ref<'auto' | 'direct' | 'custom'>('auto')
 const proxyAddr = ref('')
 const savingProxy = ref(false)
+const perfSampling = ref(true)
 const proxyOptions = [
   { label: '跟随系统代理', value: 'auto' },
   { label: '直连（不走代理）', value: 'direct' },
@@ -43,12 +45,14 @@ let offReady: (() => void) | null = null
 
 onMounted(async () => {
   const s = (await api.settings()) as {
-    engine?: 'auto' | 'cuda' | 'directml'
+    engine?: 'auto' | 'cuda' | 'trt' | 'directml'
     precision?: 'fp16' | 'fp32'
     download_proxy?: string
+    perf_sampling?: boolean
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
+  perfSampling.value = s.perf_sampling !== false
   const p = s.download_proxy ?? ''
   if (p === 'direct') proxyMode.value = 'direct'
   else if (p.startsWith('http')) {
@@ -87,6 +91,14 @@ async function saveProxy() {
     message.success('已保存，新的模型下载立即生效')
   } else {
     message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+  }
+}
+
+async function savePerfSampling(v: boolean) {
+  const r = await api.saveSettings({ perf_sampling: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    perfSampling.value = !v
   }
 }
 
@@ -167,14 +179,16 @@ async function saveEngine() {
     <NCard title="推理后端与精度" size="small">
       <p class="hint">
         DirectML：全显卡兼容（实测本机最快）· CUDA：NVIDIA 专用（供 M3 扩散模型）·
+        TensorRT：N 卡最快推理（实验性，需 .venv-cuda + tensorrt 组件；缺失自动回退）·
         当前实际后端：<NTag size="small" type="info" :bordered="false">
-          {{ store.engine?.backend === 'cuda' ? 'CUDA' : 'DirectML' }}
+          {{ store.engine?.backend === 'trt' ? 'CUDA + TensorRT' : store.engine?.backend === 'cuda' ? 'CUDA' : 'DirectML' }}
         </NTag>
       </p>
       <NRadioGroup v-model:value="engine">
         <NRadioButton value="auto">自动</NRadioButton>
         <NRadioButton value="directml">DirectML</NRadioButton>
         <NRadioButton value="cuda">CUDA</NRadioButton>
+        <NRadioButton value="trt">TensorRT</NRadioButton>
       </NRadioGroup>
       <p class="hint" style="margin: 14px 0 12px">
         FP16：实测提速 1.36~1.73x，画质无感知差异（输出 PSNR 74dB+）·
@@ -206,6 +220,16 @@ async function saveEngine() {
         />
         <NButton size="small" type="primary" :loading="savingProxy" @click="saveProxy">保存</NButton>
       </NSpace>
+    </NCard>
+
+    <NCard title="性能监控" size="small">
+      <div class="update-row">
+        <span>后台性能采样：每 2 秒采集 CPU / GPU / 内存占用与任务进程开销，供「性能」页仪表盘与趋势图使用</span>
+        <NSwitch v-model:value="perfSampling" size="small" @update:value="savePerfSampling" />
+      </div>
+      <p class="hint" style="margin-top: 8px">
+        关闭后采样停止（笔记本省电可关），重新开启立即生效；历史数据保留最近 1 小时，随重启清零。
+      </p>
     </NCard>
 
     <NCard title="应用与更新" size="small">
@@ -243,7 +267,7 @@ async function saveEngine() {
         <div>GPU：{{ store.gpuName }} <span v-if="store.hardware?.gpus?.[0]?.vram_gb">({{ store.hardware.gpus[0].vram_gb }}GB)</span></div>
         <div>CPU：{{ store.hardware?.cpu }} · {{ store.hardware?.cpu_cores }} 核心</div>
         <div>内存：{{ store.hardware?.ram_gb }} GB</div>
-        <div>NVENC 硬编：{{ store.hardware?.nvenc ? '可用' : '不可用' }}</div>
+        <div>NVENC 硬编：{{ store.hardware?.nvenc ? '可用' : '不可用' }}<template v-if="store.hardware?.av1_nvenc"> · AV1 硬编：可用</template><template v-if="store.hardware?.amf"> · AMF：可用</template><template v-if="store.hardware?.svt_av1"> · SVT-AV1：可用</template></div>
       </NSpace>
     </NCard>
 

@@ -15,11 +15,15 @@
   擦除对比、可拖进度条（file:// 原生加载，Range/moov 索引位置全兼容，零转封装开销）
 - **图片序列输出**：超分结果可按 PNG（无损）/JPG 逐帧导出，`000001.png` 起按帧号
   连续编号；分段全局续编号，断点续跑不重写已完成帧；两条管线（ONNX 分段/torch 分块）均支持
-- **多模型**：AnimeVideo（动漫，快）、Real-CUGAN（动漫降噪）、Real-ESRGAN x4plus（真人）、
-  x4plus PyTorch 版（分块断点续跑）、RIFE v4.26 补帧（帧率×2）；自定义 ONNX 导入
-- **推理**：DirectML 默认（全显卡兼容）+ FP16（提速 1.36~2.05x）；CUDA/PyTorch 组件可选
+- **多模型**：AnimeVideo（动漫，快）、Real-CUGAN（降噪档全：不降噪/1/2/3+保守，变体按需下载）、
+  **AnimeJaNai V2/V3 HD 各三档**（L1 极速~L3 画质，动漫社区口碑）、Real-ESRGAN x4plus（真人）、
+  x4plus PyTorch 版（分块断点续跑）、RIFE v4.26 补帧（帧率×2）；自定义 ONNX 导入（含 fp16 本体模型）
+- **推理**：DirectML 默认（全显卡兼容）+ FP16（提速 1.36~2.05x）；CUDA/TensorRT（引擎缓存+自动回退）、
+  PyTorch 组件可选
 - **输入兼容**：8/10bit、VFR（自动 CFR 化）；HDR 暂不支持（明确报错）
-- **产物**：H.264/H.265 软编或 NVENC 硬编，音轨无损保留，前后同帧对比
+- **产物**：H.264/H.265/AV1(SVT) 软编或 NVENC/AMF 硬编，容器 MP4/MKV/MOV，
+  音轨自动保留或指定 AAC/FLAC(无损,MKV)，**字幕轨保留**（MKV 全兼容原样 copy，
+  MP4 文本字幕转 mov_text）；运行卡显示帧率与预计剩余时间
 
 ## 开发运行
 
@@ -31,7 +35,7 @@ python -m venv .venv && .venv/Scripts/pip install -r backend/requirements.txt
 # 前端 + 桌面壳
 cd app && pnpm install && pnpm build && npx electron .
 
-# 测试（73 项，另 1 项按环境跳过）
+# 测试（99 项，另 1 项按环境跳过）
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
 ```
 

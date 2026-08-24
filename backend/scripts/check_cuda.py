@@ -1,7 +1,7 @@
 """在候选解释器内运行：验证 CUDA EP 真实可用（创建会话 + 跑一帧推理）。
 
 用法: python check_cuda.py <bundled_model.onnx>
-输出: 一行 JSON {"ok": bool, "provider": ..., "error": ...}
+输出: 一行 JSON {"ok": bool, "provider": ..., "trt": bool, "error": ...}
 """
 from __future__ import annotations
 
@@ -14,8 +14,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sv.engines.nvidia_dlls import register_nvidia_dlls
 
 
+def _trt_available() -> bool:
+    """TensorRT 库是否可加载（TRT EP 编译进 onnxruntime-gpu，但运行时另需 TRT 库）。"""
+    try:
+        import tensorrt  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def main(model_path: str) -> int:
-    result = {"ok": False, "provider": None, "error": None}
+    result = {"ok": False, "provider": None, "trt": False, "error": None}
     try:
         import numpy as np
         import onnxruntime as ort
@@ -25,6 +34,10 @@ def main(model_path: str) -> int:
             result["error"] = "无 CUDAExecutionProvider（非 GPU 版 onnxruntime）"
             print(json.dumps(result))
             return 1
+        result["trt"] = (
+            "TensorrtExecutionProvider" in ort.get_available_providers()
+            and _trt_available()
+        )
         sess = ort.InferenceSession(model_path, providers=["CUDAExecutionProvider"])
         result["provider"] = ",".join(sess.get_providers())
         inp = sess.get_inputs()[0]

@@ -24,9 +24,11 @@ from .stream import (
     PipelineError,
     RunStats,
     TaskCanceled,
-    _VCODECS,
+    audio_args,
     image_dir_bytes,
     iter_image_frames,
+    subtitle_args,
+    video_codec_args,
 )
 
 
@@ -172,39 +174,31 @@ class ChunkedPipeline:
                 out_path=final_dir, out_bytes=image_dir_bytes(final_dir),
             )
 
-        # ---- 编码：PNG 序列 + 源音轨 ----
+        # ---- 编码：PNG 序列 + 源音轨/字幕 ----
         output_path = self.output_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        mp4_family = output_path.suffix.lower() in (".mp4", ".m4v", ".mov")
         audio_codec = info.audio[0].codec if info.has_audio else None
+        has_audio = info.has_audio and enc.audio_mode != "none"
+        subs = list(getattr(info, "subtitles", []) or [])
         cmd = [
             ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
             "-framerate", info.fps_str, "-i", str(out_dir / "f%06d.png"),
         ]
-        if info.has_audio:
+        if has_audio or subs:
             cmd += ["-i", str(info.path)]
         cmd += ["-map", "0:v:0"]
-        if info.has_audio:
-            cmd += ["-map", "1:a:0?"]
-        vcodec = _VCODECS.get(enc.codec, "libx264")
-        if vcodec.endswith("_nvenc"):
-            cmd += ["-c:v", vcodec, "-preset", "p5", "-tune", "hq",
-                    "-rc", "vbr", "-cq", str(enc.crf), "-b:v", "0",
-                    "-pix_fmt", "yuv420p"]
-        else:
-            cmd += ["-c:v", vcodec, "-crf", str(enc.crf), "-preset", enc.preset,
-                    "-pix_fmt", "yuv420p"]
+        if has_audio or subs:
+            if has_audio:
+                cmd += ["-map", "1:a:0?"]
+            cmd += subtitle_args(enc, subs)
+        cmd += video_codec_args(enc)
         if self.target_size is not None:
             tw, th = self.target_size
             if (tw, th) != (info.width * tx.scale, info.height * tx.scale):
                 cmd += ["-vf", f"scale={tw}:{th}:flags=lanczos"]
-        if info.has_audio and enc.audio_mode != "none":
-            copyable = mp4_family and audio_codec in ("aac", "mp3", "ac3", "eac3", "alac")
-            if copyable and enc.audio_mode in ("auto", "copy"):
-                cmd += ["-c:a", "copy"]
-            else:
-                cmd += ["-c:a", "aac", "-b:a", "192k"]
-        if mp4_family:
+        if has_audio:
+            cmd += audio_args(enc, enc.mp4_family, audio_codec)
+        if enc.mp4_family:
             cmd += ["-movflags", "+faststart"]
         cmd += [str(output_path)]
         await asyncio.get_event_loop().run_in_executor(None, self._run_ffmpeg, cmd)

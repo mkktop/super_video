@@ -1,0 +1,33 @@
+{
+  "vendor": "the-database",
+  "license": "上游发布包自由分发（mpv-AnimeJaNai）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [
+    2
+  ],
+  "content": [
+    "anime"
+  ],
+  "temporal": false,
+  "speed": "fastest",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": false,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 4
+  },
+  "id": "animejanai-v2-l1",
+  "name": "AnimeJaNai V2 L1（极速）",
+  "description": "SuperUltraCompact 100k：极速档，实时播放级别；画质兜底档",
+  "files": [
+    {
+      "name": "2x_AnimeJaNai_V2_SuperUltraCompact_100k.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_V2_SuperUltraCompact_100k.onnx",
+      "sha256": "e209436e91c5807d8eb8a753d0df03ec057b3ced46d8106f08e7cf84a68ff0f8",
+      "size": 93208
+    }
+  ]
+}

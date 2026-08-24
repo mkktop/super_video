@@ -65,19 +65,22 @@ def select_engine(force: str | None = None) -> EngineChoice:
     实测策略（2026-08-23, RTX 5080, 见 BENCH.md）：当前模型库（小模型/小tile高频调用）
     DirectML 全面快于 CUDA EP（animevideov3 +10~25%, x4plus +270%），故默认 DirectML；
     CUDA 基础设施保留，SV_ENGINE=cuda 强制启用（M3 扩散模型 PyTorch 阶段启用）。
-    force: 'cuda' | 'directml'（环境变量 SV_ENGINE）。
+    trt = CUDA venv + TensorrtExecutionProvider（worker 内按同名设置再选 provider；
+    TRT 库缺失时引擎层自动回退，此处只保证解释器可用）。
+    force: 'cuda' | 'trt' | 'directml'（环境变量 SV_ENGINE）。
 
     打包版（PyInstaller frozen）：无独立 venv，worker 复用 sidecar.exe（DirectML）。
     """
     if getattr(sys, "frozen", False):
         return EngineChoice("directml", sys.executable, "打包版 DirectML")
     force = force or os.environ.get("SV_ENGINE")
-    if force == "cuda":
+    if force in ("cuda", "trt"):
         py = _cuda_venv_python()
         if py is not None:
             ok, detail = _probe_cuda(py)
             if ok:
-                return EngineChoice("cuda", str(py), detail)
+                backend = "trt" if force == "trt" else "cuda"
+                return EngineChoice(backend, str(py), detail)
         return EngineChoice(
             "directml", sys.executable, "CUDA 不可用，回落 DirectML"
         )

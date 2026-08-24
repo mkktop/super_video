@@ -1,0 +1,33 @@
+{
+  "vendor": "the-database",
+  "license": "上游发布包自由分发（mpv-AnimeJaNai）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [
+    2
+  ],
+  "content": [
+    "anime"
+  ],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": false,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 4
+  },
+  "id": "animejanai-v2-l2",
+  "name": "AnimeJaNai V2 L2（均衡）",
+  "description": "UltraCompact 30k：速度画质均衡，1080p→4K 主力档",
+  "files": [
+    {
+      "name": "2x_AnimeJaNai_V2_UltraCompact_30k.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_V2_UltraCompact_30k.onnx",
+      "sha256": "15617c144ee56e0f88266e607e28f582effe5b1b661267fda0e2f095dd788c6e",
+      "size": 612380
+    }
+  ]
+}

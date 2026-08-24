@@ -31,6 +31,7 @@ from .stream import (
     audio_args,
     image_dir_bytes,
     iter_image_frames,
+    subtitle_args,
 )
 
 
@@ -171,23 +172,26 @@ class SegmentedPipeline:
         tmp.replace(ckpt_file)
 
     def _concat(self, seglist: Path) -> None:
-        """concat 视频段 + 源音轨 → 最终输出（-c:v copy，秒级）。"""
-        mp4_family = self.output_path.suffix.lower() in (".mp4", ".m4v", ".mov")
+        """concat 视频段 + 源音轨/字幕 → 最终输出（-c:v copy，秒级）。"""
+        enc = self.enc
         audio_codec = self.info.audio[0].codec if self.info.has_audio else None
-        has_audio = self.info.has_audio and self.enc.audio_mode != "none"
+        has_audio = self.info.has_audio and enc.audio_mode != "none"
+        subs = list(getattr(self.info, "subtitles", []) or [])
         cmd = [
             ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
             "-f", "concat", "-safe", "0", "-i", str(seglist),
         ]
-        if has_audio:
+        if has_audio or subs:
             cmd += ["-i", str(self.info.path)]
         cmd += ["-map", "0:v:0"]
-        if has_audio:
-            cmd += ["-map", "1:a:0?"]
+        if has_audio or subs:
+            if has_audio:
+                cmd += ["-map", "1:a:0?"]
+            cmd += subtitle_args(enc, subs)
         cmd += ["-c:v", "copy"]
         if has_audio:
-            cmd += audio_args(self.enc, mp4_family, audio_codec)
-        if mp4_family:
+            cmd += audio_args(enc, enc.mp4_family, audio_codec)
+        if enc.mp4_family:
             cmd += ["-movflags", "+faststart"]
         cmd += [str(self.output_path)]
         r = subprocess.run(cmd, capture_output=True, text=True,

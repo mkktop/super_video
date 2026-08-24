@@ -20,6 +20,38 @@ _PROVIDER_ORDER = [
     "CPUExecutionProvider",
 ]
 
+# TensorRT 模式：TRT 优先，其后照常回落（TRT 不可用/失败时与默认链路等价）
+_TRT_CHAIN = [
+    "TensorrtExecutionProvider",
+    "CUDAExecutionProvider",
+    "DmlExecutionProvider",
+    "CPUExecutionProvider",
+]
+
+
+def _trt_provider_options() -> list[tuple[str, dict[str, object]]]:
+    """TRT EP 选项：引擎缓存（二次运行免重建，分钟级差异）+ fp16 引擎。
+
+    onnxruntime 的 TRT EP 只需 pip 包含该 provider（onnxruntime-gpu）；
+    运行时另需 TensorRT 库（可选组件 tensorrt wheel）——缺失时 session
+    创建失败，由 load() 分层回退到 CUDA/DML。
+    """
+    from ..paths import TEMP_DIR
+
+    cache = TEMP_DIR / "trt_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    return [(
+        "TensorrtExecutionProvider",
+        {
+            "device_id": 0,
+            "trt_engine_cache_enable": True,
+            "trt_engine_cache_path": str(cache),
+            "trt_timing_cache_enable": True,
+            "trt_fp16_enable": True,
+            "trt_max_workspace_size": 4294967296,  # 4GB
+        },
+    )]
+
 
 class OnnxSrEngine(BaseEngine):
     def __init__(
@@ -51,6 +83,7 @@ class OnnxSrEngine(BaseEngine):
         self.max_batch: int = 0  # 0 = 动态 batch；>0 = 导出时固定
         self._in_name = None
         self._out_names = None
+        self._in_fp16 = False  # 模型本体即 fp16 导出（如 AnimeJaNai 系）：喂 fp16 输入
 
     def load(self) -> None:
         import onnxruntime as ort
@@ -60,32 +93,19 @@ class OnnxSrEngine(BaseEngine):
         register_nvidia_dlls()  # CUDA 版 ORT 的 DLL 在 pip 包内，需先挂载
         available = set(ort.get_available_providers())
         if self.device == "cpu":
-            chosen = ["CPUExecutionProvider"]
+            chosen: list[str] = ["CPUExecutionProvider"]
+        elif self.device == "trt":
+            chosen = [p for p in _TRT_CHAIN if p in available] or ["CPUExecutionProvider"]
         else:
             chosen = [p for p in _PROVIDER_ORDER if p in available] or ["CPUExecutionProvider"]
-        so = ort.SessionOptions()
-        level = {
-            "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
-            "disable": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
-        }.get(self.graph_opt)
-        if level is not None:
-            so.graph_optimization_level = level
-        try:
-            self.session = ort.InferenceSession(
-                str(self.model_path), so, providers=chosen
-            )
-        except Exception as e:  # noqa: BLE001 — DML 初始化失败（无显卡机器）回落 CPU
-            if self.device == "cpu" or not (set(chosen) - {"CPUExecutionProvider"}):
-                raise
-            print(f"[engine] {chosen} 初始化失败({e})，回落 CPU")
-            self.session = ort.InferenceSession(
-                str(self.model_path), so, providers=["CPUExecutionProvider"]
-            )
+        so = self._session_options()
+        self.session = self._try_session(ort, so, chosen)
         self.provider_used = self.session.get_providers()
         inp = self.session.get_inputs()[0]
         self._in_name = inp.name
         self._out_names = [o.name for o in self.session.get_outputs()]
         self._in_dtype = inp.type  # 'tensor(float)' 等
+        self._in_fp16 = inp.type == "tensor(float16)"
         # 固定输入尺寸的导出版本（如 [1,3,64,64]）：推理前补边、推理后裁剪
         shape = inp.shape
         if len(shape) == 4 and isinstance(shape[2], int) and isinstance(shape[3], int):
@@ -100,6 +120,38 @@ class OnnxSrEngine(BaseEngine):
             self.max_batch = 0
         if self.fixed_hw is not None or self.tile:
             self.batch = 1  # 固定尺寸/分块路径不批帧（tile 批处理为后续项）
+
+    def _session_options(self):
+        import onnxruntime as ort
+
+        so = ort.SessionOptions()
+        level = {
+            "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
+            "disable": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
+        }.get(self.graph_opt)
+        if level is not None:
+            so.graph_optimization_level = level
+        return so
+
+    def _try_session(self, ort, so, chosen: list[str]):
+        """按 provider 链建 session，逐层回退：TRT 失败去 TRT 重试，GPU 失败回落 CPU。"""
+        while True:
+            providers: list = chosen
+            if "TensorrtExecutionProvider" in chosen:
+                providers = _trt_provider_options() + [
+                    p for p in chosen if p != "TensorrtExecutionProvider"]
+            try:
+                return ort.InferenceSession(str(self.model_path), so, providers=providers)
+            except Exception as e:  # noqa: BLE001
+                if "TensorrtExecutionProvider" in chosen:
+                    rest = [p for p in chosen if p != "TensorrtExecutionProvider"]
+                    print(f"[engine] TensorRT 初始化失败({e})，回退 {'/'.join(rest) or 'CPU'}")
+                    chosen = rest
+                    continue
+                if self.device == "cpu" or not (set(chosen) - {"CPUExecutionProvider"}):
+                    raise
+                print(f"[engine] {chosen} 初始化失败({e})，回落 CPU")
+                chosen = ["CPUExecutionProvider"]
 
     def _infer(self, frame: np.ndarray) -> np.ndarray:
         h, w = frame.shape[:2]
@@ -121,9 +173,11 @@ class OnnxSrEngine(BaseEngine):
         x = np.ascontiguousarray(x.transpose(2, 0, 1)[None].astype(np.float32))
         if self.value_range == "0-1":
             x = x / 255.0
+        if self._in_fp16:
+            x = x.astype(np.float16)
 
         y = self.session.run(self._out_names, {self._in_name: x})[0]
-        y = np.squeeze(y, axis=0).transpose(1, 2, 0)  # CHW -> HWC
+        y = np.squeeze(y, axis=0).transpose(1, 2, 0).astype(np.float32)  # CHW -> HWC
         if self.value_range == "0-1":
             y = y * 255.0
         y = np.clip(y, 0, 255).astype(np.uint8)
@@ -153,11 +207,13 @@ class OnnxSrEngine(BaseEngine):
         x = np.ascontiguousarray(x.transpose(0, 3, 1, 2).astype(np.float32))  # NCHW
         if self.value_range == "0-1":
             x = x / 255.0
+        if self._in_fp16:
+            x = x.astype(np.float16)
 
         y = self.session.run(self._out_names, {self._in_name: x})[0]  # N,3,H',W'
         if self.value_range == "0-1":
             y = y * 255.0
-        y = np.clip(y, 0, 255).astype(np.uint8).transpose(0, 2, 3, 1)  # NHWC
+        y = np.clip(y.astype(np.float32), 0, 255).astype(np.uint8).transpose(0, 2, 3, 1)  # NHWC
         if self.color == "bgr":
             y = y[..., ::-1]
         if ph or pw:

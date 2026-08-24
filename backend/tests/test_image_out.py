@@ -58,7 +58,7 @@ def test_encoder_cmd_image():
     """图片分支：模式路径 + start_number 全局编号 + 不带音轨/封装参数。"""
     enc = EncodeOpts(out_kind="png")
     cmd = encoder_cmd(Path("in.mp4"), Path("o") / "%06d.png", 640, 360, 640, 360,
-                      "24/1", enc, True, "aac", False, start_number=49)
+                      "24/1", enc, True, "aac", start_number=49)
     assert cmd[cmd.index("-start_number") + 1] == "49"
     assert cmd[-1].endswith("%06d.png")
     assert cmd[cmd.index("-f", cmd.index("-i")) + 1] == "image2"
@@ -69,7 +69,7 @@ def test_encoder_cmd_image():
 def test_encoder_cmd_image_jpg_scale():
     """JPG：mjpeg + qscale 2；目标尺寸≠引擎输出时编码器内 lanczos 缩放。"""
     cmd = encoder_cmd(Path("in.mp4"), Path("o") / "%06d.jpg", 640, 360, 320, 180,
-                      "24/1", EncodeOpts(out_kind="jpg"), True, "aac", False)
+                      "24/1", EncodeOpts(out_kind="jpg"), True, "aac")
     assert cmd[cmd.index("-c:v") + 1] == "mjpeg"
     assert cmd[cmd.index("-q:v") + 1] == "2"
     assert cmd[cmd.index("-vf") + 1] == "scale=320:180:flags=lanczos"

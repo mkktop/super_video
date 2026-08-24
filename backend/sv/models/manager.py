@@ -90,13 +90,22 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def download(spec: ModelSpec, progress_cb=None) -> None:
-    """下载模型全部文件。progress_cb(bytes_done, bytes_total, file_label)。"""
+def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = None) -> None:
+    """下载模型文件。progress_cb(bytes_done, bytes_total, file_label)。
+
+    only_files：只下载给定子集（变体懒下载——任务实际用哪个权重下哪个）；
+    已在本地且校验通过的文件照旧跳过。
+    """
     d = model_dir(spec.id)
     d.mkdir(parents=True, exist_ok=True)
-    total = sum(f.get("size", 0) for f in spec.files)
-    done = 0
-    for f in spec.files:
+    targets = list(only_files) if only_files is not None else list(spec.files)
+    total = sum(f.get("size", 0) for f in targets)
+    done = sum(
+        f.get("size", 0) for f in spec.files
+        if f not in targets
+        and (p := _resolve(spec, f["name"])) is not None
+    )
+    for f in targets:
         url = f["url"]
         name = f["name"]
         dest = d / name
@@ -168,6 +177,22 @@ def ensure_downloaded(spec: ModelSpec, progress_cb=None) -> None:
                     if _sha256(p) != f["sha256"]:
                         raise DownloadError(f"{p.name} 校验失败，请删除后重新下载")
                     p.with_suffix(".verified").touch()
+
+
+def ensure_files(spec: ModelSpec, files: list[dict], progress_cb=None) -> None:
+    """只保障给定文件子集在本地（变体懒下载：任务用哪个权重下哪个）。
+
+    与 ensure_downloaded 的区别：多档位模型（如 real-cugan 11 个权重）不必
+    全量下载即可开跑；缺哪个下哪个，已在本地的不动。
+    """
+    missing = []
+    for f in files:
+        p = _resolve(spec, f["name"])
+        if p is None or (f.get("size") and p.stat().st_size != f["size"]):
+            missing.append(f)
+    if not missing:
+        return
+    download(spec, progress_cb, only_files=missing)
 
 
 def pin_checksums(spec_id: str) -> dict[str, str]:
