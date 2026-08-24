@@ -55,6 +55,28 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win nsis --publish always
 
+      - name: 发布收敛（electron-builder 偶发双草稿/资产拆分）
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag.TrimStart('v')
+          $rels = gh api "repos/${{ github.repository }}/releases?per_page=20" | ConvertFrom-Json
+          $same = @($rels | Where-Object { $_.tag_name -eq $tag })
+          $keep = @($same | Where-Object { @($_.assets | Where-Object { $_.name -like "*setup.exe" }).Count -gt 0 })[0]
+          if (-not $keep) { Write-Host "没有可收敛的 Release"; exit 0 }
+          foreach ($r in $same) {
+            if ($r.id -ne $keep.id) { gh api -X DELETE "repos/${{ github.repository }}/releases/$($r.id)" | Out-Null }
+          }
+          $have = @($keep.assets.name)
+          $bm = "dist-app/super_video_${ver}_setup.exe.blockmap"
+          if (($have -notcontains (Split-Path $bm -Leaf)) -and (Test-Path $bm)) {
+            gh release upload $tag $bm --clobber
+          }
+          if ($keep.draft) { gh release edit $tag --draft=false --title $tag }
+
       - name: 模型资产上传到 models-v1 Release（供重装/旧版本下载）
         shell: pwsh
         env:

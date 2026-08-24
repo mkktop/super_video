@@ -19,7 +19,8 @@
     "publish": {
       "provider": "github",
       "owner": "mkktop",
-      "repo": "super_video"
+      "repo": "super_video",
+      "releaseType": "release"
     },
     "files": [
       "out/**",
