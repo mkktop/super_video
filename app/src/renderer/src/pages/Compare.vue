@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
-import { NButton, NEmpty, NTag } from 'naive-ui'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { NButton, NEmpty, NRadioButton, NRadioGroup, NTag } from 'naive-ui'
 import { api } from '../api'
 import { store, ui } from '../store'
 import CompareSlider from '../components/CompareSlider.vue'
+import VideoCompare from '../components/VideoCompare.vue'
 
 const task = computed(() => store.tasks.find((t) => t.id === ui.compareTaskId))
 const canCompare = computed(() => !!task.value?.preview_src && !!task.value?.preview_path)
+// 视频对比直接播输入/输出文件，只有已完成的任务有输出
+const canVideo = computed(
+  () => task.value?.status === 'done' && !!task.value.input_path && !!task.value.output_path,
+)
+const mode = ref<'frames' | 'video'>('frames')
 const busy = computed(() => task.value?.status === 'running' || task.value?.status === 'queued')
 
 const fileName = computed(() => task.value?.input_path.split(/[\\/]/).pop() ?? '')
@@ -48,11 +54,20 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <NTag size="small" :bordered="false">{{ modelName }}</NTag>
         <NTag size="small" :bordered="false" type="info">{{ scaleLabel }}</NTag>
       </div>
+      <NRadioGroup v-model:value="mode" size="small">
+        <NRadioButton value="frames">静帧</NRadioButton>
+        <NRadioButton value="video" :disabled="!canVideo">视频</NRadioButton>
+      </NRadioGroup>
     </div>
 
     <div class="stage">
+      <VideoCompare
+        v-if="mode === 'video' && canVideo"
+        :src-path="task!.input_path"
+        :out-path="task!.output_path"
+      />
       <CompareSlider
-        v-if="canCompare"
+        v-else-if="canCompare"
         :src-url="api.previewUrl(task!.id, task!.updated_at, true)"
         :out-url="api.previewUrl(task!.id, task!.updated_at)"
       />

@@ -3,12 +3,12 @@
  * 关键策略：sidecar detached 拉起 —— UI 崩溃/退出时任务进程不受影响；
  * 有任务运行时退出 UI 不杀 sidecar，重启后自动复用。
  */
-import { app, BrowserWindow, dialog, ipcMain, net as electronNet, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
 import fs from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { Readable } from 'node:stream'
 
 // 本地视频预览协议：渲染进程 <video src="svvideo:///D%3A%2F...">。
 // 必须在 app ready 前注册 scheme（stream 特权支持视频随读随解）
@@ -318,12 +318,49 @@ function installUpdate(): void {
   getAutoUpdater().quitAndInstall(true, true)
 }
 
-app.whenReady().then(async () => {
-  // svvideo:///D%3A%2F... -> 本地文件流（剪切页预览用）
-  protocol.handle('svvideo', (req) => {
-    const p = decodeURIComponent(new URL(req.url).pathname)
-    return electronNet.fetch(pathToFileURL(p).toString())
+/** svvideo:/// -> 本地视频文件流（剪切页预览、对比页双视频播放用）。
+ * Range/206 必须自己实现：net.fetch(file://) 实测会丢失 Content-Length 且把
+ * Range 请求当 200 全量返回（Electron 43 验证），<video> 拿不到字节范围响应
+ * 就无法拖动进度条。URL 里盘符前的 "/" 需剥掉，否则路径被拼成 D:/D:/。 */
+const SV_MIME: Record<string, string> = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
+}
+
+async function serveSvVideo(req: Request): Promise<Response> {
+  const p = decodeURIComponent(new URL(req.url).pathname).replace(/^\/([A-Za-z]:[\\/])/, '$1')
+  const stat = await fs.promises.stat(p).catch(() => null)
+  if (!stat?.isFile()) return new Response('not found', { status: 404 })
+  const size = stat.size
+  const mime = SV_MIME[path.extname(p).toLowerCase()] ?? 'application/octet-stream'
+  const m = /bytes=(\d+)-(\d+)?/.exec(req.headers.get('range') ?? '')
+  if (m) {
+    const start = Math.min(Number(m[1]), Math.max(size - 1, 0))
+    const end = Math.min(m[2] ? Number(m[2]) : size - 1, size - 1)
+    return new Response(Readable.toWeb(fs.createReadStream(p, { start, end })) as unknown as BodyInit, {
+      status: 206,
+      headers: {
+        'Content-Type': mime,
+        'Content-Length': String(end - start + 1),
+        'Content-Range': `bytes ${start}-${end}/${size}`,
+        'Accept-Ranges': 'bytes',
+      },
+    })
+  }
+  return new Response(Readable.toWeb(fs.createReadStream(p)) as unknown as BodyInit, {
+    headers: {
+      'Content-Type': mime,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': String(size),
+    },
   })
+}
+
+app.whenReady().then(async () => {
+  protocol.handle('svvideo', serveSvVideo)
   try {
     await reapStaleSidecars()
     await startOrReuseSidecar()
