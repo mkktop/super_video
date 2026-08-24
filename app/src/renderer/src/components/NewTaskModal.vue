@@ -21,7 +21,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api, type ProbeInfo } from '../api'
-import { refreshTasks, store } from '../store'
+import { refreshTasks, store, ui } from '../store'
 
 const show = defineModel<boolean>('show', { default: false })
 const message = useMessage()
@@ -125,9 +125,7 @@ function canNext(): boolean {
 }
 
 // ---- 文件选择 ----
-async function pickInput() {
-  const files = await window.sv.pickVideo()
-  if (!files.length) return
+async function setInput(files: string[]) {
   inputs.value = files
   probeInfo.value = null
   if (files.length === 1) {
@@ -147,6 +145,22 @@ async function pickInput() {
     autoFillOutput()
   }
 }
+
+async function pickInput() {
+  const files = await window.sv.pickVideo()
+  if (!files.length) return
+  await setInput(files)
+}
+
+// 剪切页"去超分"入口：打开向导时预填输入
+watch(show, async (v) => {
+  if (v && ui.pendingInput) {
+    const p = ui.pendingInput
+    ui.pendingInput = null
+    step.value = 1
+    await setInput([p])
+  }
+})
 
 function autoFillOutput() {
   if (inputs.value.length === 1) {

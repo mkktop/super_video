@@ -8,6 +8,9 @@
 - **断点续跑**：取消/崩溃/重启后点"继续"从上次位置接着跑（GAN 分段 checkpoint，扩散分块 checkpoint）
 - **自定义输出分辨率**：原生超分后 lanczos 精确缩放到目标宽高（只缩不放、自动取偶），
   向导自动选覆盖目标的最小原生倍率；"高级选项"可手动调分块大小（tile）
+- **视频剪切**（侧栏"视频剪切"）：三种方式——智能（起点帧精确：头部转码+尾部流复制，
+  移植自 AIOV smart cut）/ 快速无损（关键帧吸附，秒级）/ 精确转码；片内预览设入出点，
+  剪完一键进入超分向导
 - **多模型**：AnimeVideo（动漫，快）、Real-CUGAN（动漫降噪）、Real-ESRGAN x4plus（真人）、
   x4plus PyTorch 版（分块断点续跑）、RIFE v4.26 补帧（帧率×2）；自定义 ONNX 导入
 - **推理**：DirectML 默认（全显卡兼容）+ FP16（提速 1.36~2.05x）；CUDA/PyTorch 组件可选
@@ -24,7 +27,7 @@ python -m venv .venv && .venv/Scripts/pip install -r backend/requirements.txt
 # 前端 + 桌面壳
 cd app && pnpm install && pnpm build && npx electron .
 
-# 测试（60 项，另 1 项按环境跳过）
+# 测试（67 项，另 1 项按环境跳过）
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
 ```
 

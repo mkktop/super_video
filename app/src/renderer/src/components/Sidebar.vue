@@ -4,6 +4,7 @@ import { store, ui } from '../store'
 
 const items = computed(() => [
   { key: 'home', label: '首页', icon: 'home' },
+  { key: 'trim', label: '视频剪切', icon: 'cut' },
   {
     key: 'tasks',
     label: '任务',
@@ -28,6 +29,11 @@ const items = computed(() => [
         <span class="icon">
           <svg v-if="it.icon === 'home'" width="16" height="16" viewBox="0 0 16 16">
             <path d="M2.5 7L8 2.5 13.5 7v6a1 1 0 0 1-1 1h-3v-4h-3v4h-3a1 1 0 0 1-1-1V7z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
+          </svg>
+          <svg v-if="it.icon === 'cut'" width="16" height="16" viewBox="0 0 16 16">
+            <circle cx="4" cy="12" r="1.9" fill="none" stroke="currentColor" stroke-width="1.3" />
+            <circle cx="12" cy="12" r="1.9" fill="none" stroke="currentColor" stroke-width="1.3" />
+            <path d="M5.4 10.6L12 2M10.6 10.6L4 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
           </svg>
           <svg v-else-if="it.icon === 'tasks'" width="16" height="16" viewBox="0 0 16 16">
             <path d="M5.5 3.5h8M5.5 8h8M5.5 12.5h8M2.5 3.5h.01M2.5 8h.01M2.5 12.5h.01" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />

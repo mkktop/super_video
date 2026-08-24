@@ -74,6 +74,20 @@ export interface Task {
   updated_at: number
 }
 
+export interface TrimJob {
+  state: 'queued' | 'running' | 'done' | 'failed'
+  progress: number
+  input: string
+  start_s: number
+  end_s: number
+  mode: string
+  output: string
+  error: string | null
+  actual_start_s?: number
+  duration_s?: number
+  notices?: string[]
+}
+
 export const api = {
   async models(): Promise<ModelInfo[]> {
     return (await fetch(`${baseUrl}/api/models`)).json()
@@ -161,5 +175,25 @@ export const api = {
   },
   previewUrl(id: string, updatedAt: number, src = false): string {
     return `${baseUrl}/api/tasks/${id}/preview?t=${updatedAt}${src ? '&src=1' : ''}`
+  },
+  async createTrim(body: {
+    input: string
+    start_s: number
+    end_s: number
+    mode: string
+    output?: string
+  }): Promise<{ job_id: string; output: string }> {
+    const r = await fetch(`${baseUrl}/api/trim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) throw new Error((await r.json()).detail ?? `HTTP ${r.status}`)
+    return r.json()
+  },
+  async trimStatus(id: string): Promise<TrimJob> {
+    const r = await fetch(`${baseUrl}/api/trim/${id}`)
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    return r.json()
   },
 }

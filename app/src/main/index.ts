@@ -3,11 +3,18 @@
  * 关键策略：sidecar detached 拉起 —— UI 崩溃/退出时任务进程不受影响；
  * 有任务运行时退出 UI 不杀 sidecar，重启后自动复用。
  */
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net as electronNet, protocol, shell } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import net from 'node:net'
 import path from 'node:path'
 import fs from 'node:fs'
+import { pathToFileURL } from 'node:url'
+
+// 本地视频预览协议：渲染进程 <video src="svvideo:///D%3A%2F...">。
+// 必须在 app ready 前注册 scheme（stream 特权支持视频随读随解）
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'svvideo', privileges: { stream: true, bypassCSP: true } },
+])
 
 let mainWindow: BrowserWindow | null = null
 let sidecar: ChildProcess | null = null
@@ -312,6 +319,11 @@ function installUpdate(): void {
 }
 
 app.whenReady().then(async () => {
+  // svvideo:///D%3A%2F... -> 本地文件流（剪切页预览用）
+  protocol.handle('svvideo', (req) => {
+    const p = decodeURIComponent(new URL(req.url).pathname)
+    return electronNet.fetch(pathToFileURL(p).toString())
+  })
   try {
     await reapStaleSidecars()
     await startOrReuseSidecar()

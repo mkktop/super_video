@@ -14,6 +14,7 @@ import TitleBar from './components/TitleBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import NewTaskModal from './components/NewTaskModal.vue'
 import Home from './pages/Home.vue'
+import Trim from './pages/Trim.vue'
 import Tasks from './pages/Tasks.vue'
 import Models from './pages/Models.vue'
 import Settings from './pages/Settings.vue'
@@ -58,6 +59,7 @@ onMounted(() => {
           <Sidebar v-if="ui.page !== 'compare'" />
           <main class="page" :class="{ 'page-full': ui.page === 'compare' }">
             <Home v-if="ui.page === 'home'" />
+            <Trim v-else-if="ui.page === 'trim'" />
             <Tasks v-else-if="ui.page === 'tasks'" />
             <Models v-else-if="ui.page === 'models'" />
             <Compare v-else-if="ui.page === 'compare'" />

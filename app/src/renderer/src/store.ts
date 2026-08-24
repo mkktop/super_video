@@ -21,10 +21,17 @@ export const store = reactive({
 
 /** 界面状态：当前页 / 新建任务弹窗 / 全页对比 */
 export const ui = reactive({
-  page: 'home' as 'home' | 'tasks' | 'models' | 'settings' | 'compare',
+  page: 'home' as 'home' | 'trim' | 'tasks' | 'models' | 'settings' | 'compare',
   showNewTask: false,
   compareTaskId: null as string | null,
+  pendingInput: null as string | null, // 打开向导时预填的输入（剪切→超分衔接）
 })
+
+/** 打开新建任务向导并预填输入文件 */
+export function openWizardWith(input: string) {
+  ui.pendingInput = input
+  ui.showNewTask = true
+}
 
 export function openCompare(taskId: string) {
   ui.compareTaskId = taskId

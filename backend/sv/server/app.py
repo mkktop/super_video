@@ -4,10 +4,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import queue
 import shutil
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +28,7 @@ from ..models.registry import (
 )
 from ..paths import ROOT, TEMP_DIR
 from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
+from ..pipeline.trim import run_trim
 from . import db
 from .engine_select import select_engine
 from .events import EventBus
@@ -444,6 +448,91 @@ def reorder_tasks(body: TaskReorder) -> dict:
     """按传入顺序重排排队任务（拖拽排序）；非排队 id 自动跳过。"""
     n = db.reorder_queued(body.ids)
     return {"ok": True, "reordered": n}
+
+
+# ---- 视频剪切（轻量后台任务，与超分队列独立；产物可直接作为超分输入）----
+
+
+class TrimCreate(BaseModel):
+    input: str
+    start_s: float = Field(ge=0)
+    end_s: float
+    mode: str = "smart"  # smart | fast | exact
+    output: str | None = None
+
+
+_trim_jobs: dict[str, dict] = {}
+_trim_queue: "queue.Queue[str]" = queue.Queue()
+
+
+def _trim_worker() -> None:
+    while True:
+        jid = _trim_queue.get()
+        job = _trim_jobs.get(jid)
+        if job is None:
+            continue
+        try:
+            res = run_trim(
+                job["input"], job["start_s"], job["end_s"], job["mode"], job["output"],
+                nvenc=bool(cached_hardware().get("nvenc")),
+                progress_cb=lambda p: job.update(state="running", progress=round(p, 4)),
+            )
+            job.update(
+                state="done", progress=1.0, output=str(res.output),
+                actual_start_s=round(res.actual_start, 3),
+                duration_s=round(res.duration_s, 3),
+                mode=res.mode, notices=res.notices,
+            )
+        except Exception as e:  # noqa: BLE001 — 后台线程兜底，任何异常写入状态
+            job.update(state="failed", error=str(e))
+
+
+threading.Thread(target=_trim_worker, daemon=True, name="trim-worker").start()
+
+
+def _ts_label(t: float) -> str:
+    m, s = divmod(int(t), 60)
+    return f"{m:02d}-{s:02d}"
+
+
+@app.post("/api/trim", status_code=201)
+def create_trim(body: TrimCreate) -> dict:
+    input_path = Path(body.input)
+    if not input_path.exists():
+        raise HTTPException(400, f"输入文件不存在: {body.input}")
+    if body.mode not in ("smart", "fast", "exact"):
+        raise HTTPException(400, "mode 仅支持 smart / fast / exact")
+    try:
+        info = probe(input_path)
+    except UnsupportedMedia as e:
+        raise HTTPException(422, str(e))
+    if body.end_s <= body.start_s:
+        raise HTTPException(400, "出点必须晚于入点")
+    if body.start_s >= info.duration_s:
+        raise HTTPException(400, "入点超出视频时长")
+    output = body.output or str(input_path.with_name(
+        f"{input_path.stem}_cut_{_ts_label(body.start_s)}-{_ts_label(body.end_s)}.mp4"
+    ))
+    # 简单 GC：完成态任务超过 50 个时丢最旧的
+    done_ids = [k for k, v in _trim_jobs.items() if v["state"] in ("done", "failed")]
+    for k in done_ids[: max(0, len(done_ids) - 50)]:
+        _trim_jobs.pop(k, None)
+    jid = uuid4().hex[:12]
+    _trim_jobs[jid] = {
+        "state": "queued", "progress": 0.0, "input": str(input_path),
+        "start_s": body.start_s, "end_s": body.end_s, "mode": body.mode,
+        "output": output, "error": None,
+    }
+    _trim_queue.put(jid)
+    return {"job_id": jid, "output": output}
+
+
+@app.get("/api/trim/{job_id}")
+def trim_status(job_id: str) -> dict:
+    job = _trim_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404)
+    return job
 
 
 @app.post("/api/tasks/{task_id}/resume")
