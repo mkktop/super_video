@@ -71,9 +71,11 @@ jobs:
             if ($r.id -ne $keep.id) { gh api -X DELETE "repos/${{ github.repository }}/releases/$($r.id)" | Out-Null }
           }
           $have = @($keep.assets.name)
-          $bm = "dist-app/super_video_${ver}_setup.exe.blockmap"
-          if (($have -notcontains (Split-Path $bm -Leaf)) -and (Test-Path $bm)) {
-            gh release upload $tag $bm --clobber
+          # blockmap(差分更新索引)刻意不发布: electron-updater 差分下载曾把旧版
+          # 安装包错拼成新更新(v0.1.1 两次复现), 无 blockmap 时自动回落全量+sha512 校验
+          foreach ($a in @($keep.assets | Where-Object { $_.name -like "*.blockmap" })) {
+            gh api -X DELETE "repos/${{ github.repository }}/releases/assets/$($a.id)" | Out-Null
+            Write-Host "已删除 blockmap 资产 $($a.name)"
           }
           if ($keep.draft) { gh release edit $tag --draft=false --title $tag }
 

@@ -164,6 +164,16 @@ if (!gotLock) {
 // ---- 自动更新（GitHub Releases，仅打包版；公共仓库无需 token） ----
 let updaterBusy = false
 
+/** electron-updater 懒加载。打包后动态 import 的 CJS 互操作可能拿到
+ * undefined（v0.1.1 实测手动检查报 TypeError），require 直取最稳。 */
+function getAutoUpdater(): import('electron-updater').AppUpdater {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const m = require('electron-updater')
+  const updater = m.autoUpdater ?? m.default?.autoUpdater
+  if (!updater) throw new Error('electron-updater 加载失败')
+  return updater
+}
+
 /** releaseNotes 归一化成字符串（GitHub provider 给 release 正文） */
 function normalizeNotes(raw: unknown): string {
   if (typeof raw === 'string') return raw.trim()
@@ -175,8 +185,12 @@ function normalizeNotes(raw: unknown): string {
 
 function setupAutoUpdate(): void {
   if (!app.isPackaged) return
-  import('electron-updater').then(({ autoUpdater }) => {
+  try {
+    const autoUpdater = getAutoUpdater()
     autoUpdater.autoDownload = true
+    // 差分下载实测会把旧版安装包错拼成"新更新"(v0.1.0→v0.1.1 两次复现)，
+    // 禁用后走全量下载 + sha512 校验，241MB 一次性代价换正确性
+    autoUpdater.disableDifferentialDownload = true
     autoUpdater.on('update-downloaded', (info) => {
       dialog
         .showMessageBox({
@@ -187,27 +201,30 @@ function setupAutoUpdate(): void {
           defaultId: 0,
         })
         .then((r) => {
-          if (r.response === 0) autoUpdater.quitAndInstall(false, true)
+          // 静默安装 + 装完自动拉起：辅助安装器(可选目录版)带 UI 运行会卡住更新流程
+          if (r.response === 0) autoUpdater.quitAndInstall(true, true)
         })
     })
     // 启动后 10s 静默检查一次
     setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 10_000)
-  })
+  } catch (e) {
+    console.error('[updater] 初始化失败:', e)
+  }
 }
 
 async function checkUpdateManually(): Promise<{
   status: string
   current: string
   version?: string
+  notes?: string
   error?: string
 }> {
   const current = app.getVersion()
   if (!app.isPackaged) return { status: 'dev', current }
-  const { autoUpdater } = await import('electron-updater')
   if (updaterBusy) return { status: 'busy', current }
   updaterBusy = true
   try {
-    const r = await autoUpdater.checkForUpdates()
+    const r = await getAutoUpdater().checkForUpdates()
     const newVersion = r?.updateInfo?.version
     if (newVersion && newVersion !== current) {
       return {
