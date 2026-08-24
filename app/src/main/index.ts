@@ -43,7 +43,11 @@ async function healthy(port: number): Promise<boolean> {
   if (!(await tryConnect(port))) return false
   try {
     const r = await fetch(`http://127.0.0.1:${port}/api/health`)
-    return r.ok
+    if (!r.ok) return false
+    // 必须是我们自己的 sidecar：校验健康标记。仅凭 200 会误复用端口上
+    // 恰好对任意路径返回 2xx 的其他程序（其他电脑上实测踩过）
+    const body = (await r.json()) as { ok?: boolean; version?: string }
+    return body?.ok === true && typeof body.version === 'string'
   } catch {
     return false
   }
@@ -85,14 +89,18 @@ async function startOrReuseSidecar(): Promise<string> {
     })
     sidecar.unref()
     fs.closeSync(logFd)
-    for (let i = 0; i < 40; i++) {
+    // 首次启动杀软可能全量扫描 sidecar 目录（155MB），20s 不够，放宽到 60s
+    for (let i = 0; i < 120; i++) {
       if (await healthy(p)) {
         console.log(`[sidecar] 已启动 ${baseUrl}（日志 ${logPath}）`)
         return baseUrl
       }
       await new Promise((r) => setTimeout(r, 500))
     }
-    throw new Error('sidecar 启动超时，请查看 .tmp/sidecar.log')
+    throw new Error(
+      `sidecar 启动超时（已等 60s，常见原因：杀毒软件拦截了未签名的 sidecar.exe，` +
+        `或安装目录不可写）。日志：${logPath}`
+    )
   }
   throw new Error('8730-8739 无可用端口')
 }
