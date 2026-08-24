@@ -67,6 +67,22 @@ def main(task_id: str) -> int:
     if not (1 <= target <= scale):
         emit({"type": "failed", "error": f"目标倍率 x{target} 无效（1 ~ x{scale}）"})
         return 1
+    # 精确目标分辨率（自定义分辨率模式）：优先于整数倍率，仍只允许"原生超分后缩小"
+    tw = params.get("target_w")
+    th = params.get("target_h")
+    if tw is not None or th is not None:
+        if not (isinstance(tw, int) and isinstance(th, int)):
+            emit({"type": "failed", "error": "target_w/target_h 需同时提供整数宽高"})
+            return 1
+        if not (info.width <= tw <= info.width * scale and info.height <= th <= info.height * scale):
+            emit({"type": "failed", "error": (
+                f"目标分辨率 {tw}x{th} 超出范围（源 {info.width}x{info.height} ~ "
+                f"原生上限 {info.width * scale}x{info.height * scale}）"
+            )})
+            return 1
+        target_size = (tw, th)
+    else:
+        target_size = None
     interp_mode = params.get("interp", "off")
     if interp_mode not in ("off", "rife2x"):
         emit({"type": "failed", "error": f"未知补帧模式 {interp_mode}"})
@@ -100,7 +116,8 @@ def main(task_id: str) -> int:
         "type": "started",
         "total_frames": out_total,
         "src_w": info.width, "src_h": info.height,
-        "out_w": info.width * target, "out_h": info.height * target,
+        "out_w": target_size[0] if target_size else info.width * target,
+        "out_h": target_size[1] if target_size else info.height * target,
         "output": str(output_path),
     })
 
@@ -143,6 +160,7 @@ def main(task_id: str) -> int:
             progress_cb=on_progress,
             preview_path=preview_dir / f"{task_id}.jpg",
             src_preview_path=preview_dir / f"{task_id}_src.jpg",
+            target_size=target_size,
         )
         try:
             stats = asyncio.run(pipeline.run())
@@ -213,7 +231,8 @@ def main(task_id: str) -> int:
         task_id=task_id,
         progress_cb=on_progress, preview_path=preview_path,
         src_preview_path=src_preview_path,
-        target_scale=target,
+        target_scale=None if target_size else target,
+        target_size=target_size,
         interp=interp,
     )
     try:

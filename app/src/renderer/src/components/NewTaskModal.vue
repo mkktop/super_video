@@ -3,10 +3,15 @@ import { computed, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
+  NCollapse,
+  NCollapseItem,
   NForm,
   NFormItem,
   NInput,
+  NInputNumber,
   NModal,
+  NRadio,
+  NRadioGroup,
   NSelect,
   NSlider,
   NSpace,
@@ -27,6 +32,10 @@ const probeInfo = ref<ProbeInfo | null>(null)
 const probing = ref(false)
 const modelId = ref('')
 const targetScale = ref(2)
+const resMode = ref<'scale' | 'custom'>('scale')
+const targetW = ref(0)
+const targetH = ref(0)
+const tileChoice = ref(0) // 0 = 模型默认
 const codec = ref('h264')
 const crf = ref(18)
 const interp = ref<'off' | 'rife2x'>('off')
@@ -57,6 +66,53 @@ const codecOptions = computed(() => [
 ])
 
 const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
+
+// ---- 自定义分辨率 ----
+const customAvailable = computed(
+  () => inputs.value.length === 1 && !!probeInfo.value?.ok,
+)
+const srcW = computed(() => probeInfo.value?.width ?? 0)
+const srcH = computed(() => probeInfo.value?.height ?? 0)
+const maxScale = computed(() => Math.max(...(selectedModel.value?.scale ?? [1])))
+// yuv420 编码要求偶数，奇数向下取整（后端同规则）
+const effW = computed(() => Math.max(2, Math.floor((targetW.value || 0) / 2) * 2))
+const effH = computed(() => Math.max(2, Math.floor((targetH.value || 0) / 2) * 2))
+// 纪律：只允许"原生超分后缩小"——取能覆盖目标的最小原生倍率（省算力）
+const customScale = computed(() =>
+  (selectedModel.value?.scale ?? []).find(
+    (s) => srcW.value * s >= effW.value && srcH.value * s >= effH.value,
+  ) ?? null,
+)
+const belowSrc = computed(() => effW.value < srcW.value || effH.value < srcH.value)
+const customOk = computed(
+  () => customAvailable.value && !belowSrc.value && customScale.value !== null,
+)
+const aspectNote = computed(() => {
+  if (!srcW.value || !srcH.value || !effW.value || !effH.value) return ''
+  const a1 = srcW.value / srcH.value
+  const a2 = effW.value / effH.value
+  return Math.abs(a1 - a2) / a1 > 0.01
+    ? `宽高比将由 ${a1.toFixed(2)} 变为 ${a2.toFixed(2)}（轻微拉伸）`
+    : ''
+})
+
+watch(resMode, (m) => {
+  if (m === 'custom' && probeInfo.value?.ok) {
+    targetW.value = probeInfo.value.width * targetScale.value
+    targetH.value = probeInfo.value.height * targetScale.value
+  }
+})
+watch(
+  () => inputs.value.length,
+  (n) => {
+    if (n !== 1) resMode.value = 'scale' // 批量无逐文件探测，只支持倍数模式
+  },
+)
+
+const tileOptions = [
+  { label: '自动（模型默认）', value: 0 },
+  ...[128, 192, 256, 384, 512, 768, 1024].map((v) => ({ label: `${v} px`, value: v })),
+]
 
 // ---- 步骤校验 ----
 const step1Ok = computed(() => inputs.value.length > 0 && !!probeInfo.value?.ok)
@@ -96,11 +152,13 @@ function autoFillOutput() {
   if (inputs.value.length === 1) {
     const p = inputs.value[0]
     const m = p.match(/^(.*?)(\.[^.]+)?$/)
-    output.value = `${m?.[1]}_${targetScale.value}x.mp4`
+    const suffix =
+      resMode.value === 'custom' ? `${effW.value}x${effH.value}` : `${targetScale.value}x`
+    output.value = `${m?.[1]}_${suffix}.mp4`
   }
 }
 
-watch(targetScale, autoFillOutput)
+watch([targetScale, resMode, effW, effH], autoFillOutput)
 
 async function pickOutputFile() {
   const p = await window.sv.pickOutput(output.value || 'output.mp4')
@@ -113,6 +171,8 @@ function applyPreset(pid: string) {
   if (!p) return
   modelId.value = p.model_id
   targetScale.value = p.target_scale
+  resMode.value = 'scale'
+  tileChoice.value = 0
   codec.value = p.codec
   crf.value = p.crf
   interp.value = (p as { interp?: 'off' | 'rife2x' }).interp ?? 'off'
@@ -125,9 +185,14 @@ function applyPreset(pid: string) {
 // ---- 提交 ----
 async function submit() {
   if (!inputs.value.length || !modelId.value) return
+  if (resMode.value === 'custom' && !customOk.value) {
+    message.error('自定义分辨率参数无效，请检查目标宽高')
+    return
+  }
   submitting.value = true
   let ok = 0
   let lastErr = ''
+  const scaleToSend = resMode.value === 'custom' ? customScale.value! : targetScale.value
   for (const input of inputs.value) {
     const out = inputs.value.length === 1 ? output.value || undefined : undefined
     const r = await api.createTask({
@@ -135,12 +200,14 @@ async function submit() {
       output: out,
       model_id: modelId.value,
       params: {
-        scale: targetScale.value,
-        target_scale: targetScale.value,
+        scale: scaleToSend,
+        target_scale: scaleToSend,
+        ...(resMode.value === 'custom' ? { target_w: effW.value, target_h: effH.value } : {}),
         codec: codec.value,
         crf: crf.value,
         interp: interp.value,
         ...(denoise.value !== null ? { denoise: denoise.value } : {}),
+        ...(tileChoice.value ? { tile: tileChoice.value } : {}),
       },
     })
     if (r.ok) ok++
@@ -247,13 +314,41 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
     <!-- Step 3: 输出 -->
     <div v-else class="step-body">
       <NForm label-placement="left" label-width="92">
-        <NFormItem label="放大倍数">
-          <NSelect v-model:value="targetScale" :options="scaleOptions" style="width: 140px" />
-          <NTag v-if="probeInfo && selectedModel" size="small" :bordered="false" style="margin-left: 10px">
-            {{ probeInfo.width }}x{{ probeInfo.height }} →
-            {{ probeInfo.width * targetScale }}x{{ probeInfo.height * targetScale }}
-          </NTag>
+        <NFormItem label="输出分辨率">
+          <div class="res-row">
+            <NRadioGroup v-model:value="resMode" size="small">
+              <NRadio value="scale">按倍数</NRadio>
+              <NRadio value="custom" :disabled="!customAvailable">自定义</NRadio>
+            </NRadioGroup>
+            <template v-if="resMode === 'scale'">
+              <NSelect v-model:value="targetScale" :options="scaleOptions" style="width: 110px" />
+              <NTag v-if="probeInfo && selectedModel" size="small" :bordered="false">
+                {{ probeInfo.width }}x{{ probeInfo.height }} →
+                {{ probeInfo.width * targetScale }}x{{ probeInfo.height * targetScale }}
+              </NTag>
+            </template>
+            <template v-else>
+              <NInputNumber v-model:value="targetW" :min="16" :max="7680" :step="2" size="small" style="width: 118px" />
+              <span class="res-x">×</span>
+              <NInputNumber v-model:value="targetH" :min="16" :max="4320" :step="2" size="small" style="width: 118px" />
+              <NTag v-if="customScale" size="small" :bordered="false" type="info">
+                x{{ customScale }} 超分后缩放
+              </NTag>
+            </template>
+          </div>
         </NFormItem>
+        <div v-if="resMode === 'custom'" class="res-hints">
+          <span v-if="belowSrc" class="res-err">
+            目标分辨率不能低于源分辨率（{{ srcW }}x{{ srcH }}）
+          </span>
+          <span v-else-if="!customScale" class="res-err">
+            超出该模型 x{{ maxScale }} 上限（{{ srcW * maxScale }}x{{ srcH * maxScale }}），请减小目标或换更高倍率模型
+          </span>
+          <span v-else-if="aspectNote" class="res-warn">{{ aspectNote }}</span>
+          <span v-else class="res-ok">
+            先以 x{{ customScale }} 原生超分，再 lanczos 缩放至 {{ effW }}x{{ effH }}（宽高自动取偶数）
+          </span>
+        </div>
         <NFormItem label="编码器">
           <NSelect v-model:value="codec" :options="codecOptions" style="width: 300px" />
         </NFormItem>
@@ -269,6 +364,16 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
         <NFormItem v-if="modelId === 'real-cugan'" label="降噪">
           <NSelect v-model:value="denoise" :options="denoiseOptions" style="width: 320px" placeholder="选择降噪档位" />
         </NFormItem>
+        <NCollapse class="adv-collapse" :default-expanded-names="[]">
+          <NCollapseItem title="高级选项" name="adv">
+            <NFormItem label="分块大小" :show-feedback="false">
+              <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
+            </NFormItem>
+            <div class="adv-note">
+              自动=按模型默认。显存不足或大分辨率卡顿时调小分块；分块越小越省显存但速度越慢。
+            </div>
+          </NCollapseItem>
+        </NCollapse>
         <NFormItem v-if="inputs.length === 1" label="输出到">
           <NInput v-model:value="output" placeholder="默认与输入同目录">
             <template #suffix>
@@ -287,7 +392,13 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
         <NButton :disabled="step === 1 || submitting" @click="step--">上一步</NButton>
         <NSpace>
           <NButton v-if="step < 3" type="primary" :disabled="!canNext()" @click="step++">下一步</NButton>
-          <NButton v-else type="primary" :loading="submitting" @click="submit">
+          <NButton
+            v-else
+            type="primary"
+            :loading="submitting"
+            :disabled="resMode === 'custom' && !customOk"
+            @click="submit"
+          >
             加入队列（{{ inputs.length || 0 }} 个）
           </NButton>
         </NSpace>
@@ -363,5 +474,16 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
 .m-warn { margin-top: 6px; font-size: 11.5px; color: #f87171; }
 
 .batch-note { font-size: 12.5px; color: #9aa0a6; }
+
+.res-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.res-x { color: #9aa0a6; }
+.res-hints { font-size: 12px; margin: -6px 0 2px 102px; min-height: 16px; }
+.res-err { color: #f87171; }
+.res-warn { color: #fbbf24; }
+.res-ok { color: #9aa0a6; }
+.adv-collapse { border: none; }
+.adv-collapse :deep(.n-collapse-item__header) { padding: 8px 0 0; }
+.adv-note { font-size: 12px; color: #9aa0a6; margin-top: 6px; }
+
 .footer { display: flex; justify-content: space-between; }
 </style>

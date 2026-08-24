@@ -132,6 +132,43 @@ def test_invalid_input_rejected(client, clips):
     assert r.status_code == 400  # animevideov3 只有 x4
 
 
+def test_custom_res_and_tile(client, clips):
+    """自定义分辨率（target_w/h）与 tile 参数：API 校验 + E2E 出片 480x270。"""
+    out = TEMP_DIR / "srv_custom_res.mp4"
+    # tiny=160x90，x4 原生上限 640x360
+    bad_cases = [
+        {"target_w": 480},                     # 缺 target_h
+        {"target_w": 100, "target_h": 90},     # 低于源分辨率
+        {"target_w": 642, "target_h": 360},    # 超出 x4 原生上限（641 取偶后=640 仍合法）
+        {"target_w": 480.5, "target_h": 270},  # 非整数
+        {"tile": 50},                          # tile 过小
+        {"tile": 255},                         # tile 奇数
+    ]
+    for extra in bad_cases:
+        r = client.post("/api/tasks", json={
+            "input": str(clips["tiny"]), "output": str(out),
+            "model_id": "realesr-animevideov3", "params": {"scale": 4, **extra},
+        })
+        assert r.status_code == 400, (extra, r.text)
+
+    r = client.post("/api/tasks", json={
+        "input": str(clips["tiny"]), "output": str(out),
+        "model_id": "realesr-animevideov3",
+        "params": {"scale": 4, "target_w": 481, "target_h": 270, "tile": 256},
+    })
+    assert r.status_code == 201, r.text
+    t = r.json()
+    assert t["params"]["target_w"] == 480  # 奇数向下取偶
+    assert t["params"]["target_h"] == 270
+    t = wait_status(client, t["id"], ("done", "failed"))
+    assert t["status"] == "done", t.get("error")
+    from sv.pipeline.probe import probe
+
+    o = probe(Path(out))
+    assert (o.width, o.height) == (480, 270)  # x4 原生超分后缩放
+    assert o.has_audio
+
+
 def test_cancel_running_kills_tree(client, clips):
     """取消运行中任务：状态 canceled、半成品清理、无残留子进程。"""
     me = psutil.Process()

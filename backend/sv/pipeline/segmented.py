@@ -47,6 +47,7 @@ class SegmentedPipeline:
         preview_path: Path | None = None,
         src_preview_path: Path | None = None,
         target_scale: int | None = None,
+        target_size: tuple[int, int] | None = None,  # 精确目标宽高；优先于 target_scale
         interp=None,
         seg_frames: int | None = None,  # 测试/调优：固定每段输入帧数
         cleanup: bool = True,  # 成功后删除工作目录（测试保留以便构造续跑场景）
@@ -61,6 +62,7 @@ class SegmentedPipeline:
         self.preview_path = preview_path
         self.src_preview_path = src_preview_path
         self.target_scale = target_scale
+        self.target_size = target_size
         self.interp = interp
         self.seg_frames = seg_frames
         self.cleanup = cleanup
@@ -100,6 +102,7 @@ class SegmentedPipeline:
                 preview_path=self.preview_path,
                 src_preview_path=self.src_preview_path,
                 target_scale=self.target_scale,
+                target_size=self.target_size,
                 interp=self.interp,
                 seek_s=(s / info.fps) if s > 0 else None,
                 max_frames=n_in,

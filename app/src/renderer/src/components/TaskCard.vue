@@ -56,8 +56,19 @@ function fmtBytes(b: number): string {
 }
 
 const scaleLabel = computed(() => {
-  const t = Number(props.task.params?.target_scale ?? props.task.params?.scale ?? 4)
+  const p = props.task.params ?? {}
+  const tw = p.target_w as number | undefined
+  const th = p.target_h as number | undefined
+  if (tw && th) return `${props.task.src_w}x${props.task.src_h} → ${tw}x${th}`
+  const t = Number(p.target_scale ?? p.scale ?? 4)
   return `${props.task.src_w}x${props.task.src_h} → ${props.task.src_w * t}x${props.task.src_h * t}`
+})
+
+const scaleBadge = computed(() => {
+  const p = props.task.params ?? {}
+  return p.target_w && p.target_h
+    ? `${p.target_w}×${p.target_h}`
+    : `x${p.target_scale ?? p.scale ?? 4}`
 })
 
 const isBusy = computed(() => props.task.status === 'running' || props.task.status === 'queued')
@@ -97,7 +108,7 @@ function onOpenFolder() {
       <div class="badges">
         <n-tag size="small" :bordered="false">{{ modelName }}</n-tag>
         <n-tag size="small" :bordered="false" type="info">
-          x{{ task.params?.target_scale ?? task.params?.scale ?? 4 }}
+          {{ scaleBadge }}
         </n-tag>
         <n-tag v-if="task.params?.interp === 'rife2x'" size="small" :bordered="false" type="success">
           补帧2×

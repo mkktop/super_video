@@ -6,6 +6,8 @@
 
 - **严格串行任务队列**：一次一个视频、每个任务参数独立（模型/倍率/编码/补帧/降噪）；排队任务可拖拽调整顺序
 - **断点续跑**：取消/崩溃/重启后点"继续"从上次位置接着跑（GAN 分段 checkpoint，扩散分块 checkpoint）
+- **自定义输出分辨率**：原生超分后 lanczos 精确缩放到目标宽高（只缩不放、自动取偶），
+  向导自动选覆盖目标的最小原生倍率；"高级选项"可手动调分块大小（tile）
 - **多模型**：AnimeVideo（动漫，快）、Real-CUGAN（动漫降噪）、Real-ESRGAN x4plus（真人）、
   x4plus PyTorch 版（分块断点续跑）、RIFE v4.26 补帧（帧率×2）；自定义 ONNX 导入
 - **推理**：DirectML 默认（全显卡兼容）+ FP16（提速 1.36~2.05x）；CUDA/PyTorch 组件可选
@@ -22,7 +24,7 @@ python -m venv .venv && .venv/Scripts/pip install -r backend/requirements.txt
 # 前端 + 桌面壳
 cd app && pnpm install && pnpm build && npx electron .
 
-# 测试（53 项）
+# 测试（60 项，另 1 项按环境跳过）
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
 ```
 
@@ -80,5 +82,6 @@ git push origin v0.1.5
 | 中文/空格路径 | ✅ 全程中文样本实测（samples/动漫测试*.mp4） |
 | 双开实例 | ✅ 单实例锁实测（二开聚焦已有窗口；sidecar 端口复用机制天然兼容） |
 | UI 崩溃/退出 | ✅ sidecar detached，任务不丢（M1 实测），重启自动复用 |
-| 无独显机器 | ⚠️ 未在本机实测；引擎 provider 链 DML→CPU 自动回落，理论可用（慢） |
-| 睡眠唤醒 | ⚠️ 未实测；sidecar/worker 独立进程，唤醒后继续，架构上安全 |
+| 无独显机器 | ✅ 代码级验证：DML 初始化失败回落 CPU 有单测模拟（test_target_res.py），CPU EP 端到端出片实测；真机无独显环境待外场抽检 |
+| 睡眠唤醒 | ✅ 进程树挂起/恢复 6s 模拟实测通过（backend/scripts/sim_sleep_wake.py，冻结后续跑、产物完整）；真实睡眠待外场 |
+| 跨版本升级 | ✅ v0.1.7 资产完整性校验（setup.exe 的 sha512/size 与 latest.yml 一致，即 updater 下载后校验必过）；Release 正文分节与 sliceNotes 切片对 0.1.3~0.1.7 全档验证（0.1.3→0.1.7 展示 0.1.7 节） |

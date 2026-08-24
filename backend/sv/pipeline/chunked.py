@@ -37,6 +37,7 @@ class ChunkedPipeline:
         cancel_event: asyncio.Event | None = None,
         preview_path: Path | None = None,
         src_preview_path: Path | None = None,
+        target_size: tuple[int, int] | None = None,  # 精确目标宽高；与引擎输出不同则编码时缩放
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -48,6 +49,7 @@ class ChunkedPipeline:
         self.cancel_event = cancel_event
         self.preview_path = preview_path
         self.src_preview_path = src_preview_path
+        self.target_size = target_size
         self.work_dir = TEMP_DIR / "chunked" / task_id
 
     def _run_ffmpeg(self, cmd: list[str]) -> None:
@@ -150,6 +152,10 @@ class ChunkedPipeline:
         else:
             cmd += ["-c:v", vcodec, "-crf", str(enc.crf), "-preset", enc.preset,
                     "-pix_fmt", "yuv420p"]
+        if self.target_size is not None:
+            tw, th = self.target_size
+            if (tw, th) != (info.width * tx.scale, info.height * tx.scale):
+                cmd += ["-vf", f"scale={tw}:{th}:flags=lanczos"]
         if info.has_audio and enc.audio_mode != "none":
             copyable = mp4_family and audio_codec in ("aac", "mp3", "ac3", "eac3", "alac")
             if copyable and enc.audio_mode in ("auto", "copy"):

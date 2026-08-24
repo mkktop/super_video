@@ -339,6 +339,26 @@ def create_task(body: TaskCreate) -> dict:
     if not (1 <= target <= scale):
         raise HTTPException(400, f"目标倍率需在 x1 ~ x{scale} 之间")
     params["target_scale"] = target
+    # 自定义分辨率：精确目标宽高，优先于整数倍率；纪律=原生超分后只缩不放
+    tw, th = params.get("target_w"), params.get("target_h")
+    if tw is not None or th is not None:
+        if not (isinstance(tw, int) and isinstance(th, int) and tw > 0 and th > 0):
+            raise HTTPException(400, "自定义分辨率需同时提供正整数 target_w/target_h")
+        tw, th = tw - tw % 2, th - th % 2  # yuv420 编码要求偶数，向下取整
+        if tw < info.width or th < info.height:
+            raise HTTPException(
+                400, f"目标分辨率不能低于源 {info.width}x{info.height}（当前 {tw}x{th}）")
+        if tw > info.width * scale or th > info.height * scale:
+            raise HTTPException(400, (
+                f"目标 {tw}x{th} 超出模型 x{scale} 原生上限 "
+                f"{info.width * scale}x{info.height * scale}，请提高放大倍数或换更高倍率模型"
+            ))
+        params["target_w"], params["target_h"] = tw, th
+        params["target_scale"] = scale  # 整数倍率字段退位为模型原生档
+    tile = int(params.get("tile", 0))
+    if tile != 0 and not (64 <= tile <= 4096 and tile % 2 == 0):
+        raise HTTPException(400, "tile 需为 0（自动）或 64~4096 的偶数像素")
+    params["tile"] = tile
     codec = params.get("codec", "h264")
     if codec not in ("h264", "h265", "h264_nvenc", "hevc_nvenc"):
         raise HTTPException(400, "codec 仅支持 h264/h265/h264_nvenc/hevc_nvenc")
@@ -358,8 +378,9 @@ def create_task(body: TaskCreate) -> dict:
         raise HTTPException(400, "crf 范围 0-51")
     params["crf"] = int(crf)
 
+    res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
     out = body.output or str(
-        input_path.with_name(f"{input_path.stem}_{target}x{input_path.suffix or '.mp4'}")
+        input_path.with_name(f"{input_path.stem}_{res_label}{input_path.suffix or '.mp4'}")
     )
     task = db.new_task(
         str(input_path), out, body.model_id, params,

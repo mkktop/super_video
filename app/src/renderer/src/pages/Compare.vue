@@ -17,6 +17,9 @@ const modelName = computed(
 const scaleLabel = computed(() => {
   const t = task.value
   if (!t) return ''
+  const tw = t.params?.target_w as number | undefined
+  const th = t.params?.target_h as number | undefined
+  if (tw && th) return `${t.src_w}x${t.src_h} → ${tw}x${th}`
   const k = Number(t.params?.target_scale ?? t.params?.scale ?? 4)
   return `${t.src_w}x${t.src_h} → ${t.src_w * k}x${t.src_h * k}`
 })

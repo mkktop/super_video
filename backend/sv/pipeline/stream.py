@@ -154,6 +154,7 @@ class StreamPipeline:
         src_preview_path: Path | None = None,  # 源首帧截图（对比预览用）
         preview_interval_s: float = 5.0,
         target_scale: int | None = None,  # 目标倍率；小于引擎倍率时编码器缩放
+        target_size: tuple[int, int] | None = None,  # 精确目标宽高；优先于 target_scale（仍只缩不放）
         interp=None,  # Rife2x 补帧引擎；非 None 时输出帧率 x2
         seek_s: float | None = None,  # 分段续跑：解码从该时间点开始（输入 seek）
         max_frames: int | None = None,  # 分段续跑：最多解码帧数
@@ -171,6 +172,7 @@ class StreamPipeline:
         self.src_preview_path = src_preview_path
         self.preview_interval_s = preview_interval_s
         self.target_scale = target_scale
+        self.target_size = target_size
         self.interp = interp
         self.seek_s = seek_s
         self.max_frames = max_frames
@@ -181,8 +183,11 @@ class StreamPipeline:
     async def run(self) -> RunStats:
         info, enc, tx = self.info, self.enc, self.tx
         frame_w, frame_h = info.width * tx.scale, info.height * tx.scale
-        target = self.target_scale or tx.scale
-        target_w, target_h = info.width * target, info.height * target
+        if self.target_size is not None:
+            target_w, target_h = self.target_size
+        else:
+            target = self.target_scale or tx.scale
+            target_w, target_h = info.width * target, info.height * target
         output_path = self.output_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
         mp4_family = output_path.suffix.lower() in (".mp4", ".m4v", ".mov")
