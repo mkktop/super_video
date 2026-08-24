@@ -3,6 +3,7 @@
 校验层直接调用路由函数（不起 TestClient/runner）：避免与 test_server 的
 runner 共享 SV_DB 产生双消费者竞争；任务行即建即删。
 """
+import os
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,23 @@ from sv.pipeline.stream import (
     video_codec_args,
 )
 from sv.utils.process import WINDOWS_CREATE_FLAGS
+
+
+@pytest.fixture(scope="module", autouse=True)
+def own_db(tmp_path_factory):
+    """独立库并在运行期生效：直调路由函数不经过 lifespan，
+    必须自建 schema；env 只在测试期改写、退出即还原，
+    不受其他模块 collection 期改写 SV_DB 的影响，也不影响它们。"""
+    old = os.environ.get("SV_DB")
+    os.environ["SV_DB"] = str(tmp_path_factory.mktemp("encode_opts") / "t.db")
+    from sv.server import db
+
+    db.init_db()
+    yield
+    if old is None:
+        os.environ.pop("SV_DB", None)
+    else:
+        os.environ["SV_DB"] = old
 
 
 # ---- 参数层 ----
@@ -151,7 +169,8 @@ def test_validation_hw_gated_codec(clip):
 
         db.delete_task(r["id"])  # 本机支持则任务成立（测试机多为 RTX，AV1 可用）
     except HTTPException as e:
-        assert e.value.status_code == 400 and "不可用" in str(e.detail)
+        # 裸 except 的 as e 就是异常对象本身，取属性直接 e.status_code
+        assert e.status_code == 400 and "不可用" in str(e.detail)
 
 
 def test_validation_denoise_levels(clip):
