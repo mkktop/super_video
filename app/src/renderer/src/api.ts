@@ -149,6 +149,16 @@ export const api = {
   async remove(id: string): Promise<Response> {
     return fetch(`${baseUrl}/api/tasks/${id}`, { method: 'DELETE' })
   },
+  async reorderTasks(ids: string[]): Promise<Response> {
+    return fetch(`${baseUrl}/api/tasks/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    })
+  },
+  async resume(id: string): Promise<Response> {
+    return fetch(`${baseUrl}/api/tasks/${id}/resume`, { method: 'POST' })
+  },
   previewUrl(id: string, updatedAt: number, src = false): string {
     return `${baseUrl}/api/tasks/${id}/preview?t=${updatedAt}${src ? '&src=1' : ''}`
   },

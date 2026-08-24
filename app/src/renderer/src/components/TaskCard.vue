@@ -67,6 +67,15 @@ async function onCancel() {
   if (!r.ok) message.error(`取消失败: ${(await r.json()).detail ?? r.status}`)
 }
 
+async function onResume() {
+  const r = await api.resume(props.task.id)
+  if (!r.ok) {
+    message.error(`续跑失败: ${(await r.json()).detail ?? r.status}`)
+  } else {
+    message.success('已加入队列，继续处理')
+  }
+}
+
 async function onDelete() {
   const r = await api.remove(props.task.id)
   if (!r.ok) message.error(`删除失败: ${(await r.json()).detail ?? r.status}`)
@@ -135,6 +144,15 @@ function onOpenFolder() {
         全页对比
       </NButton>
       <NButton v-if="isBusy" size="small" quaternary type="error" @click="onCancel">取消</NButton>
+      <NButton
+        v-if="task.status === 'failed' || task.status === 'canceled'"
+        size="small"
+        quaternary
+        type="info"
+        @click="onResume"
+      >
+        继续
+      </NButton>
       <NButton v-if="task.status === 'done'" size="small" quaternary type="info" @click="onOpenFolder">
         打开所在文件夹
       </NButton>

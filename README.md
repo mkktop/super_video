@@ -4,7 +4,8 @@
 
 ## 功能
 
-- **严格串行任务队列**：一次一个视频、每个任务参数独立（模型/倍率/编码/补帧/降噪）
+- **严格串行任务队列**：一次一个视频、每个任务参数独立（模型/倍率/编码/补帧/降噪）；排队任务可拖拽调整顺序
+- **断点续跑**：取消/崩溃/重启后点"继续"从上次位置接着跑（GAN 分段 checkpoint，扩散分块 checkpoint）
 - **多模型**：AnimeVideo（动漫，快）、Real-CUGAN（动漫降噪）、Real-ESRGAN x4plus（真人）、
   x4plus PyTorch 版（分块断点续跑）、RIFE v4.26 补帧（帧率×2）；自定义 ONNX 导入
 - **推理**：DirectML 默认（全显卡兼容）+ FP16（提速 1.36~2.05x）；CUDA/PyTorch 组件可选
@@ -21,7 +22,7 @@ python -m venv .venv && .venv/Scripts/pip install -r backend/requirements.txt
 # 前端 + 桌面壳
 cd app && pnpm install && pnpm build && npx electron .
 
-# 测试（47 项）
+# 测试（53 项）
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
 ```
 

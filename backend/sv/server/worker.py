@@ -26,7 +26,8 @@ from sv.models.fp16 import ensure_fp16_file
 from sv.models.registry import get_model, model_file
 from sv.paths import TEMP_DIR
 from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
-from sv.pipeline.stream import EncodeOpts, PipelineError, StreamPipeline, TaskCanceled
+from sv.pipeline.segmented import SegmentedPipeline
+from sv.pipeline.stream import EncodeOpts, PipelineError, TaskCanceled
 from sv.server import db, settings
 
 
@@ -201,13 +202,15 @@ def main(task_id: str) -> int:
             "fps": round(fps, 2), "eta_sec": int(eta),
         })
 
-    pipeline = StreamPipeline(
+    # 分段管线：取消/崩溃后"继续"可跳过已完成段（checkpoint 在 .tmp/segmented/<task_id>）
+    pipeline = SegmentedPipeline(
         info, output_path, engine,
         EncodeOpts(
             codec=params.get("codec", "h264"),
             crf=int(params.get("crf", 18)),
             preset=params.get("preset", "medium"),
         ),
+        task_id=task_id,
         progress_cb=on_progress, preview_path=preview_path,
         src_preview_path=src_preview_path,
         target_scale=target,

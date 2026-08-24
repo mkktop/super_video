@@ -1,5 +1,6 @@
 """sidecar 集成测试：串行队列 / 取消 / 任务参数独立性 / 产物正确性。"""
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -164,3 +165,69 @@ def test_delete_rules(client, clips):
     t = wait_status(client, tid, ("done",))
     assert client.delete(f"/api/tasks/{tid}").status_code == 200
     assert client.get(f"/api/tasks/{tid}").status_code == 404
+
+
+def _post_task(client, clips, out_name, model="realesr-animevideov3", params=None):
+    r = client.post("/api/tasks", json={
+        "input": str(clips["tiny"]), "output": str(TEMP_DIR / out_name),
+        "model_id": model, "params": params or {},
+    })
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_reorder_queue(client, clips):
+    """拖拽重排：反序提交后，排队任务按新顺序展示且 queue_position 同步。"""
+    ids = [_post_task(client, clips, f"srv_reorder_{i}.mp4") for i in range(3)]
+    # 调度器可能已取走部分任务（running 不在重排范围），重排只作用于仍排队的子集
+    r = client.post("/api/tasks/reorder", json={"ids": list(reversed(ids))})
+    assert r.status_code == 200 and r.json()["ok"]
+    tasks = client.get("/api/tasks").json()
+    queued = [t["id"] for t in tasks if t["status"] == "queued"]
+    expected = [i for i in reversed(ids) if i in queued]
+    assert queued == expected, f"排队顺序未按拖拽生效: {queued} vs {expected}"
+    qpos = {t["id"]: t["queue_position"] for t in tasks if t["status"] == "queued"}
+    for i, tid in enumerate(queued, 1):
+        assert qpos[tid] == i
+    for tid in ids:
+        wait_status(client, tid, ("done", "canceled", "failed"), timeout=60)
+
+
+def test_resume_api(client, clips):
+    """续跑状态机：取消→继续→回队列；重复继续 409；done 继续 409；不存在 404。"""
+    # 用长片保证取消落在运行中（能留下分段工作目录）
+    out = TEMP_DIR / "srv_resume_long.mp4"
+    r = client.post("/api/tasks", json={
+        "input": str(clips["medium"]), "output": str(out),
+        "model_id": "realesr-animevideov3", "params": {},
+    })
+    tid = r.json()["id"]
+    t = wait_status(client, tid, ("running", "done"), timeout=60)
+    if t["status"] == "done":  # 机器太快跑完了，改测 done 不可续
+        assert client.post(f"/api/tasks/{tid}/resume").status_code == 409
+        return
+    assert client.post(f"/api/tasks/{tid}/cancel").status_code == 200
+    t = wait_status(client, tid, ("canceled",), timeout=30)
+    assert client.post(f"/api/tasks/{tid}/resume").status_code == 200
+    assert client.get(f"/api/tasks/{tid}").json()["status"] == "queued"
+    assert client.post(f"/api/tasks/{tid}/resume").status_code == 409  # 已在排队
+    assert client.post(f"/api/tasks/{tid}/cancel").status_code == 200  # 清理队列
+    wait_status(client, tid, ("canceled",), timeout=30)
+
+    # done 任务不可续
+    done_id = _post_task(client, clips, "srv_resume_done.mp4")
+    wait_status(client, done_id, ("done",), timeout=60)
+    assert client.post(f"/api/tasks/{done_id}/resume").status_code == 409
+
+    # 不存在 → 404
+    assert client.post("/api/tasks/not_exist/resume").status_code == 404
+
+    # 有进度但续跑数据被清理 → 409 且提示重建任务
+    from sv.server import db
+
+    gid = _post_task(client, clips, "srv_resume_gone.mp4")
+    db.update_task(gid, status="canceled", progress_frames=100)
+    shutil.rmtree(TEMP_DIR / "segmented" / gid, ignore_errors=True)
+    rr = client.post(f"/api/tasks/{gid}/resume")
+    assert rr.status_code == 409
+    assert "续跑数据已不存在" in rr.json()["detail"]

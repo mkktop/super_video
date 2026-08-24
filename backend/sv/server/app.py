@@ -19,6 +19,7 @@ from ..models.registry import (
     BUNDLED_DIR,
     USER_REGISTRY_DIR,
     ModelNotFoundError,
+    get_model,
     load_registry,
     model_dir,
 )
@@ -410,6 +411,46 @@ def remove_task(task_id: str) -> dict:
         raise HTTPException(409, "任务运行中，请先取消")
     if not db.delete_task(task_id):
         raise HTTPException(409, "删除失败")
+    return {"ok": True}
+
+
+class TaskReorder(BaseModel):
+    ids: list[str]
+
+
+@app.post("/api/tasks/reorder")
+def reorder_tasks(body: TaskReorder) -> dict:
+    """按传入顺序重排排队任务（拖拽排序）；非排队 id 自动跳过。"""
+    n = db.reorder_queued(body.ids)
+    return {"ok": True, "reordered": n}
+
+
+@app.post("/api/tasks/{task_id}/resume")
+def resume_task(task_id: str) -> dict:
+    """续跑失败/取消的任务：回到队列，worker 按 checkpoint 跳过已完成部分。"""
+    t = db.get_task(task_id)
+    if t is None:
+        raise HTTPException(404)
+    if t["status"] not in ("failed", "canceled"):
+        raise HTTPException(409, "仅失败或取消的任务可续跑")
+    if not Path(t["input_path"]).exists():
+        raise HTTPException(409, "输入文件已不存在，无法续跑")
+    try:
+        spec = get_model(t["model_id"])
+    except ModelNotFoundError:
+        raise HTTPException(409, "模型已不存在，无法续跑")
+    # 流式(ONNX)任务续跑依赖分段工作目录；无目录时仅当任务从未开始（无进度）才允许从头重跑。
+    # torch 任务无目录则从头跑（解码是幂等的）
+    if spec.engine == "onnx" and not (TEMP_DIR / "segmented" / task_id).exists() \
+            and (t["progress_frames"] or 0) > 0:
+        raise HTTPException(409, "续跑数据已不存在（临时目录被清理），请新建任务")
+    # 半成品输出已在失败/取消时删除；万一残留，续跑前清掉避免混淆
+    try:
+        Path(t["output_path"]).unlink(missing_ok=True)
+    except OSError:
+        pass
+    db.update_task(task_id, status="queued", error=None, progress_frames=0)
+    bus.publish({"type": "task_status", "task_id": task_id, "status": "queued"})
     return {"ok": True}
 
 

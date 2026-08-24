@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   progress_frames INTEGER DEFAULT 0,
   fps_run REAL DEFAULT 0, eta_sec REAL DEFAULT 0,
   error TEXT, preview_path TEXT,
-  out_bytes INTEGER DEFAULT 0, elapsed_s REAL DEFAULT 0
+  out_bytes INTEGER DEFAULT 0, elapsed_s REAL DEFAULT 0,
+  queue_order REAL DEFAULT 0             -- 排队顺序（拖拽排序）；running 取任务时保留原值
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at);
 """
@@ -65,11 +66,14 @@ def init_db() -> None:
         for ddl in (
             "ALTER TABLE tasks ADD COLUMN preview_src TEXT",
             "ALTER TABLE tasks ADD COLUMN elapsed_s REAL DEFAULT 0",
+            "ALTER TABLE tasks ADD COLUMN queue_order REAL DEFAULT 0",
         ):
             try:
                 c.execute(ddl)
             except sqlite3.OperationalError:
                 pass
+        # queue_order 回填为创建时间：老库保持原有 FIFO 相对顺序
+        c.execute("UPDATE tasks SET queue_order = created_at WHERE queue_order = 0")
 
 
 def new_task(input_path: str, output_path: str, model_id: str, params: dict,
@@ -78,14 +82,15 @@ def new_task(input_path: str, output_path: str, model_id: str, params: dict,
     now = time.time()
     src = src or {}
     with db_conn() as c:
+        qo = c.execute("SELECT COALESCE(MAX(queue_order), 0) + 1 FROM tasks").fetchone()[0]
         c.execute(
             "INSERT INTO tasks (id, created_at, updated_at, input_path, output_path,"
-            " model_id, params, status, src_w, src_h, fps, total_frames)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " model_id, params, status, src_w, src_h, fps, total_frames, queue_order)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (task_id, now, now, input_path, output_path, model_id,
              json.dumps(params, ensure_ascii=False), "queued",
              src.get("w", 0), src.get("h", 0), src.get("fps", 0.0),
-             src.get("total_frames", 0)),
+             src.get("total_frames", 0), qo),
         )
     return get_task(task_id)
 
@@ -103,17 +108,23 @@ def get_task(task_id: str) -> dict | None:
 
 
 def list_tasks() -> list[dict]:
+    """任务列表：运行/排队在前（按 queue_order），其余按创建时间倒序（最新在上）。"""
     with db_conn() as c:
-        rows = c.execute("SELECT * FROM tasks ORDER BY created_at ASC").fetchall()
+        rows = c.execute(
+            "SELECT * FROM tasks"
+            " ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,"
+            "          CASE WHEN status = 'queued' THEN queue_order END ASC,"
+            "          created_at DESC"
+        ).fetchall()
     return [_row2dict(r) for r in rows]
 
 
 def next_queued() -> dict | None:
-    """取下一个排队任务（FIFO），原子置为 running。"""
+    """取下一个排队任务（按 queue_order，即用户拖拽后的顺序），原子置为 running。"""
     with db_conn() as c:
         r = c.execute(
             "SELECT * FROM tasks WHERE status='queued'"
-            " ORDER BY created_at ASC LIMIT 1"
+            " ORDER BY queue_order ASC LIMIT 1"
         ).fetchone()
         if r is None:
             return None
@@ -124,6 +135,19 @@ def next_queued() -> dict | None:
         if c.total_changes == 0:
             return None  # 并发竞争下被别人取走
         return _row2dict(r)
+
+
+def reorder_queued(ids: list[str]) -> int:
+    """按传入顺序重排排队任务（queue_order=1..n）；运行中/已结束/不存在的 id 跳过。"""
+    n = 0
+    with db_conn() as c:
+        for i, tid in enumerate(ids, 1):
+            cur = c.execute(
+                "UPDATE tasks SET queue_order=?, updated_at=? WHERE id=? AND status='queued'",
+                (i, time.time(), tid),
+            )
+            n += cur.rowcount
+    return n
 
 
 def update_task(task_id: str, **fields) -> None:

@@ -41,15 +41,25 @@ class TaskCanceled(Exception):
     pass
 
 
-def decoder_cmd(input_path: Path, cfr_fps: str | None = None) -> list[str]:
+def decoder_cmd(
+    input_path: Path,
+    cfr_fps: str | None = None,
+    seek_s: float | None = None,
+    max_frames: int | None = None,
+) -> list[str]:
     cmd = [
         ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-i", str(input_path), "-map", "0:v:0", "-an", "-sn", "-dn",
-        "-f", "rawvideo", "-pix_fmt", "rgb24",
-        "-sws_flags", "lanczos+accurate_rnd+full_chroma_int",
     ]
+    if seek_s is not None:
+        # 输入 seek（-ss 在 -i 前）：CFR 源帧精确；VFR 源 ±1-2 帧偏差（分段续跑可接受）
+        cmd += ["-ss", f"{seek_s:.6f}"]
+    cmd += ["-i", str(input_path), "-map", "0:v:0", "-an", "-sn", "-dn",
+            "-f", "rawvideo", "-pix_fmt", "rgb24",
+            "-sws_flags", "lanczos+accurate_rnd+full_chroma_int"]
     if cfr_fps:
         cmd += ["-r", cfr_fps]  # VFR 源按平均帧率 CFR 化（补/丢帧）
+    if max_frames is not None:
+        cmd += ["-frames:v", str(max_frames)]
     cmd.append("-")
     return cmd
 
@@ -67,6 +77,16 @@ def fps_double(fps_str: str) -> str:
     from fractions import Fraction
 
     return str(Fraction(fps_str) * 2)
+
+
+def audio_args(enc: EncodeOpts, mp4_family: bool, audio_codec: str | None) -> list[str]:
+    """音轨参数：mp4 家族且编码可拷则 copy，否则转 aac 192k；audio_mode=none 不带。"""
+    if enc.audio_mode == "none":
+        return []
+    copyable = mp4_family and audio_codec in _MP4_AUDIO_COPY_OK
+    if copyable and enc.audio_mode in ("auto", "copy"):
+        return ["-c:a", "copy"]
+    return ["-c:a", "aac", "-b:a", "192k"]
 
 
 def encoder_cmd(
@@ -110,17 +130,11 @@ def encoder_cmd(
         cmd += ["-vf", f"scale={target_w}:{target_h}:flags=lanczos"]
 
     if has_audio:
-        keep = enc.audio_mode != "none"
-        copyable = mp4_family and audio_codec in _MP4_AUDIO_COPY_OK
-        if keep and copyable and enc.audio_mode in ("auto", "copy"):
-            cmd += ["-c:a", "copy"]
-        elif keep:
-            cmd += ["-c:a", "aac", "-b:a", "192k"]
+        cmd += audio_args(enc, mp4_family, audio_codec)
     if mp4_family:
         cmd += ["-movflags", "+faststart"]
     cmd += [str(output_path)]
     return cmd
-
 
 class StreamPipeline:
     """逐帧流式超分管线。
@@ -141,6 +155,11 @@ class StreamPipeline:
         preview_interval_s: float = 5.0,
         target_scale: int | None = None,  # 目标倍率；小于引擎倍率时编码器缩放
         interp=None,  # Rife2x 补帧引擎；非 None 时输出帧率 x2
+        seek_s: float | None = None,  # 分段续跑：解码从该时间点开始（输入 seek）
+        max_frames: int | None = None,  # 分段续跑：最多解码帧数
+        with_audio: bool = True,  # 分段编码不挂音轨（最终 concat 时统一合成）
+        seg_start: int = 0,  # 分段续跑：本段在总输出帧中的起始偏移（进度上报用）
+        seg_total: int | None = None,  # 分段续跑：总输出帧数覆盖（进度上报用）
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -153,6 +172,11 @@ class StreamPipeline:
         self.preview_interval_s = preview_interval_s
         self.target_scale = target_scale
         self.interp = interp
+        self.seek_s = seek_s
+        self.max_frames = max_frames
+        self.with_audio = with_audio
+        self.seg_start = seg_start
+        self.seg_total = seg_total
 
     async def run(self) -> RunStats:
         info, enc, tx = self.info, self.enc, self.tx
@@ -166,14 +190,16 @@ class StreamPipeline:
         out_fps_str = fps_double(info.fps_str) if self.interp is not None else info.fps_str
 
         dec = asyncio.create_subprocess_exec(
-            *decoder_cmd(info.path, cfr_fps=info.fps_str if info.vfr else None),
+            *decoder_cmd(info.path, cfr_fps=info.fps_str if info.vfr else None,
+                         seek_s=self.seek_s, max_frames=self.max_frames),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,
         )
         enc_proc = asyncio.create_subprocess_exec(
             *encoder_cmd(info.path, output_path, frame_w, frame_h, target_w, target_h,
-                         out_fps_str, enc, info.has_audio, audio_codec, mp4_family),
+                         out_fps_str, enc, self.with_audio and info.has_audio,
+                         audio_codec, mp4_family),
             stdin=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,
@@ -185,7 +211,8 @@ class StreamPipeline:
         drain_enc = asyncio.create_task(self._drain(p_enc.stderr, enc_err))
 
         frame_size = info.width * info.height * 3
-        total = info.total_frames * (2 if self.interp is not None else 1)
+        total = self.seg_total if self.seg_total is not None else info.total_frames * (2 if self.interp is not None else 1)
+        local_total = total - self.seg_start  # 本段应产出的帧数（分段续跑时 < total）
         t0 = time.perf_counter()
         frames = 0
         last_cb = 0.0
@@ -222,11 +249,11 @@ class StreamPipeline:
                 if self.src_preview_path is not None:
                     self._save_jpg(src_frame, self.src_preview_path)
                 last_preview = now
-            if self.progress_cb and (now - last_cb >= 0.5 or frames == total):
+            if self.progress_cb and (now - last_cb >= 0.5 or frames == local_total):
                 elapsed = now - t0
                 fps = frames / elapsed if elapsed > 0 else 0.0
-                eta = (total - frames) / fps if fps > 0 else 0.0
-                self.progress_cb(frames, total, fps, eta)
+                eta = (total - self.seg_start - frames) / fps if fps > 0 else 0.0
+                self.progress_cb(self.seg_start + frames, total, fps, eta)
                 last_cb = now
 
         try:
