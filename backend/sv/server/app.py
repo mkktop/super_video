@@ -363,6 +363,10 @@ def create_task(body: TaskCreate) -> dict:
     if tile != 0 and not (64 <= tile <= 4096 and tile % 2 == 0):
         raise HTTPException(400, "tile 需为 0（自动）或 64~4096 的偶数像素")
     params["tile"] = tile
+    out_kind = params.get("out_kind", "video")
+    if out_kind not in ("video", "png", "jpg"):
+        raise HTTPException(400, "out_kind 仅支持 video / png / jpg")
+    params["out_kind"] = out_kind
     codec = params.get("codec", "h264")
     if codec not in ("h264", "h265", "h264_nvenc", "hevc_nvenc"):
         raise HTTPException(400, "codec 仅支持 h264/h265/h264_nvenc/hevc_nvenc")
@@ -383,9 +387,15 @@ def create_task(body: TaskCreate) -> dict:
     params["crf"] = int(crf)
 
     res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
-    out = body.output or str(
-        input_path.with_name(f"{input_path.stem}_{res_label}{input_path.suffix or '.mp4'}")
-    )
+    if out_kind == "video":
+        out = body.output or str(
+            input_path.with_name(f"{input_path.stem}_{res_label}{input_path.suffix or '.mp4'}")
+        )
+    else:
+        # 图片序列：输出是文件夹，帧图按 000001.png 起逐帧编号
+        out = body.output or str(input_path.with_name(f"{input_path.stem}_{res_label}_frames"))
+        if Path(out).exists() and not Path(out).is_dir():
+            raise HTTPException(400, "图片序列的输出路径需为文件夹")
     task = db.new_task(
         str(input_path), out, body.model_id, params,
         src={"w": info.width, "h": info.height, "fps": info.fps,

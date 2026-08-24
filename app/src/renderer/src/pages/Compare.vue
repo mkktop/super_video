@@ -8,9 +8,11 @@ import VideoCompare from '../components/VideoCompare.vue'
 
 const task = computed(() => store.tasks.find((t) => t.id === ui.compareTaskId))
 const canCompare = computed(() => !!task.value?.preview_src && !!task.value?.preview_path)
-// 视频对比直接播输入/输出文件，只有已完成的任务有输出
+// 视频对比直接播输入/输出文件，只有已完成的任务有输出；
+// 图片序列任务的输出是目录（svvideo 404），按扩展名排除
 const canVideo = computed(
-  () => task.value?.status === 'done' && !!task.value.input_path && !!task.value.output_path,
+  () => task.value?.status === 'done' && !!task.value.input_path && !!task.value.output_path
+    && /\.(mp4|m4v|mov|webm|mkv)$/i.test(task.value.output_path),
 )
 const mode = ref<'frames' | 'video'>('frames')
 const busy = computed(() => task.value?.status === 'running' || task.value?.status === 'queued')

@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('sv', {
   },
   pickVideo: () => ipcRenderer.invoke('dialog:pickVideo') as Promise<string[]>,
   pickOutput: (suggest: string) => ipcRenderer.invoke('dialog:pickOutput', suggest) as Promise<string | null>,
+  pickDir: () => ipcRenderer.invoke('dialog:pickDir') as Promise<string | null>,
   pickModel: () => ipcRenderer.invoke('dialog:pickModel') as Promise<string | null>,
   saveLog: (content: string) => ipcRenderer.invoke('dialog:saveLog', content) as Promise<string | null>,
   showInFolder: (p: string) => ipcRenderer.invoke('shell:showInFolder', p),

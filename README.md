@@ -13,6 +13,8 @@
   剪完一键进入超分向导
 - **视频对比**：对比页"静帧/视频"双模式——视频模式源/超分双路同步播放、拖动分割线
   擦除对比、可拖进度条（svvideo:// 协议自实现 Range/206 支持任意位置秒拖）
+- **图片序列输出**：超分结果可按 PNG（无损）/JPG 逐帧导出，`000001.png` 起按帧号
+  连续编号；分段全局续编号，断点续跑不重写已完成帧；两条管线（ONNX 分段/torch 分块）均支持
 - **多模型**：AnimeVideo（动漫，快）、Real-CUGAN（动漫降噪）、Real-ESRGAN x4plus（真人）、
   x4plus PyTorch 版（分块断点续跑）、RIFE v4.26 补帧（帧率×2）；自定义 ONNX 导入
 - **推理**：DirectML 默认（全显卡兼容）+ FP16（提速 1.36~2.05x）；CUDA/PyTorch 组件可选
@@ -29,7 +31,7 @@ python -m venv .venv && .venv/Scripts/pip install -r backend/requirements.txt
 # 前端 + 桌面壳
 cd app && pnpm install && pnpm build && npx electron .
 
-# 测试（67 项，另 1 项按环境跳过）
+# 测试（73 项，另 1 项按环境跳过）
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
 ```
 

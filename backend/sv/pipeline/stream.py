@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ class EncodeOpts:
     crf: int = 18
     preset: str = "medium"
     audio_mode: str = "auto"  # auto: 兼容则 copy，否则转 aac；none: 丢弃音轨
+    out_kind: str = "video"  # video | png | jpg——图片序列=整视频逐帧导出（无音轨）
 
 
 @dataclass
@@ -39,6 +41,26 @@ class PipelineError(RuntimeError):
 
 class TaskCanceled(Exception):
     pass
+
+
+_IMG_NAME_RE = re.compile(r"^(\d{6})\.(png|jpg)$")
+
+
+def iter_image_frames(d: Path) -> list[tuple[int, Path]]:
+    """目录内按帧号命名的图片（000001.png / 000002.jpg…），返回 (帧号, 路径) 升序。"""
+    if not d.is_dir():
+        return []
+    out: list[tuple[int, Path]] = []
+    for f in d.iterdir():
+        m = _IMG_NAME_RE.match(f.name)
+        if m and f.is_file():
+            out.append((int(m.group(1)), f))
+    out.sort()
+    return out
+
+
+def image_dir_bytes(d: Path) -> int:
+    return sum(f.stat().st_size for _, f in iter_image_frames(d))
 
 
 def decoder_cmd(
@@ -101,7 +123,21 @@ def encoder_cmd(
     has_audio: bool,
     audio_codec: str | None,
     mp4_family: bool,
+    start_number: int = 1,  # 图片序列：本段首帧的全局帧号（分段续跑全局编号）
 ) -> list[str]:
+    if enc.out_kind != "video":
+        # 图片序列：image2 复用器一帧一图；无音轨/封装参数
+        cmd = [
+            ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "rawvideo", "-pix_fmt", "rgb24",
+            "-video_size", f"{frame_w}x{frame_h}", "-framerate", fps_str, "-i", "pipe:0",
+        ]
+        if (target_w, target_h) != (frame_w, frame_h):
+            cmd += ["-vf", f"scale={target_w}:{target_h}:flags=lanczos"]
+        if enc.out_kind == "jpg":
+            cmd += ["-c:v", "mjpeg", "-q:v", "2"]  # qscale 2 ≈ 高质量
+        cmd += ["-start_number", str(start_number), "-f", "image2", str(output_path)]
+        return cmd
     cmd = [
         ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
         "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -161,6 +197,7 @@ class StreamPipeline:
         with_audio: bool = True,  # 分段编码不挂音轨（最终 concat 时统一合成）
         seg_start: int = 0,  # 分段续跑：本段在总输出帧中的起始偏移（进度上报用）
         seg_total: int | None = None,  # 分段续跑：总输出帧数覆盖（进度上报用）
+        frame_start: int = 1,  # 图片序列分段：本段首帧全局帧号（000001 起编号）
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -179,6 +216,7 @@ class StreamPipeline:
         self.with_audio = with_audio
         self.seg_start = seg_start
         self.seg_total = seg_total
+        self.frame_start = frame_start
 
     async def run(self) -> RunStats:
         info, enc, tx = self.info, self.enc, self.tx
@@ -204,7 +242,7 @@ class StreamPipeline:
         enc_proc = asyncio.create_subprocess_exec(
             *encoder_cmd(info.path, output_path, frame_w, frame_h, target_w, target_h,
                          out_fps_str, enc, self.with_audio and info.has_audio,
-                         audio_codec, mp4_family),
+                         audio_codec, mp4_family, start_number=self.frame_start),
             stdin=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,

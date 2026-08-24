@@ -113,6 +113,14 @@ function onOpenFolder() {
         <n-tag v-if="task.params?.interp === 'rife2x'" size="small" :bordered="false" type="success">
           补帧2×
         </n-tag>
+        <n-tag
+          v-if="task.params?.out_kind === 'png' || task.params?.out_kind === 'jpg'"
+          size="small"
+          :bordered="false"
+          type="warning"
+        >
+          {{ String(task.params.out_kind).toUpperCase() }} 序列
+        </n-tag>
         <n-tag size="small" :bordered="false" :type="statusMeta[task.status].type">
           {{ statusMeta[task.status].label }}{{ task.queue_position ? ` #${task.queue_position}` : '' }}
         </n-tag>

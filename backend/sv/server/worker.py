@@ -87,6 +87,10 @@ def main(task_id: str) -> int:
     if interp_mode not in ("off", "rife2x"):
         emit({"type": "failed", "error": f"未知补帧模式 {interp_mode}"})
         return 1
+    out_kind = params.get("out_kind", "video")
+    if out_kind not in ("video", "png", "jpg"):
+        emit({"type": "failed", "error": f"未知输出类型 {out_kind}"})
+        return 1
     denoise = params.get("denoise")  # real-cugan 降噪档：3 → denoise3 变体
     variant = f"denoise{int(denoise)}" if denoise else None
 
@@ -155,6 +159,7 @@ def main(task_id: str) -> int:
                 codec=params.get("codec", "h264"),
                 crf=int(params.get("crf", 18)),
                 preset=params.get("preset", "medium"),
+                out_kind=out_kind,
             ),
             task_id=task_id, chunk=int(params.get("chunk") or 32),
             progress_cb=on_progress,
@@ -227,6 +232,7 @@ def main(task_id: str) -> int:
             codec=params.get("codec", "h264"),
             crf=int(params.get("crf", 18)),
             preset=params.get("preset", "medium"),
+            out_kind=out_kind,
         ),
         task_id=task_id,
         progress_cb=on_progress, preview_path=preview_path,

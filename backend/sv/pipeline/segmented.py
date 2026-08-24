@@ -29,6 +29,8 @@ from .stream import (
     StreamPipeline,
     TaskCanceled,
     audio_args,
+    image_dir_bytes,
+    iter_image_frames,
 )
 
 
@@ -89,14 +91,25 @@ class SegmentedPipeline:
 
         starts = list(range(0, total_in, seg))
         t0 = time.perf_counter()
+        img_mode = self.enc.out_kind != "video"
+        img_dir: Path | None = None
+        if img_mode:
+            # 图片序列：每段直写最终目录（-start_number 全局续编号），无需 concat。
+            # 全新任务先清掉旧编号图（上次更长的运行可能留下高帧号残留）
+            img_dir = self.output_path
+            if not done:
+                img_dir.mkdir(parents=True, exist_ok=True)
+                for _, f in iter_image_frames(img_dir):
+                    f.unlink()
         for s in starts:
             if s in done:
                 continue  # 续跑：跳过已完成段
             if self.cancel_event is not None and self.cancel_event.is_set():
                 raise TaskCanceled()
             n_in = min(seg, total_in - s)
+            seg_out = (img_dir / f"%06d.{self.enc.out_kind}") if img_mode else work / f"seg_{s:06d}.mp4"
             pipe = StreamPipeline(
-                info, work / f"seg_{s:06d}.mp4", tx, self.enc,
+                info, seg_out, tx, self.enc,
                 progress_cb=self.progress_cb,
                 cancel_event=self.cancel_event,
                 preview_path=self.preview_path,
@@ -109,10 +122,28 @@ class SegmentedPipeline:
                 with_audio=False,  # 段只编视频，音轨最后统一合成
                 seg_start=s * factor,
                 seg_total=total_out,
+                frame_start=s * factor + 1 if img_mode else 1,
             )
             await pipe.run()
             done.add(s)
             self._save_ckpt(work, ckpt_file, done)
+
+        if img_mode:
+            # 成功后裁掉可能残留的高帧号图；统计目录体积作为产物大小
+            assert img_dir is not None
+            for num, f in iter_image_frames(img_dir):
+                if num > total_out:
+                    f.unlink()
+            elapsed = time.perf_counter() - t0
+            if self.cleanup:
+                shutil.rmtree(work, ignore_errors=True)
+            return RunStats(
+                frames=total_out,
+                elapsed_s=elapsed,
+                fps=total_out / elapsed if elapsed > 0 else 0.0,
+                out_path=self.output_path,
+                out_bytes=image_dir_bytes(img_dir),
+            )
 
         # 最终合成：视频段 concat + 源音轨（与 encoder_cmd 同款 copy/aac 逻辑）
         seglist = work / "segments.txt"

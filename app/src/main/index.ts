@@ -426,6 +426,12 @@ ipcMain.handle('dialog:pickOutput', async (_e, suggest: string) => {
   return r.canceled ? null : r.filePath
 })
 
+ipcMain.handle('dialog:pickDir', async () => {
+  // 图片序列输出目录选择
+  const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+  return r.canceled ? null : r.filePaths[0]
+})
+
 ipcMain.handle('shell:showInFolder', (_e, p: string) => {
   shell.showItemInFolder(p)
 })

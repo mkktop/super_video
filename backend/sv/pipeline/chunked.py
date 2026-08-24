@@ -19,7 +19,15 @@ from PIL import Image
 from ..paths import TEMP_DIR, ffmpeg_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS
 from .probe import MediaInfo
-from .stream import EncodeOpts, PipelineError, RunStats, TaskCanceled, _VCODECS
+from .stream import (
+    EncodeOpts,
+    PipelineError,
+    RunStats,
+    TaskCanceled,
+    _VCODECS,
+    image_dir_bytes,
+    iter_image_frames,
+)
 
 
 class ChunkedPipeline:
@@ -95,6 +103,7 @@ class ChunkedPipeline:
         n = self._decode_stage(src_dir)
         ckpt_file = self.work_dir / "checkpoint.json"
         done: set[int] = set(json.loads(ckpt_file.read_text())["done"]) if ckpt_file.exists() else set()
+        done_at_start = bool(done)  # 图片序列：非续跑时清掉最终目录的旧编号图
 
         starts = list(range(0, n, self.chunk))
         frames_done = sum(min(s + self.chunk, n) - s for s in done)
@@ -129,6 +138,39 @@ class ChunkedPipeline:
             done.add(s)
             self._save_ckpt(done)
             report()
+
+        # ---- 输出：图片序列（PNG 直通/转 JPG）或视频 ----
+        if enc.out_kind != "video":
+            final_dir = self.output_path  # 图片序列输出是目录
+            final_dir.mkdir(parents=True, exist_ok=True)
+            if not done_at_start:
+                for _, f in iter_image_frames(final_dir):
+                    f.unlink()
+            cmd = [
+                ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+                "-framerate", info.fps_str, "-i", str(out_dir / "f%06d.png"),
+            ]
+            scale_needed = self.target_size is not None and self.target_size != (
+                info.width * tx.scale, info.height * tx.scale
+            )
+            if scale_needed:
+                cmd += ["-vf", f"scale={self.target_size[0]}:{self.target_size[1]}:flags=lanczos"]
+            if enc.out_kind == "jpg":
+                cmd += ["-c:v", "mjpeg", "-q:v", "2"]
+            elif not scale_needed:
+                cmd += ["-c:v", "copy"]  # PNG→PNG 直通，不重压
+            cmd += ["-f", "image2", str(final_dir / f"%06d.{enc.out_kind}")]
+            await asyncio.get_event_loop().run_in_executor(None, self._run_ffmpeg, cmd)
+            for num, f in iter_image_frames(final_dir):  # 裁掉历史残留高帧号
+                if num > n:
+                    f.unlink()
+            report(force=True)
+            shutil.rmtree(self.work_dir, ignore_errors=True)  # 成功后清理
+            return RunStats(
+                frames=n, elapsed_s=time.perf_counter() - t0,
+                fps=n / (time.perf_counter() - t0),
+                out_path=final_dir, out_bytes=image_dir_bytes(final_dir),
+            )
 
         # ---- 编码：PNG 序列 + 源音轨 ----
         output_path = self.output_path

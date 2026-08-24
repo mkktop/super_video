@@ -11,6 +11,7 @@ import {
   NInputNumber,
   NModal,
   NRadio,
+  NRadioButton,
   NRadioGroup,
   NSelect,
   NSlider,
@@ -36,6 +37,7 @@ const resMode = ref<'scale' | 'custom'>('scale')
 const targetW = ref(0)
 const targetH = ref(0)
 const tileChoice = ref(0) // 0 = 模型默认
+const outKind = ref<'video' | 'png' | 'jpg'>('video')
 const codec = ref('h264')
 const crf = ref(18)
 const interp = ref<'off' | 'rife2x'>('off')
@@ -66,6 +68,13 @@ const codecOptions = computed(() => [
 ])
 
 const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
+
+const isImage = computed(() => outKind.value !== 'video')
+const imgFrameHint = computed(() => {
+  if (!isImage.value || !probeInfo.value?.ok) return ''
+  const n = probeInfo.value.total_frames * (interp.value === 'rife2x' ? 2 : 1)
+  return `将导出全部 ${n} 帧，按 000001.${outKind.value} 顺序编号`
+})
 
 // ---- 自定义分辨率 ----
 const customAvailable = computed(
@@ -168,13 +177,20 @@ function autoFillOutput() {
     const m = p.match(/^(.*?)(\.[^.]+)?$/)
     const suffix =
       resMode.value === 'custom' ? `${effW.value}x${effH.value}` : `${targetScale.value}x`
-    output.value = `${m?.[1]}_${suffix}.mp4`
+    output.value = isImage.value
+      ? `${m?.[1]}_${suffix}_frames`
+      : `${m?.[1]}_${suffix}.mp4`
   }
 }
 
-watch([targetScale, resMode, effW, effH], autoFillOutput)
+watch([targetScale, resMode, effW, effH, outKind], autoFillOutput)
 
 async function pickOutputFile() {
+  if (isImage.value) {
+    const p = await window.sv.pickDir()
+    if (p) output.value = p
+    return
+  }
   const p = await window.sv.pickOutput(output.value || 'output.mp4')
   if (p) output.value = p
 }
@@ -187,6 +203,7 @@ function applyPreset(pid: string) {
   targetScale.value = p.target_scale
   resMode.value = 'scale'
   tileChoice.value = 0
+  outKind.value = 'video'
   codec.value = p.codec
   crf.value = p.crf
   interp.value = (p as { interp?: 'off' | 'rife2x' }).interp ?? 'off'
@@ -217,8 +234,9 @@ async function submit() {
         scale: scaleToSend,
         target_scale: scaleToSend,
         ...(resMode.value === 'custom' ? { target_w: effW.value, target_h: effH.value } : {}),
-        codec: codec.value,
-        crf: crf.value,
+        ...(isImage.value
+          ? { out_kind: outKind.value }
+          : { codec: codec.value, crf: crf.value }),
         interp: interp.value,
         ...(denoise.value !== null ? { denoise: denoise.value } : {}),
         ...(tileChoice.value ? { tile: tileChoice.value } : {}),
@@ -328,6 +346,14 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
     <!-- Step 3: 输出 -->
     <div v-else class="step-body">
       <NForm label-placement="left" label-width="92">
+        <NFormItem label="输出格式">
+          <NRadioGroup v-model:value="outKind" size="small">
+            <NRadioButton value="video">视频</NRadioButton>
+            <NRadioButton value="png">PNG 图片序列</NRadioButton>
+            <NRadioButton value="jpg">JPG 图片序列</NRadioButton>
+          </NRadioGroup>
+          <span v-if="imgFrameHint" class="img-hint">{{ imgFrameHint }}</span>
+        </NFormItem>
         <NFormItem label="输出分辨率">
           <div class="res-row">
             <NRadioGroup v-model:value="resMode" size="small">
@@ -363,10 +389,10 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
             先以 x{{ customScale }} 原生超分，再 lanczos 缩放至 {{ effW }}x{{ effH }}（宽高自动取偶数）
           </span>
         </div>
-        <NFormItem label="编码器">
+        <NFormItem v-if="outKind === 'video'" label="编码器">
           <NSelect v-model:value="codec" :options="codecOptions" style="width: 300px" />
         </NFormItem>
-        <NFormItem label="画质 (CRF)">
+        <NFormItem v-if="outKind === 'video'" label="画质 (CRF)">
           <NSlider v-model:value="crf" :min="12" :max="30" :step="1" :marks="{ 14: '近无损', 18: '推荐', 24: '小体积' }" />
         </NFormItem>
         <NFormItem label="补帧">
@@ -490,6 +516,7 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
 .batch-note { font-size: 12.5px; color: #9aa0a6; }
 
 .res-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.img-hint { margin-left: 12px; font-size: 12px; color: #9aa0a6; }
 .res-x { color: #9aa0a6; }
 .res-hints { font-size: 12px; margin: -6px 0 2px 102px; min-height: 16px; }
 .res-err { color: #f87171; }
