@@ -44,6 +44,7 @@ def main() -> None:
     sd = torch.load(str(pth), map_location="cpu", weights_only=True)
     net.load_state_dict(sd.get("params_ema", sd), strict=True)
 
+    out.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
         Normalized(net).eval(), torch.randn(1, 3, 64, 64), str(out),
         input_names=["input"], output_names=["output"],
