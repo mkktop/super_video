@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -15,7 +15,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api } from '../api'
-import { refreshModels, store } from '../store'
+import { checkAppUpdate, refreshModels, store } from '../store'
 
 const message = useMessage()
 const engine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
@@ -33,6 +33,7 @@ const proxyMode = ref<'auto' | 'direct' | 'custom'>('auto')
 const proxyAddr = ref('')
 const savingProxy = ref(false)
 const perfSampling = ref(true)
+const autoCheck = ref(true)
 const proxyOptions = [
   { label: '跟随系统代理', value: 'auto' },
   { label: '直连（不走代理）', value: 'direct' },
@@ -47,10 +48,12 @@ onMounted(async () => {
     precision?: 'fp16' | 'fp32'
     download_proxy?: string
     perf_sampling?: boolean
+    auto_update_check?: boolean
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
   perfSampling.value = s.perf_sampling !== false
+  autoCheck.value = s.auto_update_check !== false
   const p = s.download_proxy ?? ''
   if (p === 'direct') proxyMode.value = 'direct'
   else if (p.startsWith('http')) {
@@ -66,8 +69,30 @@ onMounted(async () => {
     downloading.value = false
     updateMsg.value = `新版本 v${v} 已下载完成，点击"立即重启"生效`
   })
-  checkUpdate() // 静默检查：打开设置页即感知新版本，无需先点按钮
 })
+
+/** 更新区显示跟随启动检查结果(启动时只查一次,进设置页不再发起网络检查) */
+watch(
+  () => store.update,
+  (u) => {
+    if (!u.checked) return
+    if (u.status === 'dev') {
+      updateMsg.value = '开发模式不检查更新（打包版自动检查 GitHub Releases）'
+    } else if (u.status === 'available') {
+      updateVersion.value = u.version
+      updateNotes.value = u.notes
+      updateMsg.value = `发现新版本 v${u.version}，点击"下载更新"获取（全量安装包）${
+        u.notes ? '（悬浮在"检查更新"上可查看更新内容）' : ''
+      }`
+    } else if (u.status === 'latest') {
+      updateVersion.value = ''
+      updateMsg.value = `已是最新版本（${u.current}）`
+    } else if (u.status === 'error') {
+      updateMsg.value = `检查失败：${u.error ?? '未知错误'}（发布前属正常，见 README 发布流程）`
+    }
+  },
+  { deep: true, immediate: true },
+)
 
 onUnmounted(() => {
   offProgress?.()
@@ -99,31 +124,20 @@ async function savePerfSampling(v: boolean) {
   }
 }
 
+async function saveAutoCheck(v: boolean) {
+  const r = await api.saveSettings({ auto_update_check: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    autoCheck.value = !v
+  }
+}
+
 async function checkUpdate() {
   checking.value = true
   updateMsg.value = ''
   updateNotes.value = ''
   try {
-    const r = await window.sv.checkUpdate()
-    if (r.status === 'dev') {
-      updateVersion.value = ''
-      readyVersion.value = ''
-      updateMsg.value = '开发模式不检查更新（打包版自动检查 GitHub Releases）'
-    } else if (r.status === 'available') {
-      updateVersion.value = r.version ?? ''
-      updateNotes.value = r.notes ?? ''
-      updateMsg.value = `发现新版本 v${updateVersion.value}，点击"下载更新"获取（全量安装包）${
-        updateNotes.value ? '（悬浮在"检查更新"上可查看更新内容）' : ''
-      }`
-    } else if (r.status === 'latest') {
-      updateVersion.value = ''
-      readyVersion.value = ''
-      updateMsg.value = `已是最新版本（${r.current}）`
-    } else if (r.status === 'error') {
-      updateMsg.value = `检查失败：${r.error ?? '未知错误'}（发布前属正常，见 README 发布流程）`
-    } else {
-      updateMsg.value = '检查中，请稍候'
-    }
+    await checkAppUpdate() // 结果进 store.update,由 watcher 刷新本页与顶栏
   } finally {
     checking.value = false
   }
@@ -248,6 +262,10 @@ async function saveEngine() {
       </div>
       <NProgress v-if="downloading" :percentage="downloadPercent" :height="6" style="margin-top: 10px" />
       <p v-if="updateMsg" class="hint" style="margin-top: 8px">{{ updateMsg }}</p>
+      <div class="update-row" style="margin-top: 12px">
+        <span>启动时自动检查更新（有新版本时在顶栏版本号旁提示）</span>
+        <NSwitch v-model:value="autoCheck" size="small" @update:value="saveAutoCheck" />
+      </div>
     </NCard>
 
     <NCard title="本机环境" size="small">

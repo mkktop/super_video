@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { store, ui } from '../store'
 
 const maximized = ref(false)
 const version = ref('')
@@ -8,6 +9,9 @@ let off: (() => void) | null = null
 const minimize = () => window.sv.win.minimize()
 const toggleMax = () => window.sv.win.toggleMaximize()
 const close = () => window.sv.win.close()
+
+// 启动检查发现新版本 → 版本号旁常驻提示,点击去设置页处理
+const hasUpdate = computed(() => store.update.status === 'available')
 
 onMounted(async () => {
   off = window.sv.win.onMaximized((m) => (maximized.value = m))
@@ -22,6 +26,15 @@ onUnmounted(() => off?.())
       <span class="mark">⬆</span>
       <span class="name">super_video</span>
       <span class="ver">v{{ version }}</span>
+      <button
+        v-if="hasUpdate"
+        class="upd"
+        title="发现新版本,点击前往设置页下载"
+        @click="ui.page = 'settings'"
+      >
+        <span class="upd-dot" />
+        v{{ store.update.version }} 可更新
+      </button>
     </div>
     <div class="controls">
       <button class="ctl" title="最小化" @click="minimize">
@@ -93,6 +106,37 @@ onUnmounted(() => off?.())
   padding: 1px 8px;
   margin-left: 2px;
   letter-spacing: 0.3px;
+}
+.upd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #4f8cff;
+  background: rgba(79, 140, 255, 0.12);
+  border: 1px solid rgba(79, 140, 255, 0.45);
+  border-radius: 8px;
+  padding: 1px 9px;
+  margin-left: 6px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s, color 0.15s;
+}
+.upd:hover {
+  background: rgba(79, 140, 255, 0.24);
+  color: #6fa0ff;
+}
+.upd-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4f8cff;
+  box-shadow: 0 0 6px rgba(79, 140, 255, 0.9);
+  animation: upd-pulse 2s ease-in-out infinite;
+}
+@keyframes upd-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 .controls {
   display: flex;

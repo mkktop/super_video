@@ -24,6 +24,15 @@ export const store = reactive({
     latest: null as PerfSample | null,
     samples: [] as PerfSample[], // 最近 1 小时,与后端环形缓冲同步
   },
+  settings: {} as Record<string, unknown>,
+  update: {
+    checked: false, // 启动检查是否已完成(只查一次)
+    status: '' as '' | 'dev' | 'available' | 'latest' | 'error',
+    version: '',
+    current: '',
+    notes: '',
+    error: '',
+  },
   hardware: null as null | {
     gpus: Array<{ name: string; vram_gb: number | null }>
     cpu: string
@@ -191,6 +200,23 @@ function connectWs() {
   ws.onerror = () => ws.close()
 }
 
+/** 应用更新检查:启动一次 + 设置页手动触发,结果共享给顶栏提示与设置页 */
+export async function checkAppUpdate() {
+  try {
+    const r = await window.sv.checkUpdate()
+    store.update.status = r.status
+    store.update.version = r.version ?? ''
+    store.update.current = r.current ?? ''
+    store.update.notes = r.notes ?? ''
+    store.update.error = r.error ?? ''
+  } catch (e) {
+    store.update.status = 'error'
+    store.update.error = String(e)
+  } finally {
+    store.update.checked = true
+  }
+}
+
 export async function initStore() {
   await initBase()
   store.models = await api.models()
@@ -198,11 +224,18 @@ export async function initStore() {
   store.hardware = (await api.hardware()) as NonNullable<typeof store.hardware>
   store.gpuName = store.hardware.gpus?.[0]?.name ?? '未知显卡'
   store.engine = await api.engine()
+  try {
+    store.settings = await api.settings()
+  } catch {
+    /* 设置读取失败按默认(自动检查开) */
+  }
   await Promise.all([refreshTasks(), refreshStats(), refreshPerf()])
   connectWs()
   schedulePoll()
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) refreshTasks()
   })
+  // 启动只检查一次更新,可在设置中关闭;异步进行不阻塞界面就绪
+  if (store.settings.auto_update_check !== false) void checkAppUpdate()
   store.ready = true
 }

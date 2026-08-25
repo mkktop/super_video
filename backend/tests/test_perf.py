@@ -62,15 +62,20 @@ def test_disabled_by_setting(monkeypatch):
 
 
 def test_settings_toggle_validation(tmp_path, monkeypatch):
-    """开关持久化:bool 合法,非 bool 拒绝。"""
+    """bool 开关持久化:合法落盘,非 bool 拒绝(perf_sampling / auto_update_check)。"""
     monkeypatch.setattr("sv.server.settings.SETTINGS_PATH", tmp_path / "s.json")
     from sv.server.settings import DEFAULTS, load, save
 
     assert DEFAULTS["perf_sampling"] is True
+    assert DEFAULTS["auto_update_check"] is True
     assert save({"perf_sampling": False})["perf_sampling"] is False
+    assert save({"auto_update_check": False})["auto_update_check"] is False
     assert load()["perf_sampling"] is False
+    assert load()["auto_update_check"] is False
     with pytest.raises(ValueError):
         save({"perf_sampling": "yes"})
+    with pytest.raises(ValueError):
+        save({"auto_update_check": 1})
 
 
 def test_publishes_perf_event():
