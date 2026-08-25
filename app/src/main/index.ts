@@ -29,6 +29,35 @@ function findRoot(): string {
   throw new Error('找不到项目根目录（需包含 .venv 与 backend）')
 }
 
+/** 数据目录（模型/组件/任务库/日志）解析。
+ *  正确位置 = 安装目录的同级目录：NSIS 更新/卸载只清空安装目录本身
+ *  （RMDir $INSTDIR），同级不受影响。注意 dirname(resourcesPath) 是安装
+ *  目录本身——v0.1.21~v0.2.1 的坑：数据建在了安装目录里，每次更新都被
+ *  旧卸载器连带清空。 */
+function resolveDataRoot(root: string): string {
+  if (!app.isPackaged) return root
+  const installDir = path.dirname(root)
+  const wrong = path.join(installDir, 'super_video_data') // 误建位置
+  const sibling = path.join(path.dirname(installDir), 'super_video_data')
+  try {
+    // 旧位置数据搬到新位置（同盘 rename 原子；新位置已存在则不动，不覆盖）
+    if (fs.existsSync(wrong) && !fs.existsSync(sibling)) {
+      fs.mkdirSync(path.dirname(sibling), { recursive: true })
+      fs.renameSync(wrong, sibling)
+      console.log(`[data] 已迁移数据目录 ${wrong} → ${sibling}`)
+    }
+    fs.mkdirSync(sibling, { recursive: true })
+    fs.accessSync(sibling, fs.constants.W_OK)
+    return sibling
+  } catch (e) {
+    // 安装在 Program Files 等不可写位置时退回用户目录（数据仍在安装目录外）
+    const fallback = path.join(app.getPath('appData'), 'super_video_data')
+    console.warn(`[data] 同级目录不可用(${e})，改用 ${fallback}`)
+    fs.mkdirSync(fallback, { recursive: true })
+    return fallback
+  }
+}
+
 function tryConnect(port: number, timeoutMs = 800): Promise<boolean> {
   return new Promise((resolve) => {
     const s = net.connect({ port, host: '127.0.0.1' }, () => {
@@ -107,9 +136,8 @@ async function startOrReuseSidecar(): Promise<string> {
   // 2) 全新拉起（detached：独立于 Electron 生命周期）
   const root = findRoot()
   const isPackaged = app.isPackaged
-  // 数据目录放安装目录同级（更新时旧版卸载器会清空安装目录，数据在里面会被
-  // 连带删掉——v0.1.20 及之前的坑）；sidecar 侧同名 SV_DATA，另含一次性迁移
-  const dataRoot = isPackaged ? path.join(path.dirname(root), 'super_video_data') : root
+  // 数据目录在安装目录外（详见 resolveDataRoot 注释）；sidecar 侧同名 SV_DATA
+  const dataRoot = resolveDataRoot(root)
   const logPath = path.join(dataRoot, '.tmp', 'sidecar.log')
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
   const logFd = fs.openSync(logPath, 'a')
