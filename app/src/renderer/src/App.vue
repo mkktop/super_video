@@ -12,8 +12,8 @@ import {
 import { initStore, ui } from './store'
 import TitleBar from './components/TitleBar.vue'
 import Sidebar from './components/Sidebar.vue'
-import NewTaskModal from './components/NewTaskModal.vue'
 import Home from './pages/Home.vue'
+import NewTask from './pages/NewTask.vue'
 import Trim from './pages/Trim.vue'
 import Tasks from './pages/Tasks.vue'
 import Models from './pages/Models.vue'
@@ -60,6 +60,8 @@ onMounted(() => {
         <div class="body">
           <Sidebar v-if="ui.page !== 'compare'" />
           <main class="page" :class="{ 'page-full': ui.page === 'compare' }">
+            <!-- 新建任务页 v-show 常驻挂载：填一半切去别的页再回来，草稿不丢 -->
+            <NewTask v-show="ui.page === 'newtask'" />
             <Home v-if="ui.page === 'home'" />
             <Trim v-else-if="ui.page === 'trim'" />
             <Tasks v-else-if="ui.page === 'tasks'" />
@@ -67,10 +69,9 @@ onMounted(() => {
             <Perf v-else-if="ui.page === 'perf'" />
             <Logs v-else-if="ui.page === 'logs'" />
             <Compare v-else-if="ui.page === 'compare'" />
-            <Settings v-else />
+            <Settings v-else-if="ui.page === 'settings'" />
           </main>
         </div>
-        <NewTaskModal v-model:show="ui.showNewTask" />
       </div>
     </n-message-provider>
   </n-config-provider>

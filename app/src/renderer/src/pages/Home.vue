@@ -42,7 +42,7 @@ const hw = computed(() => store.hardware)
         <h1>视频超分<span class="grad">工作台</span></h1>
         <p>低分辨率视频 · AI 重建 · 高清输出　让老片重获新生</p>
         <div class="hero-actions">
-          <NButton type="primary" size="large" @click="ui.showNewTask = true">＋ 新建超分任务</NButton>
+          <NButton type="primary" size="large" @click="ui.page = 'newtask'">＋ 新建超分任务</NButton>
           <NButton size="large" quaternary @click="ui.page = 'tasks'">查看任务队列</NButton>
         </div>
       </div>

@@ -62,7 +62,7 @@ function onDrop() {
         <h1>任务队列</h1>
         <p class="sub">严格串行执行 · 一次处理一个视频 · 拖拽排队任务可调整顺序</p>
       </div>
-      <NButton type="primary" @click="ui.showNewTask = true">＋ 新建任务</NButton>
+      <NButton type="primary" @click="ui.page = 'newtask'">＋ 新建任务</NButton>
     </div>
 
     <NEmpty

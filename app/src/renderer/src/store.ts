@@ -45,9 +45,10 @@ export const store = reactive({
   },
 })
 
-/** 界面状态：当前页 / 新建任务弹窗 / 全页对比 */
+/** 界面状态：当前页 / 全页对比 / 新建任务页预填输入 */
 export const ui = reactive({
   page: 'home' as
+    | 'newtask'
     | 'home'
     | 'trim'
     | 'tasks'
@@ -56,15 +57,14 @@ export const ui = reactive({
     | 'logs'
     | 'settings'
     | 'compare',
-  showNewTask: false,
   compareTaskId: null as string | null,
-  pendingInput: null as string | null, // 打开向导时预填的输入（剪切→超分衔接）
+  pendingInput: null as string | null, // 跳转新建任务页时预填的输入（剪切→超分衔接）
 })
 
-/** 打开新建任务向导并预填输入文件 */
+/** 跳转新建任务页并预填输入文件 */
 export function openWizardWith(input: string) {
   ui.pendingInput = input
-  ui.showNewTask = true
+  ui.page = 'newtask'
 }
 
 export function openCompare(taskId: string) {

@@ -4,14 +4,15 @@ import { store, ui } from '../store'
 
 const items = computed(() => [
   { key: 'home', label: '首页', icon: 'home' },
-  { key: 'trim', label: '视频剪切', icon: 'cut' },
   {
     key: 'tasks',
     label: '任务',
     icon: 'tasks',
     badge: store.tasks.filter((t) => t.status === 'running' || t.status === 'queued').length,
   },
+  { key: 'newtask', label: '新建任务', icon: 'plus' },
   { key: 'models', label: '模型市场', icon: 'cube' },
+  { key: 'trim', label: '视频剪切', icon: 'cut' },
   { key: 'perf', label: '性能', icon: 'pulse' },
   { key: 'logs', label: '日志', icon: 'log' },
   { key: 'settings', label: '设置', icon: 'gear' },
@@ -39,7 +40,11 @@ const miniPerf = computed(() => {
         @click="ui.page = it.key as typeof ui.page"
       >
         <span class="icon">
-          <svg v-if="it.icon === 'home'" width="16" height="16" viewBox="0 0 16 16">
+          <svg v-if="it.icon === 'plus'" width="16" height="16" viewBox="0 0 16 16">
+            <rect x="2" y="2" width="12" height="12" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.3" />
+            <path d="M8 5.4v5.2M5.4 8h5.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+          </svg>
+          <svg v-else-if="it.icon === 'home'" width="16" height="16" viewBox="0 0 16 16">
             <path d="M2.5 7L8 2.5 13.5 7v6a1 1 0 0 1-1 1h-3v-4h-3v4h-3a1 1 0 0 1-1-1V7z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" />
           </svg>
           <svg v-else-if="it.icon === 'cut'" width="16" height="16" viewBox="0 0 16 16">

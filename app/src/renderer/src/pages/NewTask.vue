@@ -9,15 +9,11 @@ import {
   NFormItem,
   NInput,
   NInputNumber,
-  NModal,
   NRadio,
   NRadioButton,
   NRadioGroup,
   NSelect,
   NSlider,
-  NSpace,
-  NStep,
-  NSteps,
   NSwitch,
   NTag,
   useMessage,
@@ -25,10 +21,8 @@ import {
 import { api, type ProbeInfo } from '../api'
 import { refreshTasks, store, ui } from '../store'
 
-const show = defineModel<boolean>('show', { default: false })
 const message = useMessage()
 
-const step = ref(1)
 const inputs = ref<string[]>([])
 const probeInfo = ref<ProbeInfo | null>(null)
 const probing = ref(false)
@@ -48,6 +42,7 @@ const interp = ref<'off' | 'rife2x'>('off')
 const denoise = ref<number | null>(null)
 const output = ref('')
 const submitting = ref(false)
+const modelSec = ref<HTMLElement | null>(null)
 
 // ---- 模型 ----
 const srModels = computed(() => store.models.filter((m) => m.kind !== 'interp'))
@@ -165,15 +160,15 @@ const tileOptions = [
   ...[128, 192, 256, 384, 512, 768, 1024].map((v) => ({ label: `${v} px`, value: v })),
 ]
 
-// ---- 步骤校验 ----
-const step1Ok = computed(() => inputs.value.length > 0 && !!probeInfo.value?.ok)
-const step2Ok = computed(() => !!modelId.value && !!selectedModel.value?.vram_ok)
-
-function canNext(): boolean {
-  if (step.value === 1) return step1Ok.value
-  if (step.value === 2) return step2Ok.value
-  return false
-}
+// ---- 提交校验：单文件需探测成功，多文件批量直接放行（无逐文件探测） ----
+const canSubmit = computed(
+  () =>
+    inputs.value.length > 0 &&
+    (inputs.value.length > 1 || !!probeInfo.value?.ok) &&
+    !!modelId.value &&
+    !!selectedModel.value?.vram_ok &&
+    !(resMode.value === 'custom' && !customOk.value),
+)
 
 // ---- 文件选择 ----
 async function setInput(files: string[]) {
@@ -203,15 +198,17 @@ async function pickInput() {
   await setInput(files)
 }
 
-// 剪切页"去超分"入口：打开向导时预填输入
-watch(show, async (v) => {
-  if (v && ui.pendingInput) {
-    const p = ui.pendingInput
-    ui.pendingInput = null
-    step.value = 1
-    await setInput([p])
-  }
-})
+// 剪切页"去超分"入口：跳到本页时预填输入
+watch(
+  () => ui.page,
+  async (p) => {
+    if (p === 'newtask' && ui.pendingInput) {
+      const path = ui.pendingInput
+      ui.pendingInput = null
+      await setInput([path])
+    }
+  },
+)
 
 function autoFillOutput() {
   if (inputs.value.length === 1) {
@@ -254,13 +251,16 @@ function applyPreset(pid: string) {
   interp.value = (p as { interp?: 'off' | 'rife2x' }).interp ?? 'off'
   denoise.value = null
   autoFillOutput()
-  message.success(`已应用预设「${p.name}」`)
-  if (step.value === 1 && inputs.value.length) step.value = 3
+  message.success(
+    `已应用「${p.name}」：${selectedModel.value?.name ?? p.model_id} · x${p.target_scale}`,
+  )
+  // 原弹窗点预设会跳步骤给出反馈；整页后改为滚到模型区，让选中的卡片看得见
+  modelSec.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 // ---- 提交 ----
 async function submit() {
-  if (!inputs.value.length || !modelId.value) return
+  if (!canSubmit.value) return
   if (resMode.value === 'custom' && !customOk.value) {
     message.error('自定义分辨率参数无效，请检查目标宽高')
     return
@@ -301,16 +301,16 @@ async function submit() {
     message.success(
       `已加入队列 ${ok} 个任务${selectedModel.value && !selectedModel.value.installed ? '（模型将自动下载）' : ''}${lastErr ? `；失败: ${lastErr}` : ''}`,
     )
-    show.value = false
     reset()
+    ui.page = 'tasks'
     refreshTasks()
   } else {
     message.error(`创建失败: ${lastErr}`)
   }
 }
 
+// 清空本轮选择；编码/画质等输出偏好保留上次取值，连续建任务不用重设
 function reset() {
-  step.value = 1
   inputs.value = []
   probeInfo.value = null
   modelId.value = ''
@@ -321,14 +321,14 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
 </script>
 
 <template>
-  <NModal
-    v-model:show="show"
-    preset="card"
-    title="新建超分任务"
-    style="width: 720px"
-    :mask-closable="!submitting"
-    @after-leave="reset"
-  >
+  <div class="newtask-page">
+    <div class="page-head">
+      <div>
+        <h1>新建超分任务</h1>
+        <p class="sub">选择视频与模型 → 配置输出 → 加入队列串行处理</p>
+      </div>
+    </div>
+
     <!-- 预设条 -->
     <div class="presets">
       <span class="presets-label">一键预设</span>
@@ -343,14 +343,9 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
       </button>
     </div>
 
-    <NSteps :current="step" size="small" class="steps">
-      <NStep title="选择视频" />
-      <NStep title="选择模型" />
-      <NStep title="输出设置" />
-    </NSteps>
-
-    <!-- Step 1: 输入 -->
-    <div v-if="step === 1" class="step-body">
+    <!-- ① 选择视频 -->
+    <section class="sec">
+      <h2 class="sec-title"><span class="sec-num">1</span>选择视频</h2>
       <NButton dashed block size="large" @click="pickInput">
         {{ inputs.length ? `已选 ${inputs.length} 个文件（点击重选）` : '点击选择视频文件（可多选批量入队）' }}
       </NButton>
@@ -366,10 +361,16 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
         <div v-else class="probe-err">{{ probeInfo.error || '文件不可用' }}</div>
       </NCard>
       <div v-else-if="probing" class="probe-hint">正在读取视频信息…</div>
-    </div>
+    </section>
 
-    <!-- Step 2: 模型 -->
-    <div v-else-if="step === 2" class="step-body">
+    <!-- ② 选择模型 -->
+    <section ref="modelSec" class="sec">
+      <h2 class="sec-title">
+        <span class="sec-num">2</span>选择模型
+        <span class="sel-chip" :class="{ on: !!selectedModel }">
+          {{ selectedModel ? `已选 ${selectedModel.name} · x${targetScale}` : '点击卡片选择' }}
+        </span>
+      </h2>
       <div class="model-grid">
         <div
           v-for="m in srModels"
@@ -378,6 +379,7 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
           :class="{ selected: modelId === m.id, disabled: !m.vram_ok }"
           @click="m.vram_ok && ((modelId = m.id), (targetScale = Math.min(...m.scale)))"
         >
+          <span v-if="modelId === m.id" class="m-check">✓</span>
           <div class="m-head">
             <span class="m-name">{{ m.name }}</span>
             <NTag v-if="!m.installed && !m.bundled" size="tiny" :bordered="false" type="warning">需下载 {{ m.size_mb }}MB</NTag>
@@ -392,125 +394,136 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
           <div v-if="m.vram_note" class="m-warn">{{ m.vram_note }}</div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- Step 3: 输出 -->
-    <div v-else class="step-body">
+    <!-- ③ 输出设置 -->
+    <section class="sec">
+      <h2 class="sec-title"><span class="sec-num">3</span>输出设置</h2>
       <NForm label-placement="left" label-width="92">
-        <NFormItem label="输出格式">
-          <NRadioGroup v-model:value="outKind" size="small">
-            <NRadioButton value="video">视频</NRadioButton>
-            <NRadioButton value="png">PNG 图片序列</NRadioButton>
-            <NRadioButton value="jpg">JPG 图片序列</NRadioButton>
-          </NRadioGroup>
-          <span v-if="imgFrameHint" class="img-hint">{{ imgFrameHint }}</span>
-        </NFormItem>
-        <NFormItem label="输出分辨率">
-          <div class="res-row">
-            <NRadioGroup v-model:value="resMode" size="small">
-              <NRadio value="scale">按倍数</NRadio>
-              <NRadio value="custom" :disabled="!customAvailable">自定义</NRadio>
-            </NRadioGroup>
-            <template v-if="resMode === 'scale'">
-              <NSelect v-model:value="targetScale" :options="scaleOptions" style="width: 110px" />
-              <NTag v-if="probeInfo && selectedModel" size="small" :bordered="false">
-                {{ probeInfo.width }}x{{ probeInfo.height }} →
-                {{ probeInfo.width * targetScale }}x{{ probeInfo.height * targetScale }}
-              </NTag>
-            </template>
-            <template v-else>
-              <NInputNumber v-model:value="targetW" :min="16" :max="7680" :step="2" size="small" style="width: 118px" />
-              <span class="res-x">×</span>
-              <NInputNumber v-model:value="targetH" :min="16" :max="4320" :step="2" size="small" style="width: 118px" />
-              <NTag v-if="customScale" size="small" :bordered="false" type="info">
-                x{{ customScale }} 超分后缩放
-              </NTag>
-            </template>
-          </div>
-        </NFormItem>
-        <div v-if="resMode === 'custom'" class="res-hints">
-          <span v-if="belowSrc" class="res-err">
-            目标分辨率不能低于源分辨率（{{ srcW }}x{{ srcH }}）
-          </span>
-          <span v-else-if="!customScale" class="res-err">
-            超出该模型 x{{ maxScale }} 上限（{{ srcW * maxScale }}x{{ srcH * maxScale }}），请减小目标或换更高倍率模型
-          </span>
-          <span v-else-if="aspectNote" class="res-warn">{{ aspectNote }}</span>
-          <span v-else class="res-ok">
-            先以 x{{ customScale }} 原生超分，再 lanczos 缩放至 {{ effW }}x{{ effH }}（宽高自动取偶数）
-          </span>
-        </div>
-        <NFormItem v-if="outKind === 'video'" label="编码器">
-          <NSelect v-model:value="codec" :options="codecOptions" style="width: 300px" />
-        </NFormItem>
-        <NFormItem v-if="outKind === 'video'" label="封装容器">
-          <NSelect v-model:value="container" :options="containerOptions" style="width: 300px" />
-        </NFormItem>
-        <NFormItem v-if="outKind === 'video'" label="音轨">
-          <NSelect v-model:value="audioMode" :options="audioOptions" style="width: 300px" />
-        </NFormItem>
-        <NFormItem v-if="outKind === 'video' && srcSubs.length" label="字幕">
-          <div class="sub-row">
-            <NSwitch v-model:value="keepSubtitles" size="small" />
-            <span class="sub-hint">{{ subHint }}</span>
-          </div>
-        </NFormItem>
-        <NFormItem v-if="outKind === 'video'" label="画质 (CRF)">
-          <NSlider v-model:value="crf" :min="12" :max="30" :step="1" :marks="{ 14: '近无损', 18: '推荐', 24: '小体积' }" />
-        </NFormItem>
-        <NFormItem label="补帧">
-          <NSelect v-model:value="interp" :options="interpOptions" style="width: 320px" />
-          <NTag v-if="interp === 'rife2x' && probeInfo" size="small" :bordered="false" type="info" style="margin-left: 10px">
-            {{ probeInfo.fps }} → {{ probeInfo.fps * 2 }} fps
-          </NTag>
-        </NFormItem>
-        <NFormItem v-if="hasDenoiseVariants" label="降噪">
-          <NSelect v-model:value="denoise" :options="denoiseOptions" style="width: 320px" placeholder="选择降噪档位（默认保守模式）" />
-        </NFormItem>
-        <NCollapse class="adv-collapse" :default-expanded-names="[]">
-          <NCollapseItem title="高级选项" name="adv">
-            <NFormItem label="分块大小" :show-feedback="false">
-              <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
+        <div class="out-cols">
+          <div class="out-col">
+            <NFormItem label="输出格式">
+              <NRadioGroup v-model:value="outKind" size="small">
+                <NRadioButton value="video">视频</NRadioButton>
+                <NRadioButton value="png">PNG 图片序列</NRadioButton>
+                <NRadioButton value="jpg">JPG 图片序列</NRadioButton>
+              </NRadioGroup>
+              <span v-if="imgFrameHint" class="img-hint">{{ imgFrameHint }}</span>
             </NFormItem>
-            <div class="adv-note">
-              自动=按模型默认。显存不足或大分辨率卡顿时调小分块；分块越小越省显存但速度越慢。
+            <NFormItem label="输出分辨率">
+              <div class="res-row">
+                <NRadioGroup v-model:value="resMode" size="small">
+                  <NRadio value="scale">按倍数</NRadio>
+                  <NRadio value="custom" :disabled="!customAvailable">自定义</NRadio>
+                </NRadioGroup>
+                <template v-if="resMode === 'scale'">
+                  <NSelect v-model:value="targetScale" :options="scaleOptions" style="width: 110px" />
+                  <NTag v-if="probeInfo && selectedModel" size="small" :bordered="false">
+                    {{ probeInfo.width }}x{{ probeInfo.height }} →
+                    {{ probeInfo.width * targetScale }}x{{ probeInfo.height * targetScale }}
+                  </NTag>
+                </template>
+                <template v-else>
+                  <NInputNumber v-model:value="targetW" :min="16" :max="7680" :step="2" size="small" style="width: 118px" />
+                  <span class="res-x">×</span>
+                  <NInputNumber v-model:value="targetH" :min="16" :max="4320" :step="2" size="small" style="width: 118px" />
+                  <NTag v-if="customScale" size="small" :bordered="false" type="info">
+                    x{{ customScale }} 超分后缩放
+                  </NTag>
+                </template>
+              </div>
+            </NFormItem>
+            <div v-if="resMode === 'custom'" class="res-hints">
+              <span v-if="belowSrc" class="res-err">
+                目标分辨率不能低于源分辨率（{{ srcW }}x{{ srcH }}）
+              </span>
+              <span v-else-if="!customScale" class="res-err">
+                超出该模型 x{{ maxScale }} 上限（{{ srcW * maxScale }}x{{ srcH * maxScale }}），请减小目标或换更高倍率模型
+              </span>
+              <span v-else-if="aspectNote" class="res-warn">{{ aspectNote }}</span>
+              <span v-else class="res-ok">
+                先以 x{{ customScale }} 原生超分，再 lanczos 缩放至 {{ effW }}x{{ effH }}（宽高自动取偶数）
+              </span>
             </div>
-          </NCollapseItem>
-        </NCollapse>
-        <NFormItem v-if="inputs.length === 1" label="输出到">
-          <NInput v-model:value="output" placeholder="默认与输入同目录">
-            <template #suffix>
-              <NButton size="tiny" @click="pickOutputFile">浏览…</NButton>
-            </template>
-          </NInput>
-        </NFormItem>
-        <NFormItem v-else label="批量说明">
-          <span class="batch-note">{{ inputs.length }} 个文件将使用以上相同参数依次入队（串行处理）</span>
-        </NFormItem>
+            <NFormItem v-if="outKind === 'video'" label="编码器">
+              <NSelect v-model:value="codec" :options="codecOptions" style="width: 300px" />
+            </NFormItem>
+            <NFormItem v-if="outKind === 'video'" label="封装容器">
+              <NSelect v-model:value="container" :options="containerOptions" style="width: 300px" />
+            </NFormItem>
+            <NFormItem v-if="outKind === 'video'" label="音轨">
+              <NSelect v-model:value="audioMode" :options="audioOptions" style="width: 300px" />
+            </NFormItem>
+            <NFormItem v-if="outKind === 'video' && srcSubs.length" label="字幕">
+              <div class="sub-row">
+                <NSwitch v-model:value="keepSubtitles" size="small" />
+                <span class="sub-hint">{{ subHint }}</span>
+              </div>
+            </NFormItem>
+          </div>
+          <div class="out-col">
+            <NFormItem v-if="outKind === 'video'" label="画质 (CRF)">
+              <NSlider v-model:value="crf" :min="12" :max="30" :step="1" :marks="{ 14: '近无损', 18: '推荐', 24: '小体积' }" />
+            </NFormItem>
+            <NFormItem label="补帧">
+              <NSelect v-model:value="interp" :options="interpOptions" style="width: 320px" />
+              <NTag v-if="interp === 'rife2x' && probeInfo" size="small" :bordered="false" type="info" style="margin-left: 10px">
+                {{ probeInfo.fps }} → {{ probeInfo.fps * 2 }} fps
+              </NTag>
+            </NFormItem>
+            <NFormItem v-if="hasDenoiseVariants" label="降噪">
+              <NSelect v-model:value="denoise" :options="denoiseOptions" style="width: 320px" placeholder="选择降噪档位（默认保守模式）" />
+            </NFormItem>
+            <NCollapse class="adv-collapse" :default-expanded-names="[]">
+              <NCollapseItem title="高级选项" name="adv">
+                <NFormItem label="分块大小" :show-feedback="false">
+                  <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
+                </NFormItem>
+                <div class="adv-note">
+                  自动=按模型默认。显存不足或大分辨率卡顿时调小分块；分块越小越省显存但速度越慢。
+                </div>
+              </NCollapseItem>
+            </NCollapse>
+            <NFormItem v-if="inputs.length === 1" label="输出到">
+              <NInput v-model:value="output" placeholder="默认与输入同目录">
+                <template #suffix>
+                  <NButton size="tiny" @click="pickOutputFile">浏览…</NButton>
+                </template>
+              </NInput>
+            </NFormItem>
+            <NFormItem v-else-if="inputs.length > 1" label="批量说明">
+              <span class="batch-note">{{ inputs.length }} 个文件将使用以上相同参数依次入队（串行处理）</span>
+            </NFormItem>
+          </div>
+        </div>
       </NForm>
-    </div>
+    </section>
 
-    <template #footer>
-      <div class="footer">
-        <NButton :disabled="step === 1 || submitting" @click="step--">上一步</NButton>
-        <NSpace>
-          <NButton v-if="step < 3" type="primary" :disabled="!canNext()" @click="step++">下一步</NButton>
-          <NButton
-            v-else
-            type="primary"
-            :loading="submitting"
-            :disabled="resMode === 'custom' && !customOk"
-            @click="submit"
-          >
-            加入队列（{{ inputs.length || 0 }} 个）
-          </NButton>
-        </NSpace>
-      </div>
-    </template>
-  </NModal>
+    <!-- 吸底操作条 -->
+    <div class="footer-bar">
+      <NButton :disabled="submitting" @click="reset">清空</NButton>
+      <NButton
+        type="primary"
+        :loading="submitting"
+        :disabled="!canSubmit"
+        @click="submit"
+      >
+        加入队列（{{ inputs.length || 0 }} 个）
+      </NButton>
+    </div>
+  </div>
 </template>
 
 <style scoped>
+.newtask-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 100%;
+}
+h1 { font-size: 20px; font-weight: 700; }
+.sub { font-size: 12.5px; color: #9aa0a6; margin-top: 4px; }
+
 .presets {
   display: flex;
   align-items: center;
@@ -519,7 +532,7 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
   border: 1px solid #2c3138;
   border-radius: 8px;
   background: linear-gradient(90deg, rgba(79, 140, 255, 0.06), rgba(139, 92, 246, 0.05));
-  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 .presets-label { font-size: 12px; color: #9aa0a6; flex-shrink: 0; }
 .preset {
@@ -541,23 +554,50 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
 }
 .p-icon { font-size: 14px; }
 
-.steps { margin-bottom: 18px; }
-.step-body { min-height: 220px; display: flex; flex-direction: column; gap: 14px; }
+.sec { display: flex; flex-direction: column; gap: 12px; }
+.sec-title {
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sel-chip {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: #9aa0a6;
+}
+.sel-chip.on { color: #4f8cff; }
+.sec-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #4f8cff, #8b5cf6);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
 
 .probe-card { background: #1a1c1f; }
 .probe-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 8px 16px;
   font-size: 13px;
   color: #9aa0a6;
 }
 .probe-grid b { color: #e8eaed; font-weight: 600; margin-left: 4px; }
 .probe-err { color: #f87171; font-size: 13px; }
-.probe-hint { color: #9aa0a6; font-size: 13px; text-align: center; margin-top: 30px; }
+.probe-hint { color: #9aa0a6; font-size: 13px; text-align: center; }
 
 .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .model-card {
+  position: relative;
   border: 1.5px solid #2a2d31;
   border-radius: 10px;
   padding: 14px;
@@ -570,14 +610,35 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
   background: rgba(79, 140, 255, 0.08);
 }
 .model-card.disabled { opacity: 0.45; cursor: not-allowed; }
+.m-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #4f8cff;
+  color: #fff;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .m-head { display: flex; align-items: center; gap: 8px; }
 .m-name { font-weight: 600; font-size: 14px; }
 .m-desc { color: #9aa0a6; font-size: 12px; margin: 6px 0; }
 .m-tags { display: flex; gap: 10px; font-size: 12px; color: #7c838c; }
 .m-warn { margin-top: 6px; font-size: 11.5px; color: #f87171; }
 
-.batch-note { font-size: 12.5px; color: #9aa0a6; }
+/* 输出设置两列；窄窗口（内容宽 <752px）自动退化单列 */
+.out-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  column-gap: 36px;
+}
+.out-col { display: flex; flex-direction: column; }
 
+.batch-note { font-size: 12.5px; color: #9aa0a6; }
 .res-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .sub-row { display: flex; align-items: center; gap: 10px; }
 .sub-hint { font-size: 12px; color: #9aa0a6; }
@@ -591,5 +652,17 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
 .adv-collapse :deep(.n-collapse-item__header) { padding: 8px 0 0; }
 .adv-note { font-size: 12px; color: #9aa0a6; margin-top: 6px; }
 
-.footer { display: flex; justify-content: space-between; }
+/* 吸底操作条：滚动时贴住可视区底部，内容不足一屏时沉到页底 */
+.footer-bar {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 4px 4px;
+  background: #141517;
+  border-top: 1px solid #232629;
+  z-index: 5;
+}
 </style>
