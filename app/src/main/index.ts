@@ -272,6 +272,8 @@ if (!gotLock) {
 // 不自动下载：全量包 241MB，静默下载既耗流量又会在用户不知情时弹窗打断。
 let updaterBusy = false
 let downloadBusy = false
+// 已下载待安装的版本：事件只广播一次，renderer 重载后靠 app:update-state 查询恢复
+let readyVersion = ''
 
 /** electron-updater 懒加载。打包后动态 import 的 CJS 互操作可能拿到
  * undefined（v0.1.1 实测手动检查报 TypeError），require 直取最稳。 */
@@ -351,7 +353,10 @@ function setupAutoUpdate(): void {
     // 禁用后走全量下载 + sha512 校验，241MB 一次性代价换正确性
     autoUpdater.disableDifferentialDownload = true
     autoUpdater.on('download-progress', (p) => broadcast('app:update-progress', Math.round(p.percent)))
-    autoUpdater.on('update-downloaded', (info) => broadcast('app:update-ready', info.version))
+    autoUpdater.on('update-downloaded', (info) => {
+      readyVersion = info.version
+      broadcast('app:update-ready', info.version)
+    })
   } catch (e) {
     console.error('[updater] 初始化失败:', e)
   }
@@ -390,6 +395,7 @@ async function checkUpdateManually(): Promise<{
 async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
   if (downloadBusy) return { ok: false, error: '下载已在进行' }
   downloadBusy = true
+  readyVersion = '' // 重新下载覆盖旧包，状态回到下载中
   try {
     await getAutoUpdater().downloadUpdate()
     return { ok: true }
@@ -440,6 +446,8 @@ ipcMain.handle('app:check-update', () => checkUpdateManually())
 ipcMain.handle('app:download-update', () => downloadUpdate())
 
 ipcMain.handle('app:install-update', () => installUpdate())
+
+ipcMain.handle('app:update-state', () => ({ ready: readyVersion, downloading: downloadBusy }))
 
 // ---- 自绘标题栏的窗口控制 ----
 ipcMain.on('win:minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())

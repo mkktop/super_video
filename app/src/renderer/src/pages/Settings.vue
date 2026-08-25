@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   NButton,
   NCard,
@@ -23,12 +23,6 @@ const precision = ref<'fp16' | 'fp32'>('fp16')
 const saving = ref(false)
 const appVersion = ref('')
 const checking = ref(false)
-const downloading = ref(false)
-const downloadPercent = ref(0)
-const updateMsg = ref('')
-const updateNotes = ref('') // 新版本更新内容（Release 正文），悬浮按钮时展示
-const updateVersion = ref('') // 发现的新版本（待下载）
-const readyVersion = ref('') // 已下载完成、待重启安装的版本
 const proxyMode = ref<'auto' | 'direct' | 'custom'>('auto')
 const proxyAddr = ref('')
 const savingProxy = ref(false)
@@ -36,13 +30,66 @@ const perfSampling = ref(true)
 const autoCheck = ref(true)
 const trcBusy = ref(false)
 const parallelStreams = ref(false)
+// 已保存的引擎/精度（脏状态对比用；保存成功后同步）
+const savedEngine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
+const savedPrecision = ref<'fp16' | 'fp32'>('fp16')
 const proxyOptions = [
   { label: '跟随系统代理', value: 'auto' },
   { label: '直连（不走代理）', value: 'direct' },
   { label: '自定义代理', value: 'custom' },
 ]
-let offProgress: (() => void) | null = null
-let offReady: (() => void) | null = null
+// 更新状态全部从全局 store 派生：事件监听在 store 层注册，
+// 切页/重进设置页不丢"已下载待安装"与下载进度
+const updateVersion = computed(() => store.update.version)
+const updateNotes = computed(() => store.update.notes)
+const readyVersion = computed(() => store.update.ready)
+const downloading = computed(() => store.update.downloading)
+const downloadPercent = computed(() => store.update.percent)
+const updateMsg = computed(() => {
+  const u = store.update
+  if (u.ready) return `新版本 v${u.ready} 已下载完成，点击"立即重启"生效`
+  if (u.downloading) return '正在下载更新…（下载完成后可点击"立即重启"）'
+  if (u.downloadError) return `下载失败：${u.downloadError}`
+  if (!u.checked) return ''
+  if (u.status === 'dev') return '开发模式不检查更新（打包版自动检查 GitHub Releases）'
+  if (u.status === 'available')
+    return `发现新版本 v${u.version}，点击"下载更新"获取（全量安装包）${
+      u.notes ? '（悬浮在"检查更新"上可查看更新内容）' : ''
+    }`
+  if (u.status === 'latest') return `已是最新版本（${u.current}）`
+  if (u.status === 'error') return `检查失败：${u.error ?? '未知错误'}（发布前属正常，见 README 发布流程）`
+  return ''
+})
+const engineDirty = computed(() => engine.value !== savedEngine.value || precision.value !== savedPrecision.value)
+const backendLabel = computed(() => {
+  const b = store.engine?.backend
+  if (b === 'trt') return 'CUDA + TensorRT'
+  if (b === 'cuda') return 'CUDA'
+  return 'DirectML'
+})
+const backendType = computed(() =>
+  store.engine?.backend === 'trt' || store.engine?.backend === 'cuda' ? 'success' : 'default',
+)
+/** 更新状态标签：挂在版本行右侧,一眼可辨 */
+const updateTag = computed(() => {
+  if (readyVersion.value) return { text: `v${readyVersion.value} 已就绪`, type: 'success' as const }
+  if (downloading.value) return { text: '下载中', type: 'info' as const }
+  const u = store.update
+  if (u.status === 'available') return { text: `可更新 v${u.version}`, type: 'warning' as const }
+  if (u.status === 'latest' && u.checked) return { text: '已是最新', type: 'success' as const }
+  return null
+})
+/** 硬件编码能力汇总（无任何硬编时提示软编兜底） */
+const encSummary = computed(() => {
+  const h = store.hardware
+  if (!h) return ''
+  const parts: string[] = []
+  if (h.nvenc) parts.push('NVENC H.264')
+  if (h.av1_nvenc) parts.push('NVENC AV1')
+  if (h.amf) parts.push('AMF')
+  if (h.svt_av1) parts.push('SVT-AV1（软件）')
+  return parts.length ? parts.join(' · ') : '无（使用软件编码）'
+})
 
 onMounted(async () => {
   const s = (await api.settings()) as {
@@ -64,43 +111,9 @@ onMounted(async () => {
     proxyAddr.value = p
   } else proxyMode.value = 'auto'
   appVersion.value = await window.sv.appVersion()
+  savedEngine.value = engine.value
+  savedPrecision.value = precision.value
   refreshTrt()
-  offProgress = window.sv.onUpdateProgress((pct) => {
-    downloadPercent.value = pct
-  })
-  offReady = window.sv.onUpdateReady((v) => {
-    readyVersion.value = v
-    downloading.value = false
-    updateMsg.value = `新版本 v${v} 已下载完成，点击"立即重启"生效`
-  })
-})
-
-/** 更新区显示跟随启动检查结果(启动时只查一次,进设置页不再发起网络检查) */
-watch(
-  () => store.update,
-  (u) => {
-    if (!u.checked) return
-    if (u.status === 'dev') {
-      updateMsg.value = '开发模式不检查更新（打包版自动检查 GitHub Releases）'
-    } else if (u.status === 'available') {
-      updateVersion.value = u.version
-      updateNotes.value = u.notes
-      updateMsg.value = `发现新版本 v${u.version}，点击"下载更新"获取（全量安装包）${
-        u.notes ? '（悬浮在"检查更新"上可查看更新内容）' : ''
-      }`
-    } else if (u.status === 'latest') {
-      updateVersion.value = ''
-      updateMsg.value = `已是最新版本（${u.current}）`
-    } else if (u.status === 'error') {
-      updateMsg.value = `检查失败：${u.error ?? '未知错误'}（发布前属正常，见 README 发布流程）`
-    }
-  },
-  { deep: true, immediate: true },
-)
-
-onUnmounted(() => {
-  offProgress?.()
-  offReady?.()
 })
 
 async function saveProxy() {
@@ -138,25 +151,23 @@ async function saveAutoCheck(v: boolean) {
 
 async function checkUpdate() {
   checking.value = true
-  updateMsg.value = ''
-  updateNotes.value = ''
   try {
-    await checkAppUpdate() // 结果进 store.update,由 watcher 刷新本页与顶栏
+    await checkAppUpdate() // 结果进 store.update,本页文案由 computed 派生
   } finally {
     checking.value = false
   }
 }
 
 async function doDownload() {
-  downloading.value = true
-  downloadPercent.value = 0
-  updateMsg.value = '正在下载更新…（下载完成后可点击"立即重启"）'
+  store.update.downloading = true
+  store.update.percent = 0
+  store.update.downloadError = ''
   const r = await window.sv.downloadUpdate()
   if (!r.ok) {
-    downloading.value = false
-    updateMsg.value = `下载失败：${r.error ?? '未知错误'}`
+    store.update.downloading = false
+    store.update.downloadError = r.error ?? '未知错误'
   }
-  // 成功时 update-downloaded 事件会把 downloading 置 false 并提示重启
+  // 成功时 update-ready 事件会把 downloading 置 false 并写入 ready
 }
 
 function doInstall() {
@@ -168,6 +179,8 @@ async function saveEngine() {
   const r = await api.saveSettings({ engine: engine.value, precision: precision.value })
   saving.value = false
   if (r.ok) {
+    savedEngine.value = engine.value
+    savedPrecision.value = precision.value
     message.success('已保存，从下一个任务起生效')
     store.engine = await api.engine()
   } else {
@@ -228,33 +241,46 @@ async function uninstallTrc() {
       <h1>设置</h1>
     </div>
 
+    <div class="settings-grid">
     <NCard title="推理后端与精度" size="small">
-      <p class="hint">
-        DirectML：兼容所有显卡 · CUDA：NVIDIA 显卡专用 ·
-        TensorRT：NVIDIA 显卡高性能推理（需安装下方加速组件，未安装时自动回退 DirectML）·
-        当前后端：<NTag size="small" type="info" :bordered="false">
-          {{ store.engine?.backend === 'trt' ? 'CUDA + TensorRT' : store.engine?.backend === 'cuda' ? 'CUDA' : 'DirectML' }}
-        </NTag>
-      </p>
-      <NRadioGroup v-model:value="engine">
-        <NRadioButton value="auto">自动</NRadioButton>
-        <NRadioButton value="directml">DirectML</NRadioButton>
-        <NRadioButton value="cuda">CUDA</NRadioButton>
-        <NRadioButton value="trt">TensorRT</NRadioButton>
-      </NRadioGroup>
-      <p class="hint" style="margin: 14px 0 12px">
-        FP16：推荐，处理速度提升约 1.4~1.7 倍，画质无可感知差异 ·
-        FP32：供个别模型出现数值异常时使用
-      </p>
-      <NRadioGroup v-model:value="precision">
-        <NRadioButton value="fp16">FP16（推荐）</NRadioButton>
-        <NRadioButton value="fp32">FP32</NRadioButton>
-      </NRadioGroup>
-      <div class="update-row" style="margin-top: 14px">
-        <span>双路并行：由两个进程分段同时处理，提升 GPU 利用率；配合硬件编码器效果最佳，使用软编码时提升有限。显存占用约增加一倍，低显存设备建议关闭</span>
+      <div class="backend-status">
+        <span class="field-label">当前后端</span>
+        <NTag size="small" :bordered="false" :type="backendType">{{ backendLabel }}</NTag>
+        <span v-if="store.engine?.detail" class="hint-inline">{{ store.engine.detail }}</span>
+      </div>
+
+      <div class="field">
+        <div class="field-label">推理后端</div>
+        <NRadioGroup v-model:value="engine">
+          <NRadioButton value="auto">自动</NRadioButton>
+          <NRadioButton value="directml">DirectML</NRadioButton>
+          <NRadioButton value="cuda">CUDA</NRadioButton>
+          <NRadioButton value="trt">TensorRT</NRadioButton>
+        </NRadioGroup>
+        <p class="hint" style="margin-top: 8px">
+          DirectML 兼容所有显卡；CUDA / TensorRT 仅限 NVIDIA 显卡。
+          TensorRT 需安装下方加速组件，未安装时自动回退 DirectML。
+        </p>
+      </div>
+
+      <div class="field">
+        <div class="field-label">计算精度</div>
+        <NRadioGroup v-model:value="precision">
+          <NRadioButton value="fp16">FP16（推荐）</NRadioButton>
+          <NRadioButton value="fp32">FP32</NRadioButton>
+        </NRadioGroup>
+        <p class="hint" style="margin-top: 8px">
+          FP16 处理速度约提升 1.4~1.7 倍，画质无可感知差异；FP32 供个别模型出现数值异常时使用
+        </p>
+      </div>
+
+      <div class="update-row" style="margin-top: 2px">
+        <span>双路并行：两个进程分段同时处理，提升 GPU 利用率；配合硬件编码器效果最佳，使用软编码时提升有限。显存占用约增加一倍，低显存设备建议关闭</span>
         <NSwitch v-model:value="parallelStreams" size="small" @update:value="saveParallel" />
       </div>
-      <div style="margin-top: 14px">
+
+      <div class="save-row">
+        <span v-if="engineDirty" class="hint-inline">有未保存的修改，保存后从下一个任务起生效</span>
         <NButton type="primary" size="small" :loading="saving" @click="saveEngine">保存</NButton>
       </div>
     </NCard>
@@ -313,7 +339,7 @@ async function uninstallTrc() {
         未覆盖 GitHub CDN 域名，可切换为「自定义代理」并填写本地代理地址
         （如 http://127.0.0.1:7890）。
       </p>
-      <NSpace :size="8" align="center">
+      <NSpace :size="8" align="center" wrap>
         <NSelect v-model:value="proxyMode" :options="proxyOptions" size="small" style="width: 170px" />
         <NInput
           v-if="proxyMode === 'custom'"
@@ -338,7 +364,10 @@ async function uninstallTrc() {
 
     <NCard title="应用与更新" size="small">
       <div class="update-row">
-        <span>当前版本 <b>v{{ appVersion }}</b> · 更新源：GitHub Releases</span>
+        <span class="version-line">
+          当前版本 <b>v{{ appVersion }}</b>
+          <NTag v-if="updateTag" size="small" :bordered="false" :type="updateTag.type">{{ updateTag.text }}</NTag>
+        </span>
         <NSpace :size="8">
           <NPopover trigger="hover" placement="top-end" :disabled="!updateNotes" :width="380" trigger-style="display: inline-flex">
             <template #trigger>
@@ -371,13 +400,18 @@ async function uninstallTrc() {
     </NCard>
 
     <NCard title="设备信息" size="small">
-      <NSpace vertical :size="6">
-        <div>GPU：{{ store.gpuName }} <span v-if="store.hardware?.gpus?.[0]?.vram_gb">({{ store.hardware.gpus[0].vram_gb }}GB)</span></div>
-        <div>CPU：{{ store.hardware?.cpu }} · {{ store.hardware?.cpu_cores }} 核心</div>
-        <div>内存：{{ store.hardware?.ram_gb }} GB</div>
-        <div>NVENC 硬编：{{ store.hardware?.nvenc ? '可用' : '不可用' }}<template v-if="store.hardware?.av1_nvenc"> · AV1 硬编：可用</template><template v-if="store.hardware?.amf"> · AMF：可用</template><template v-if="store.hardware?.svt_av1"> · SVT-AV1：可用</template></div>
-      </NSpace>
+      <div class="spec-grid">
+        <span class="k">显卡</span>
+        <span>{{ store.gpuName }}<template v-if="store.hardware?.gpus?.[0]?.vram_gb">（{{ store.hardware.gpus[0].vram_gb }}GB 显存）</template></span>
+        <span class="k">处理器</span>
+        <span>{{ store.hardware?.cpu }} · {{ store.hardware?.cpu_cores }} 核心</span>
+        <span class="k">内存</span>
+        <span>{{ store.hardware?.ram_gb }} GB</span>
+        <span class="k">硬件编码</span>
+        <span>{{ encSummary }}</span>
+      </div>
     </NCard>
+    </div>
   </div>
 </template>
 
@@ -387,9 +421,13 @@ async function uninstallTrc() {
   flex-direction: column;
   gap: 16px;
   width: 100%;
-  min-width: 620px; /* 窄于此宽度改为横向滚动,不挤压内部控件 */
-  max-width: 860px;
-  margin: 0 auto; /* 窗口宽时列居中,窄时随窗口收窄 */
+  min-width: 560px; /* 窄于此宽度改为横向滚动,不挤压内部控件 */
+}
+/* 宽窗口两列铺满(推理|TRT 组件 / 下载|监控 / 更新|设备),窄窗口自动回落单列 */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  gap: 16px;
 }
 h1 { font-size: 20px; font-weight: 700; }
 .hint { color: #9aa0a6; font-size: 12.5px; margin-bottom: 12px; }
@@ -409,4 +447,32 @@ h1 { font-size: 20px; font-weight: 700; }
   max-height: 240px;
   overflow-y: auto;
 }
+/* 后端状态行：标签 + 彩色 Tag + 说明，一眼可辨 */
+.backend-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.field { margin-bottom: 14px; }
+.field-label { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.backend-status .field-label { margin-bottom: 0; }
+.hint-inline { color: #9aa0a6; font-size: 12px; }
+.save-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+.version-line { display: inline-flex; align-items: center; gap: 8px; }
+/* 设备信息：标签-值两列网格，整齐对齐 */
+.spec-grid {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  row-gap: 8px;
+  align-items: baseline;
+}
+.spec-grid .k { color: #9aa0a6; font-size: 12.5px; }
 </style>

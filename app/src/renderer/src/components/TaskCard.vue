@@ -10,7 +10,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api, type Task } from '../api'
-import { openCompare, store } from '../store'
+import { openCompare, refreshStats, refreshTasks, store } from '../store'
 
 const props = defineProps<{ task: Task }>()
 const message = useMessage()
@@ -89,7 +89,13 @@ async function onResume() {
 
 async function onDelete() {
   const r = await api.remove(props.task.id)
-  if (!r.ok) message.error(`删除失败: ${(await r.json()).detail ?? r.status}`)
+  if (!r.ok) {
+    message.error(`删除失败: ${(await r.json()).detail ?? r.status}`)
+  } else {
+    // 立即刷新，不等 WS 事件/轮询（健康时轮询间隔 8s，会显得删除很慢）
+    refreshTasks()
+    refreshStats()
+  }
 }
 
 function onOpenFolder() {

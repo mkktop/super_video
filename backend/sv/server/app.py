@@ -72,6 +72,7 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, migrate_legacy_data)
     db.init_db()
+    await loop.run_in_executor(None, sweep_orphan_workdirs)
     runner.start()
     perf.start()
     yield
@@ -125,11 +126,17 @@ def perf_history() -> dict:
 
 
 @app.get("/api/engine")
-def get_engine() -> dict:
-    """当前推理后端（runner 启动时探测：CUDA 优先，回落 DirectML）。"""
-    if runner.engine is None:
-        runner.engine = select_engine()
-    e = runner.engine
+async def get_engine() -> dict:
+    """推理后端展示：任务进行中如实返回当前任务所用后端；
+    空闲时按设置推算下一任务将使用的后端（与 runner._run_one 同口径，
+    设置切换后立即反映）。探测首次可达分钟级，放线程池避免阻塞事件循环。"""
+    if runner.current_id is not None and runner.engine is not None:
+        e = runner.engine
+    else:
+        engine_setting = load_settings().get("engine", "auto")
+        want = None if engine_setting == "auto" else engine_setting
+        loop = asyncio.get_running_loop()
+        e = await loop.run_in_executor(None, select_engine, want)
     return {"backend": e.backend, "python": e.python_exe, "detail": e.detail}
 
 
@@ -516,7 +523,7 @@ async def cancel_task(task_id: str) -> dict:
 
 
 @app.delete("/api/tasks/{task_id}")
-def remove_task(task_id: str) -> dict:
+async def remove_task(task_id: str) -> dict:
     t = db.get_task(task_id)
     if t is None:
         raise HTTPException(404)
@@ -524,7 +531,45 @@ def remove_task(task_id: str) -> dict:
         raise HTTPException(409, "任务运行中，请先取消")
     if not db.delete_task(task_id):
         raise HTTPException(409, "删除失败")
+    # 工作目录（续跑用）与预览图随任务删除一并清理；大目录可能数百 MB，
+    # 放后台线程执行不阻塞响应
+    asyncio.get_running_loop().run_in_executor(None, purge_task_files, task_id)
+    # 广播删除事件：WS 健康时轮询间隔 8s，靠事件让列表即时刷新
+    bus.publish({"type": "task_deleted", "task_id": task_id})
     return {"ok": True}
+
+
+def purge_task_files(task_id: str) -> None:
+    """删除任务专属临时产物：分段/分块工作目录 + 预览图。"""
+    for d in (TEMP_DIR / "segmented" / task_id, TEMP_DIR / "chunked" / task_id):
+        shutil.rmtree(d, ignore_errors=True)
+    pv = TEMP_DIR / "previews"
+    if pv.is_dir():
+        for p in pv.glob(f"{task_id}*.jpg"):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+
+def sweep_orphan_workdirs(max_age_s: float = 3600.0) -> None:
+    """启动清扫：崩溃/强杀遗留的孤儿工作目录（数据库无对应任务）。
+
+    只清修改时间超过 max_age_s 的目录——避免误删其他 sidecar 实例
+    （测试/开发）刚建的任务目录。取消任务的目录因任务行还在而保留（续跑依据）。
+    """
+    ids = db.all_task_ids()
+    deadline = time.time() - max_age_s
+    for sub in ("segmented", "chunked"):
+        base = TEMP_DIR / sub
+        if not base.is_dir():
+            continue
+        for d in base.iterdir():
+            try:
+                if d.is_dir() and d.name not in ids and d.stat().st_mtime < deadline:
+                    shutil.rmtree(d, ignore_errors=True)
+            except OSError:
+                continue
 
 
 class TaskReorder(BaseModel):

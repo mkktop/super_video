@@ -191,3 +191,9 @@ def delete_task(task_id: str) -> bool:
     with db_conn() as c:
         cur = c.execute("DELETE FROM tasks WHERE id=? AND status!='running'", (task_id,))
         return cur.rowcount > 0
+
+
+def all_task_ids() -> set[str]:
+    """全表任务 id（孤儿目录清扫用；list_tasks 有历史上限会漏）。"""
+    with db_conn() as c:
+        return {r[0] for r in c.execute("SELECT id FROM tasks")}

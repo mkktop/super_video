@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('sv', {
   }>,
   downloadUpdate: () => ipcRenderer.invoke('app:download-update') as Promise<{ ok: boolean; error?: string }>,
   installUpdate: () => ipcRenderer.invoke('app:install-update') as Promise<void>,
+  updateState: () => ipcRenderer.invoke('app:update-state') as Promise<{ ready: string; downloading: boolean }>,
   onUpdateProgress: (cb: (percent: number) => void) => {
     const fn = (_e: IpcRendererEvent, percent: number) => cb(percent)
     ipcRenderer.on('app:update-progress', fn)

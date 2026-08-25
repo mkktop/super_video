@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { NButton, NProgress, NTag } from 'naive-ui'
 import { store, ui } from '../store'
+import PerfRings from '../components/PerfRings.vue'
 
 const running = computed(() => store.tasks.find((t) => t.status === 'running'))
 // 统计走 /api/stats 全量聚合：任务列表有历史上限，直接数列表会漏旧任务
@@ -136,6 +137,15 @@ const hw = computed(() => store.hardware)
         </div>
       </div>
     </section>
+
+    <!-- 实时性能 -->
+    <section>
+      <div class="sec-head">
+        <h2 class="sec-title">实时性能</h2>
+        <button class="sec-link" @click="ui.page = 'perf'">查看趋势 →</button>
+      </div>
+      <PerfRings />
+    </section>
   </div>
 </template>
 
@@ -227,6 +237,18 @@ h1 {
 .stat-label { font-size: 12px; color: #9aa0a6; margin-top: 2px; }
 
 .sec-title { font-size: 15px; font-weight: 600; color: #c6cad0; margin-bottom: 12px; }
+.sec-head { display: flex; align-items: center; justify-content: space-between; }
+.sec-head .sec-title { margin-bottom: 12px; }
+.sec-link {
+  border: none;
+  background: none;
+  color: #4f8cff;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+}
+.sec-link:hover { text-decoration: underline; }
 .hw-grid { display: grid; grid-template-columns: 1.6fr 1.2fr 0.7fr; gap: 14px; }
 .hw { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
 .hw-gpu {

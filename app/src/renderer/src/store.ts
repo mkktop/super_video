@@ -29,11 +29,15 @@ export const store = reactive({
   settings: {} as Record<string, unknown>,
   update: {
     checked: false, // 启动检查是否已完成(只查一次)
-    status: '' as '' | 'dev' | 'available' | 'latest' | 'error',
+    status: '' as '' | 'dev' | 'available' | 'latest' | 'busy' | 'error',
     version: '',
     current: '',
     notes: '',
     error: '',
+    ready: '', // 已下载待安装的版本(空=未下载)
+    downloading: false,
+    percent: 0,
+    downloadError: '',
   },
   hardware: null as null | {
     gpus: Array<{ name: string; vram_gb: number | null }>
@@ -220,6 +224,9 @@ function connectWs() {
     refreshTasks()
     refreshPerf()
     refreshTrt()
+    // 断线间隙可能错过 model_download done 事件，进度条残留卡住：
+    // 清空后靠 refreshModels 纠正完成态，下载中的条目由下一个进度事件补回
+    store.downloadProgress = {}
     schedulePoll()
   }
   ws.onmessage = handleWsEvent
@@ -248,6 +255,24 @@ export async function checkAppUpdate() {
   }
 }
 
+/** 更新下载事件 → 全局 store：监听随 initStore 注册且不注销，
+ *  页面切换/组件重建不丢状态；update-ready 只广播一次，重进设置页靠 store 还原。 */
+function watchUpdateEvents() {
+  window.sv.onUpdateProgress((pct) => {
+    store.update.percent = pct
+  })
+  window.sv.onUpdateReady((v) => {
+    store.update.ready = v
+    store.update.downloading = false
+    store.update.percent = 100
+  })
+  // renderer 重载兜底：向主进程查询当前下载状态
+  void window.sv.updateState().then((s) => {
+    if (s.ready) store.update.ready = s.ready
+    if (s.downloading) store.update.downloading = true
+  })
+}
+
 export async function initStore() {
   await initBase()
   store.models = await api.models()
@@ -268,5 +293,6 @@ export async function initStore() {
   })
   // 启动只检查一次更新,可在设置中关闭;异步进行不阻塞界面就绪
   if (store.settings.auto_update_check !== false) void checkAppUpdate()
+  watchUpdateEvents()
   store.ready = true
 }

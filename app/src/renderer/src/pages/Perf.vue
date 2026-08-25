@@ -5,6 +5,7 @@ import { api } from '../api'
 import { store } from '../store'
 import TrendChart from '../components/TrendChart.vue'
 import type { ChartSeries } from '../components/TrendChart.vue'
+import PerfRings from '../components/PerfRings.vue'
 
 const rangeMin = ref(15)
 const ranges = [5, 15, 60]
@@ -28,54 +29,7 @@ watch(latest, () => {
   if (!samplingOn.value) samplingOn.value = true
 })
 
-// ---- 仪表环 ----
-const RING_C = 226.2 // 2πr, r=36
-
-interface Ring {
-  label: string
-  color: string
-  pct: number
-  value: string
-  sub: string
-  na?: boolean
-}
-
-const rings = computed<Ring[]>(() => {
-  const l = latest.value
-  const hw = store.hardware
-  return [
-    {
-      label: 'CPU 占用',
-      color: '#4f8cff',
-      pct: l?.cpu ?? 0,
-      value: l ? `${Math.round(l.cpu)}%` : '—',
-      sub: hw ? `${hw.cpu_cores} 核心` : '',
-    },
-    {
-      label: '内存占用',
-      color: '#f59e0b',
-      pct: l?.mem_pct ?? 0,
-      value: l ? `${Math.round(l.mem_pct)}%` : '—',
-      sub: l && hw ? `${l.mem_used_gb} / ${hw.ram_gb} GB` : '',
-    },
-    {
-      label: 'GPU 占用',
-      color: '#34d399',
-      pct: gpu0.value?.util ?? 0,
-      value: gpu0.value ? `${gpu0.value.util ?? 0}%` : '—',
-      sub: store.gpuName || '',
-      na: !gpu0.value,
-    },
-    {
-      label: '显存占用',
-      color: '#8b5cf6',
-      pct: vramTotalGb.value ? (vramUsedGb.value / vramTotalGb.value) * 100 : 0,
-      value: gpu0.value && vramTotalGb.value ? `${vramUsedGb.value.toFixed(1)} GB` : '—',
-      sub: vramTotalGb.value ? `总 ${vramTotalGb.value.toFixed(1)} GB` : '',
-      na: !gpu0.value,
-    },
-  ]
-})
+// ---- 仪表环（PerfRings 共享组件，首页同款） ----
 
 // ---- 运行任务 ----
 const running = computed(() => store.tasks.find((t) => t.status === 'running'))
@@ -151,31 +105,7 @@ const gpuEver = computed(
     </div>
 
     <!-- 仪表环 -->
-    <section class="gauge-grid">
-      <div v-for="r in rings" :key="r.label" class="card gauge">
-        <div class="ring-wrap">
-          <svg width="88" height="88" viewBox="0 0 88 88">
-            <circle cx="44" cy="44" r="36" class="ring-track" />
-            <circle
-              cx="44"
-              cy="44"
-              r="36"
-              class="ring-val"
-              :stroke="r.color"
-              :stroke-dasharray="`${(RING_C * Math.min(r.pct, 100)) / 100} ${RING_C}`"
-            />
-          </svg>
-          <span class="ring-pct" :style="{ color: r.na ? '#5c626b' : r.color }">
-            {{ r.na ? '—' : `${Math.round(r.pct)}%` }}
-          </span>
-        </div>
-        <div class="gauge-body">
-          <div class="g-label">{{ r.label }}</div>
-          <div class="g-value">{{ r.value }}</div>
-          <div class="g-sub">{{ r.na ? '暂不支持采集' : r.sub }}</div>
-        </div>
-      </div>
-    </section>
+    <PerfRings />
 
     <!-- 运行任务 -->
     <section v-if="running" class="card task-card">
@@ -266,45 +196,6 @@ h2 { font-size: 15px; font-weight: 600; color: #c6cad0; }
   color: #fbbf24;
   border-color: rgba(251, 191, 36, 0.3);
   background: rgba(251, 191, 36, 0.06);
-}
-
-.gauge-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.gauge { padding: 16px 18px; display: flex; align-items: center; gap: 14px; }
-.ring-wrap { position: relative; width: 88px; height: 88px; flex-shrink: 0; }
-.ring-track { fill: none; stroke: #2a2d31; stroke-width: 8; }
-.ring-val {
-  fill: none;
-  stroke-width: 8;
-  stroke-linecap: round;
-  transform: rotate(-90deg);
-  transform-origin: 44px 44px;
-  transition: stroke-dasharray 0.5s ease-out;
-}
-.ring-pct {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.gauge-body { min-width: 0; }
-.g-label { font-size: 12.5px; color: #9aa0a6; }
-.g-value {
-  font-size: 20px;
-  font-weight: 700;
-  margin: 3px 0 2px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.g-sub {
-  font-size: 11.5px;
-  color: #6b7280;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .task-card {

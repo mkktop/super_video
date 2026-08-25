@@ -75,13 +75,18 @@ def test_worker_entry_parses_shard():
 
     用不存在的任务 id：入口解析正确就会输出标准 failed 事件（rc=2）；
     解析失败（旧版 len(argv)!=2 检查）会打印 usage 且 rc=2 但无 JSON 行。
+    注入 PYTHONIOENCODING=cp1252 模拟英文 Windows CI：入口必须自带 UTF-8
+    reconfigure 兜底，否则中文错误行 UnicodeEncodeError、stdout 一行皆无
+    （v0.2.0 CI 实际翻车场景）。
     """
+    import os
     import subprocess
     import sys
 
     r = subprocess.run(
         [sys.executable, "-m", "sv.server.worker", "no-such-task", "--shard", "1", "2"],
         capture_output=True, timeout=60,
+        env={**os.environ, "PYTHONIOENCODING": "cp1252"},
     )
     lines = [l for l in r.stdout.decode("utf-8", "replace").splitlines() if l.strip()]
     assert lines and lines[-1].startswith('{"type": "failed"'), lines[-3:]

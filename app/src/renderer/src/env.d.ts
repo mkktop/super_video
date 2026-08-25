@@ -14,6 +14,7 @@ declare global {
       }>
       downloadUpdate: () => Promise<{ ok: boolean; error?: string }>
       installUpdate: () => Promise<void>
+      updateState: () => Promise<{ ready: string; downloading: boolean }>
       onUpdateProgress: (cb: (percent: number) => void) => () => void
       onUpdateReady: (cb: (version: string) => void) => () => void
       pickVideo: () => Promise<string[]>

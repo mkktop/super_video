@@ -407,6 +407,15 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
 if __name__ == "__main__":
     import argparse
 
+    # Windows 管道默认走系统 locale：中文系统 GBK 尚可、英文系统 cp1252 直接
+    # UnicodeEncodeError（一行事件都吐不出）。runner 真实链路带 PYTHONIOENCODING；
+    # 直跑（-m / 调试 / 测试）由此兜底，与 cli.main 同款
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
+
     ap = argparse.ArgumentParser(prog="worker")
     ap.add_argument("task_id")
     ap.add_argument("--shard", nargs=2, type=int, metavar=("I", "N"),

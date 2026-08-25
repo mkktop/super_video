@@ -85,22 +85,25 @@ class Runner:
         self.current_id = task_id
         self.bus.publish({"type": "task_status", "task_id": task_id, "status": "running"})
 
-        # 每个任务启动时按当前设置选择后端（设置热切换，下一任务生效）
+        # 每个任务启动时按当前设置选择后端（设置热切换，下一任务生效）。
+        # 探测首次可达分钟级（TRT 真会话），放线程池避免卡住事件循环
         from .settings import load as load_settings
 
         engine_setting = load_settings().get("engine", "auto")
-        # torch 引擎必须走 PyTorch CUDA 环境（独立 .venv-cuda）
-        try:
-            from ..models.registry import get_model
 
-            if get_model(task["model_id"]).engine == "torch":
-                self.engine = select_engine("cuda")
-            else:
-                self.engine = select_engine(
-                    None if engine_setting == "auto" else engine_setting
-                )
-        except Exception:  # noqa: BLE001 — 模型解析失败交给 worker 报具体错误
-            self.engine = select_engine(None if engine_setting == "auto" else engine_setting)
+        def _select():
+            # torch 引擎必须走 PyTorch CUDA 环境（独立 .venv-cuda）
+            try:
+                from ..models.registry import get_model
+
+                if get_model(task["model_id"]).engine == "torch":
+                    return select_engine("cuda")
+            except Exception:  # noqa: BLE001 — 模型解析失败交给 worker 报具体错误
+                pass
+            return select_engine(None if engine_setting == "auto" else engine_setting)
+
+        loop = asyncio.get_running_loop()
+        self.engine = await loop.run_in_executor(None, _select)
         worker_py = self.engine.python_exe
         env = {**os.environ, "PYTHONPATH": str(BACKEND_DIR), "PYTHONUNBUFFERED": "1"}
         # frozen worker 的管道 stdout 默认走系统 locale（GBK）：中文事件行会以 GBK

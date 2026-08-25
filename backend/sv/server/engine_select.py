@@ -113,7 +113,7 @@ def select_engine(force: str | None = None) -> EngineChoice:
                                     f"组件探测失败，回落 DirectML（{detail}）")
             return EngineChoice("directml", sys.executable,
                                 "TRT 组件未安装，回落 DirectML")
-        return EngineChoice("directml", sys.executable, "打包版 DirectML")
+        return EngineChoice("directml", sys.executable, "")
     force = force or os.environ.get("SV_ENGINE")
     if force in ("cuda", "trt"):
         py = _cuda_venv_python()
