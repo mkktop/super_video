@@ -189,6 +189,11 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     batch = int(params.get("batch") or spec.io.get("batch_hint", 1) or 1)
     if info.width * info.height > 1280 * 720:
         batch = 1
+    # u8 图手术（前后处理 GPU 化，BENCH 3.8x）只支持 batch=1；batch_hint 的
+    # 批量收益（+6%）远小于禁用包装的代价——非用户显式指定且无分块时强制单帧。
+    # 实测 960x720：batch4 无包装 104ms/帧 vs batch1 包装 26ms/帧（4x）。
+    if batch > 1 and not params.get("batch") and not (params.get("tile") or spec.tile_hint):
+        batch = 1
 
     t0 = time.perf_counter()
     precision = settings.load().get("precision", "fp32")
@@ -276,7 +281,10 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
                 device=ort_device)
             engine.load()
             import numpy as np
-            engine.process(np.zeros((64, 64, 3), dtype=np.uint8))  # 预热兼显存探测
+            # 预热兼显存探测。必须用源帧真实尺寸：DML 会话一旦跑过 64x64 这类
+            # 小形状，后续真实尺寸的执行路径被拖慢且不可逆（实测 960x720：
+            # 25.7ms -> 38.5ms/帧，+50%；先小后大也无法自愈）
+            engine.process(np.zeros((info.height, info.width, 3), dtype=np.uint8))
             break
         except Exception as e:  # noqa: BLE001
             if not _oom(e) or tile in (1,):

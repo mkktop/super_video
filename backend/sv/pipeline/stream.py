@@ -280,8 +280,13 @@ class StreamPipeline:
         self.seg_start = seg_start
         self.seg_total = seg_total
         self.frame_start = frame_start
+        # 分段计时（性能剖析用；SegmentedPipeline 汇总落盘，平时无人读）：
+        # read=解码管道读取 infer=process() 写=编码管道写入+drain preview=预览 JPEG
+        # qin_wait/qout_wait=协程等队列（饥饿时间） enc_finish=段尾编码进程收尾
+        self.stage_stats: dict[str, float] = {}
 
     async def run(self) -> RunStats:
+        _t_entry = time.perf_counter()
         info, enc, tx = self.info, self.enc, self.tx
         frame_w, frame_h = info.width * tx.scale, info.height * tx.scale
         if self.target_size is not None:
@@ -320,6 +325,7 @@ class StreamPipeline:
         total = self.seg_total if self.seg_total is not None else info.total_frames * (2 if self.interp is not None else 1)
         local_total = total - self.seg_start  # 本段应产出的帧数（分段续跑时 < total）
         t0 = time.perf_counter()
+        self.stage_stats["setup"] = t0 - _t_entry  # ffmpeg 解码/编码进程拉起耗时
         batch = max(1, int(getattr(tx, "batch", 1) or 1))
         assert p_enc.stdin is not None and p_dec.stdout is not None
 
@@ -332,16 +338,20 @@ class StreamPipeline:
 
         async def reader() -> None:
             """解码帧搬运：干净 EOF 放行哨兵；异常直接抛（外层取消同伴，不会卡死）。"""
+            t_read = 0.0
             while True:
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise TaskCanceled()
                 items: list[np.ndarray] = []
                 while len(items) < batch:
                     try:
+                        _t = time.perf_counter()
                         buf = await p_dec.stdout.readexactly(frame_size)
+                        t_read += time.perf_counter() - _t
                     except asyncio.IncompleteReadError as e:
                         if len(e.partial) == 0:
                             await q_in.put(None)
+                            self.stage_stats["read"] = t_read
                             return
                         tail = " | ".join(dec_err)
                         raise PipelineError(
@@ -352,9 +362,14 @@ class StreamPipeline:
 
         async def inferer() -> None:
             prev_out: np.ndarray | None = None  # 补帧用：上一张超分输出帧
+            t_qin = t_infer = 0.0
             while True:
+                _t = time.perf_counter()
                 item = await q_in.get()
+                t_qin += time.perf_counter() - _t
                 if item is None:
+                    self.stage_stats["qin_wait"] = t_qin
+                    self.stage_stats["infer"] = t_infer
                     if self.interp is not None and prev_out is not None:
                         await q_out.put((prev_out, None))  # 末帧复制，凑满 2N 保持时长/音画同步
                     await q_out.put(None)
@@ -367,7 +382,9 @@ class StreamPipeline:
                     outs_list = [outs[i] for i in range(outs.shape[0])]
                 else:
                     f0 = frames[0]
+                    _t = time.perf_counter()
                     outs_list = [await loop.run_in_executor(None, lambda f=f0: tx.process(f))]
+                    t_infer += time.perf_counter() - _t
                 for i, out_frame in enumerate(outs_list):
                     if out_frame.shape != (frame_h, frame_w, 3):
                         raise PipelineError(
@@ -386,25 +403,36 @@ class StreamPipeline:
             frames = 0
             last_cb = 0.0
             last_preview = 0.0
+            t_qout = t_write = t_preview = 0.0
             while True:
+                _t = time.perf_counter()
                 item = await q_out.get()
+                t_qout += time.perf_counter() - _t
                 if item is None:
+                    self.stage_stats["qout_wait"] = t_qout
+                    self.stage_stats["write"] = t_write
+                    self.stage_stats["preview"] = t_preview
+                    self.stage_stats["frames"] = float(frames)
                     return frames
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise TaskCanceled()
                 out_frame, src_frame = item
+                _t = time.perf_counter()
                 p_enc.stdin.write(out_frame.tobytes())
                 await p_enc.stdin.drain()
+                t_write += time.perf_counter() - _t
                 frames += 1
                 now = time.perf_counter()
                 # 源图与输出图必须同帧成对保存（对比滑块左右一致）
                 if (src_frame is not None
                         and (self.preview_path is not None or self.src_preview_path is not None)
                         and (frames == 1 or now - last_preview >= self.preview_interval_s)):
+                    _t = time.perf_counter()
                     if self.preview_path is not None:
                         self._save_preview(out_frame)
                     if self.src_preview_path is not None:
                         self._save_jpg(src_frame, self.src_preview_path)
+                    t_preview += time.perf_counter() - _t
                     last_preview = now
                 if self.progress_cb and (now - last_cb >= 0.5 or frames == local_total):
                     elapsed = now - t0
@@ -420,7 +448,9 @@ class StreamPipeline:
             results = await asyncio.gather(*tasks)
             n_frames = results[2]
             p_enc.stdin.close()
+            _t = time.perf_counter()
             enc_rc = await p_enc.wait()
+            self.stage_stats["enc_finish"] = time.perf_counter() - _t
             dec_rc = await p_dec.wait()
             if enc_rc != 0:
                 raise PipelineError(f"编码进程失败(rc={enc_rc}): {' | '.join(enc_err)}")
@@ -444,6 +474,7 @@ class StreamPipeline:
             await asyncio.gather(drain_dec, drain_enc, return_exceptions=True)
 
         elapsed = time.perf_counter() - t0
+        self.stage_stats["wall"] = elapsed + self.stage_stats.get("setup", 0.0)
         stats = RunStats(
             frames=n_frames,
             elapsed_s=elapsed,
