@@ -40,7 +40,8 @@ const proxyOptions = [
 ]
 // 更新状态全部从全局 store 派生：事件监听在 store 层注册，
 // 切页/重进设置页不丢"已下载待安装"与下载进度
-const updateVersion = computed(() => store.update.version)
+// 仅 available 状态下 version 才有效——latest 时后端也回传版本号(=当前版),不能据此显示下载按钮
+const updateVersion = computed(() => (store.update.status === 'available' ? store.update.version : ''))
 const updateNotes = computed(() => store.update.notes)
 const readyVersion = computed(() => store.update.ready)
 const downloading = computed(() => store.update.downloading)
