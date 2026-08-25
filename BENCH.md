@@ -132,3 +132,80 @@ PSNR 74~75dB = 数值级一致（远高于 CRF18 编码损失）；x4plus 58.7dB
 其 fp16 转换版 DML 加载失败 → manifest 标 fp16=false。
 
 **RIFE v4.26**（vs-mlrt impl=2 七通道版）：t=0 重构 I0 45.7dB；e2e 补帧输出帧率精确 ×2、时长/音轨保持。
+
+# 全链路吞吐优化：uint8 图手术 + 流水线重叠（2026-08-25，RTX 5080 / 9800X3D / 动漫测试1.mp4 1080p→4K / AnimeJaNai V3 HD L2）
+
+背景：产品默认管线跑该场景仅 ~6fps、GPU 利用率 ~27%，远未吃满硬件。基准脚本
+`backend/scripts/bench_fullspeed.py`（分阶段隔离 + GPU/CPU 采样）与
+`backend/scripts/bench_uint8.py`（ONNX 图手术实验）。
+
+## 分阶段隔离（DML，fp16）
+
+| 阶段 | 结果 | 结论 |
+|---|---|---|
+| 解码(hevc 1080p) | 软解 57.7fps / cuvid 55.7fps | 非瓶颈；硬解无优势（swscale 仍在 CPU） |
+| 推理 process() | **137ms/帧，其中 session.run 裸跑仅 61ms** | **~75ms 是 CPU 侧 numpy 前后处理**（4K 输出 95MB fp32 的 transpose/×255/clip/astype） |
+| 编码(4K) | libx264 61fps / libx265 31fps / h264_nvenc 70 / hevc_nvenc 87 / av1_nvenc 80 | 非瓶颈（远超 6fps 的管线速度） |
+| batch | b4 在 DML/CUDA 均倒退（135→240ms / 3895ms 病态） | 1080p 恒定 b1；CUDA fp32 b4 会触发病态慢路径 |
+
+CUDA EP 对照：fp16 b1 裸跑 45.7ms ≈ DML 43.7ms，但 process() 145ms 同样被 CPU 后处理淹没。
+ov 重叠/par2 双段并行在包装前几乎无收益（6.1→6.4fps）——瓶颈在 process() 内部串行，不在管线 IO。
+
+## uint8 直进直出图手术（决定性实验）
+
+onnx 图包装（`scripts/bench_uint8.py` 的 wrap_model）：
+输入侧 `uint8[N,H,W,3] → Cast f32 → Div255 → Transpose NCHW`，输出侧
+`(绕过末端 fp32→fp16 Cast) → Mul255 → Clip → Transpose NHWC → Cast uint8`。
+前后处理全部在 GPU，D2H 只传 24.9MB uint8（原 95MB fp32），CPU 侧零浮点操作。
+
+| 精度 | plain | post-only(输出侧) | full(全包装) | e2e(解码→推理→NVENC) |
+|---|---|---|---|---|
+| DML fp16 | 138.2ms | 46.8ms | **36.7ms (3.8x)** | 6.3 → **18.0fps**，GPU 27%→58% |
+| DML fp32 | 133.1ms | 58.7ms | — | — |
+| CUDA fp16 | 144.4ms | 57.7ms | 48.2ms (3.0x) | 6.0 → 15.4fps |
+
+- **输出逐位一致**（maxdiff=0×5 帧）：包装路径甚至更精确（跳过了 fp16 输出往返量化）。
+- 叠加 ov 重叠（reader/推理线程/writer 三协程）：**e2e 23.3fps（3.7x），GPU 73%，功耗 116W→240W**。
+- par2 双段并行无增益（18.1fps）：DML 内部串行 session.run，ov 已覆盖 IO 重叠。
+- 包装后 batch=4 仍无益（38.3 vs 36.7ms）。
+
+### DML 落地坑（复现且绕过）
+
+1. fp16 转换模型内部的 fp32→fp16 Cast 作为**末端输出节点**时 DML 走拷贝路径不执行；
+   被追加节点消费后真正执行即崩 `0x8007023E`（MLOperatorAuthorImpl）。**绕过末端 Cast、
+   直接取其 fp32 输入接尾链**即安全（输入侧的 fp32→fp16 Cast 实测可正常执行）。
+2. 包装 session 需 `ORT_ENABLE_BASIC`（全量优化会重排被输出边界保护的算子触发坑 1；
+   BASIC 实测不影响该模型速度）。
+3. onnx 图手术注意：前置链节点要插表头（拓扑序）、原输入从 graph.input 删除（SSA）。
+
+## 结论与行动项
+
+瓶颈不是 GPU 算力也不是编解码，是**每帧 ~100ms 的 CPU 浮点数组前后处理**。
+提速路径（按收益）：
+1. **uint8 全包装图手术**（推理 3.8x，e2e 2.9x）——产品化：引擎 load 时对
+   tile=0/动态尺寸/fixed_hw=None 的模型惰性生成包装缓存（models_store 旁路或 .tmp），
+   process() 直喂 uint8 帧；DML 走末端 Cast 绕过 + BASIC 优化。
+2. **读-推-写三协程重叠**（再 +30%：18→23.3fps）——StreamPipeline 改造，
+   推理挪 executor 线程（session.run 释放 GIL），队列深度 3。
+3. TRT（未装 1.5GB wheel）：包装后 GPU 仍只 73%，TRT fp16 融合有望把 36.7ms 再压
+   ~30-50%，e2e 冲 30fps+；作为后续可选项。
+4. 编码保持默认即可（x264 61fps@4K 富余）；NVENC 在 CPU 紧张时有价值非速度必需。
+
+## 产品化落地（2026-08-25 同日）
+
+u8 图手术 + 三协程重叠已并入产品链路：
+- `sv/engines/u8_wrap.py`：图手术（io 约定自适应 rgb/bgr × 0-1/0-255，fp16 末端 Cast 绕过）；
+  `OnnxSrEngine` load 时惰性生成缓存（.tmp/u8_wrap）+ 每模型×后端一次 A/B 逐位校验
+  （≤1/255 容差，不过则静默回退原路径）；tile/固定尺寸/batch>1/TRT 不包装。
+- `StreamPipeline`：reader/推理(executor 线程)/writer 三协程重叠，batch>1 推理保持同步
+  （DML 线程池批量死锁前科）；reader 异常由 gather 即时取消同伴，无死锁面。
+
+真机复验（sidecar 全链路，动漫测试1.mp4 1080p→4K，V3 HD L2 fp16，91 帧）：
+
+| 编码 | 改造前 | 改造后 | 提升 |
+|---|---|---|---|
+| libx264 crf18（默认） | 5.65fps / 16.1s | **20.2fps / 5.9s** | 3.6x |
+| h264_nvenc | — | 20.0fps / 4.7s | 推理已成瓶颈，编码器不再影响速度 |
+
+产物规格核验：3840x2160、91 帧、音轨保留。测试：test_u8_wrap.py 9 条 + 既有
+引擎/管线/分块/批量/分段/E2E 套件 39 条全绿（CI 无 GPU 时包装在 CPU EP 同样成立）。

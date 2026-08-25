@@ -320,88 +320,105 @@ class StreamPipeline:
         total = self.seg_total if self.seg_total is not None else info.total_frames * (2 if self.interp is not None else 1)
         local_total = total - self.seg_start  # 本段应产出的帧数（分段续跑时 < total）
         t0 = time.perf_counter()
-        frames = 0
-        last_cb = 0.0
-        last_preview = 0.0
         batch = max(1, int(getattr(tx, "batch", 1) or 1))
+        assert p_enc.stdin is not None and p_dec.stdout is not None
 
-        async def read_frame() -> np.ndarray | None:
-            """读一帧；干净 EOF 返回 None，帧中截断抛错。"""
-            try:
-                buf = await p_dec.stdout.readexactly(frame_size)
-            except asyncio.IncompleteReadError as e:
-                if len(e.partial) == 0:
-                    return None
-                tail = " | ".join(dec_err)
-                raise PipelineError(
-                    f"解码流在帧中间截断({len(e.partial)}/{frame_size}字节): {tail}"
-                ) from e
-            return np.frombuffer(buf, dtype=np.uint8).reshape(info.height, info.width, 3)
+        # 三协程重叠：读下一帧 / 推理(线程) / 写上一帧 并行（BENCH.md 2026-08-25：
+        # uint8 包装之上再 +30%；session.run 释放 GIL，推理挪 executor 不堵事件循环）。
+        # batch>1 的推理保持同步调用（DML 批量路径在线程池里有死锁前科）。
+        q_in: asyncio.Queue = asyncio.Queue(maxsize=3)
+        q_out: asyncio.Queue = asyncio.Queue(maxsize=3)
+        loop = asyncio.get_running_loop()
 
-        prev_out: np.ndarray | None = None  # 补帧用：上一张超分输出帧
-
-        def emit_frame(out_frame: np.ndarray, src_frame: np.ndarray | None) -> None:
-            """写一帧到编码器并处理预览/进度（src 仅真实帧有，补帧产物跳过预览）。"""
-            nonlocal frames, last_preview, last_cb
-            p_enc.stdin.write(out_frame.tobytes())
-            frames += 1
-            now = time.perf_counter()
-            # 源图与输出图必须同帧成对保存（对比滑块左右一致）
-            if (src_frame is not None
-                    and (self.preview_path is not None or self.src_preview_path is not None)
-                    and (frames == 1 or now - last_preview >= self.preview_interval_s)):
-                if self.preview_path is not None:
-                    self._save_preview(out_frame)
-                if self.src_preview_path is not None:
-                    self._save_jpg(src_frame, self.src_preview_path)
-                last_preview = now
-            if self.progress_cb and (now - last_cb >= 0.5 or frames == local_total):
-                elapsed = now - t0
-                fps = frames / elapsed if elapsed > 0 else 0.0
-                eta = (total - self.seg_start - frames) / fps if fps > 0 else 0.0
-                self.progress_cb(self.seg_start + frames, total, fps, eta)
-                last_cb = now
-
-        try:
-            assert p_enc.stdin is not None and p_dec.stdout is not None
+        async def reader() -> None:
+            """解码帧搬运：干净 EOF 放行哨兵；异常直接抛（外层取消同伴，不会卡死）。"""
             while True:
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise TaskCanceled()
+                items: list[np.ndarray] = []
+                while len(items) < batch:
+                    try:
+                        buf = await p_dec.stdout.readexactly(frame_size)
+                    except asyncio.IncompleteReadError as e:
+                        if len(e.partial) == 0:
+                            await q_in.put(None)
+                            return
+                        tail = " | ".join(dec_err)
+                        raise PipelineError(
+                            f"解码流在帧中间截断({len(e.partial)}/{frame_size}字节): {tail}"
+                        ) from e
+                    items.append(np.frombuffer(buf, dtype=np.uint8).reshape(info.height, info.width, 3))
+                await q_in.put(items if batch > 1 else items[0])
 
+        async def inferer() -> None:
+            prev_out: np.ndarray | None = None  # 补帧用：上一张超分输出帧
+            while True:
+                item = await q_in.get()
+                if item is None:
+                    if self.interp is not None and prev_out is not None:
+                        await q_out.put((prev_out, None))  # 末帧复制，凑满 2N 保持时长/音画同步
+                    await q_out.put(None)
+                    return
+                if self.cancel_event is not None and self.cancel_event.is_set():
+                    raise TaskCanceled()
+                frames = list(item) if batch > 1 else [item]
                 if batch > 1:
-                    pending: list[np.ndarray] = []
-                    while len(pending) < batch:
-                        f = await read_frame()
-                        if f is None:
-                            break
-                        pending.append(f)
-                    if not pending:
-                        break  # 干净 EOF
-                    outs = tx.process_batch(np.stack(pending))  # [N,H',W',3]
-                    srcs = pending
+                    outs = tx.process_batch(np.stack(frames))  # [N,H',W',3]
+                    outs_list = [outs[i] for i in range(outs.shape[0])]
                 else:
-                    f = await read_frame()
-                    if f is None:
-                        break  # 干净 EOF
-                    outs = tx.process(f)[None]
-                    srcs = [f]
-
-                for i in range(outs.shape[0]):
-                    out_frame = outs[i]
+                    f0 = frames[0]
+                    outs_list = [await loop.run_in_executor(None, lambda f=f0: tx.process(f))]
+                for i, out_frame in enumerate(outs_list):
                     if out_frame.shape != (frame_h, frame_w, 3):
                         raise PipelineError(
                             f"变换输出尺寸 {out_frame.shape} 与预期 {(frame_h, frame_w, 3)} 不符"
                         )
                     if self.interp is not None and prev_out is not None:
                         # 两帧之间插一张，帧率翻倍；末尾补一张凑满 2N
-                        emit_frame(self.interp.interpolate(prev_out, out_frame), None)
-                    emit_frame(out_frame, srcs[i])
+                        a, b = prev_out, out_frame
+                        inter = await loop.run_in_executor(
+                            None, lambda x=a, y=b: self.interp.interpolate(x, y))
+                        await q_out.put((inter, None))
+                    await q_out.put((out_frame, frames[i]))
                     prev_out = out_frame
+
+        async def writer() -> int:
+            frames = 0
+            last_cb = 0.0
+            last_preview = 0.0
+            while True:
+                item = await q_out.get()
+                if item is None:
+                    return frames
+                if self.cancel_event is not None and self.cancel_event.is_set():
+                    raise TaskCanceled()
+                out_frame, src_frame = item
+                p_enc.stdin.write(out_frame.tobytes())
                 await p_enc.stdin.drain()
+                frames += 1
+                now = time.perf_counter()
+                # 源图与输出图必须同帧成对保存（对比滑块左右一致）
+                if (src_frame is not None
+                        and (self.preview_path is not None or self.src_preview_path is not None)
+                        and (frames == 1 or now - last_preview >= self.preview_interval_s)):
+                    if self.preview_path is not None:
+                        self._save_preview(out_frame)
+                    if self.src_preview_path is not None:
+                        self._save_jpg(src_frame, self.src_preview_path)
+                    last_preview = now
+                if self.progress_cb and (now - last_cb >= 0.5 or frames == local_total):
+                    elapsed = now - t0
+                    fps = frames / elapsed if elapsed > 0 else 0.0
+                    eta = (total - self.seg_start - frames) / fps if fps > 0 else 0.0
+                    self.progress_cb(self.seg_start + frames, total, fps, eta)
+                    last_cb = now
 
-            if self.interp is not None and prev_out is not None:
-                emit_frame(prev_out, None)  # 末帧复制，凑满 2N 保持时长/音画同步
-
+        tasks = [asyncio.create_task(reader()),
+                 asyncio.create_task(inferer()),
+                 asyncio.create_task(writer())]
+        try:
+            results = await asyncio.gather(*tasks)
+            n_frames = results[2]
             p_enc.stdin.close()
             enc_rc = await p_enc.wait()
             dec_rc = await p_dec.wait()
@@ -419,15 +436,18 @@ class StreamPipeline:
             await self._reap(p_dec, p_enc)
             raise
         finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             for task in (drain_dec, drain_enc):
                 task.cancel()
             await asyncio.gather(drain_dec, drain_enc, return_exceptions=True)
 
         elapsed = time.perf_counter() - t0
         stats = RunStats(
-            frames=frames,
+            frames=n_frames,
             elapsed_s=elapsed,
-            fps=frames / elapsed if elapsed > 0 else 0.0,
+            fps=n_frames / elapsed if elapsed > 0 else 0.0,
             out_path=output_path,
             out_bytes=output_path.stat().st_size if output_path.exists() else 0,
         )

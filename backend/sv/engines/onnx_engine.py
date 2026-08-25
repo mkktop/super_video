@@ -63,6 +63,7 @@ class OnnxSrEngine(BaseEngine):
         tile: int = 0,
         tile_overlap: int = 16,
         batch: int = 1,
+        u8_wrap: bool = True,
     ):
         self.model_path = Path(model_path)
         self.scale = scale
@@ -77,6 +78,7 @@ class OnnxSrEngine(BaseEngine):
         self.tile = tile
         self.tile_overlap = tile_overlap
         self.batch = max(1, batch)
+        self.u8_wrap_enabled = u8_wrap  # uint8 直进直出图手术（BENCH.md 2026-08-25）
         self.session = None
         self.provider_used: list[str] = []
         self.fixed_hw: tuple[int, int] | None = None
@@ -84,6 +86,9 @@ class OnnxSrEngine(BaseEngine):
         self._in_name = None
         self._out_names = None
         self._in_fp16 = False  # 模型本体即 fp16 导出（如 AnimeJaNai 系）：喂 fp16 输入
+        self._u8_sess = None  # 包装 session（uint8 HWC 直进直出）
+        self._u8_in_name = None
+        self.u8_wrapped = False
 
     def load(self) -> None:
         import onnxruntime as ort
@@ -120,6 +125,83 @@ class OnnxSrEngine(BaseEngine):
             self.max_batch = 0
         if self.fixed_hw is not None or self.tile:
             self.batch = 1  # 固定尺寸/分块路径不批帧（tile 批处理为后续项）
+        self._try_u8_wrap()
+
+    # ---- uint8 直进直出图手术（前后处理全在 GPU，推理 3.8x，见 u8_wrap.py）----
+
+    def _try_u8_wrap(self) -> None:
+        """惰性生成包装模型并做逐位校验；任何失败静默回退原路径。"""
+        if not self.u8_wrap_enabled or self.device == "trt":
+            return  # TRT 自有引擎缓存链路，包装会触发引擎重建，不掺和
+        if self.tile or self.fixed_hw is not None or self.batch > 1:
+            return
+        if self.session is None or len(self.session.get_outputs()) != 1:
+            return
+        try:
+            self._setup_u8()
+        except Exception as e:  # noqa: BLE001 — 优化项，失败必须回退而不是带崩任务
+            print(f"[engine] u8 包装不可用，走原路径: {type(e).__name__}: {e}")
+            self._u8_sess = None
+            self.u8_wrapped = False
+
+    def _setup_u8(self) -> None:
+        import onnxruntime as ort
+
+        from ..paths import TEMP_DIR
+        from .u8_wrap import wrap_u8
+
+        cache_dir = TEMP_DIR / "u8_wrap"
+        cache = cache_dir / f"{self.model_path.stem}_u8.onnx"
+        if not cache.exists():
+            wrap_u8(self.model_path, cache,
+                    color=self.color, range_01=self.value_range == "0-1")
+        provider = self.provider_used[0] if self.provider_used else "x"
+        marker = cache_dir / f"{self.model_path.stem}_u8.ok.{provider}"
+        so = ort.SessionOptions()
+        # BASIC：全量优化会重排被输出边界保护的 Cast/Clip 触发 DML 崩溃（u8_wrap.py 头注）
+        so.graph_optimization_level = (
+            ort.GraphOptimizationLevel.ORT_DISABLE_ALL if self.graph_opt == "disable"
+            else ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+        )
+        sess = ort.InferenceSession(str(cache), so, providers=self.provider_used)
+        in_name = sess.get_inputs()[0].name
+        if not marker.exists():  # 每模型×每后端一次 A/B 逐位校验，通过后落标记
+            self._validate_u8(sess, in_name)
+            marker.touch()
+        self._u8_sess = sess
+        self._u8_in_name = in_name
+        self.u8_wrapped = True
+        print(f"[engine] u8 包装生效（前后处理 GPU 化）: {cache.name}")
+
+    def _validate_u8(self, sess, in_name: str) -> None:
+        """包装前后输出逐位对比（≤1/255 容差，覆盖偶/奇尺寸与 pad 路径）。"""
+        rng = np.random.default_rng(7)
+        for f in (np.zeros((96, 128, 3), np.uint8),
+                  rng.integers(0, 256, (96, 128, 3), dtype=np.uint8),
+                  rng.integers(0, 256, (95, 127, 3), dtype=np.uint8)):
+            a = self._infer(f)
+            b = self._run_u8(sess, in_name, f)
+            diff = int(np.abs(a.astype(np.int16) - b.astype(np.int16)).max())
+            if a.shape != b.shape or diff > 1:
+                raise ValueError(f"u8 包装输出不一致 shape {a.shape}/{b.shape} maxdiff={diff}")
+
+    def _run_u8(self, sess, in_name: str, frame: np.ndarray) -> np.ndarray:
+        """uint8 HWC 直进直出；pad 在 uint8 输入侧做（廉价），输出侧裁剪。"""
+        h, w = frame.shape[:2]
+        ph = (self.pad - h % self.pad) % self.pad
+        pw = (self.pad - w % self.pad) % self.pad
+        x = frame
+        if ph or pw:
+            x = np.pad(x, ((0, ph), (0, pw), (0, 0)), mode="edge")
+        y = sess.run(None, {in_name: x[None]})[0][0]
+        if ph or pw:
+            y = np.ascontiguousarray(y[: h * self.scale, : w * self.scale])
+        return y
+
+    def process(self, frame: np.ndarray) -> np.ndarray:
+        if self._u8_sess is not None:
+            return self._run_u8(self._u8_sess, self._u8_in_name, frame)
+        return super().process(frame)
 
     def _session_options(self):
         import onnxruntime as ort

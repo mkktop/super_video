@@ -21,6 +21,8 @@ a = Analysis(
         "uvicorn.protocols.websockets.auto", "uvicorn.lifespan.on",
         "py7zr", "py7zr.callbacks", "py7zr.py7zr",
         "sv.engines.rife", "sv.engines.torch_engine",
+        # u8 图手术 / fp16 转换是惰性 import，静态分析可能漏收
+        "onnx", "onnxconverter_common",
     ],
     hookspath=[],
     excludes=["tkinter", "matplotlib", "torch", "IPython", "jedi"],
