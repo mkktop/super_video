@@ -10,3 +10,4 @@ fastapi
 httpx2
 uvicorn
 websockets
+py7zr

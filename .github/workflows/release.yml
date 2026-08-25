@@ -43,6 +43,10 @@ jobs:
         working-directory: backend
         run: pyinstaller sidecar.spec --noconfirm
 
+      - name: sidecar 自检（缺库立即红，防 requirements 漂移打进坏包）
+        working-directory: backend
+        run: dist/sidecar/sidecar.exe selftest
+
       - name: 前端构建
         working-directory: app
         run: |

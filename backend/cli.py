@@ -249,6 +249,26 @@ def cmd_ort_check(args):
     return 0 if result["ok"] else 1
 
 
+def cmd_selftest(args):
+    """打包自检：验证惰性 import 的运行库都随包（CI 构建环境漂移防线）。
+
+    requirements.txt 漏包时 PyInstaller 只对 hiddenimports 警告不报错，打出的
+    exe 运行期才炸（v0.1.18 组件安装 No module named 'py7zr' 事故）。release
+    workflow 打包后跑本命令，缺库立即红。
+    """
+    import json as _json
+
+    mods = ["py7zr", "onnx", "onnxconverter_common", "numpy", "psutil"]
+    bad = []
+    for m in mods:
+        try:
+            __import__(m)
+        except Exception as e:  # noqa: BLE001 — 任何导入失败都要上报
+            bad.append(f"{m}: {type(e).__name__}: {e}")
+    print(_json.dumps({"ok": not bad, "missing": bad}, ensure_ascii=False))
+    return 0 if not bad else 1
+
+
 def main():
     # Windows 管道/重定向下 stdout 默认走系统 locale（GBK）：worker 中文事件行会以
     # GBK 字节到达 runner（PyInstaller frozen 无视 PYTHONIOENCODING，实测环境变量
@@ -305,14 +325,19 @@ def main():
                    help="可选：用该模型创建 CUDA 会话并跑一帧（真验证）")
     p.set_defaults(func=cmd_ort_check)
 
+    p = sub.add_parser("selftest", help="[内部] 打包自检：惰性导入的库是否都随包")
+    p.set_defaults(func=cmd_selftest)
+
     args = ap.parse_args()
     if not getattr(args, "model_id", True) and args.cmd == "models" and args.action != "list":
         ap.error("models download/pin 需要模型 id")
     try:
-        args.func(args)
+        rc = args.func(args)
     except PipelineError as e:
         console.print(f"[red]管线失败:[/red] {e}")
         sys.exit(1)
+    if rc:  # 子命令返回码必须传导（selftest 缺库要红掉 CI；worker 自带 sys.exit）
+        sys.exit(rc)
 
 
 if __name__ == "__main__":
