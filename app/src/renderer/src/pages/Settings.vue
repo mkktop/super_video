@@ -35,6 +35,7 @@ const savingProxy = ref(false)
 const perfSampling = ref(true)
 const autoCheck = ref(true)
 const trcBusy = ref(false)
+const parallelStreams = ref(false)
 const proxyOptions = [
   { label: '跟随系统代理', value: 'auto' },
   { label: '直连（不走代理）', value: 'direct' },
@@ -53,6 +54,7 @@ onMounted(async () => {
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
+  parallelStreams.value = s.parallel_streams === true
   perfSampling.value = s.perf_sampling !== false
   autoCheck.value = s.auto_update_check !== false
   const p = s.download_proxy ?? ''
@@ -173,6 +175,16 @@ async function saveEngine() {
   }
 }
 
+async function saveParallel(v: boolean) {
+  const r = await api.saveSettings({ parallel_streams: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    parallelStreams.value = !v
+  } else {
+    message.success(v ? '已开启，从下一个任务起生效' : '已关闭')
+  }
+}
+
 // ---- TRT 可选组件 ----
 
 function fmtGB(b: number): string {
@@ -238,6 +250,10 @@ async function uninstallTrc() {
         <NRadioButton value="fp16">FP16（推荐）</NRadioButton>
         <NRadioButton value="fp32">FP32</NRadioButton>
       </NRadioGroup>
+      <div class="update-row" style="margin-top: 14px">
+        <span>双路并行加速：两个进程分段同时推理，吃满闲置的 GPU（配硬编码器实测近 2 倍；软编码时 CPU 先顶满，收益有限）；显存占用翻倍，低显存显卡或遇到异常时关闭</span>
+        <NSwitch v-model:value="parallelStreams" size="small" @update:value="saveParallel" />
+      </div>
       <div style="margin-top: 14px">
         <NButton type="primary" size="small" :loading="saving" @click="saveEngine">保存</NButton>
       </div>

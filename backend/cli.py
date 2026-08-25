@@ -178,7 +178,9 @@ def cmd_worker(args):
     """打包模式复用入口：sidecar.exe worker <task_id>（等价 python -m sv.server.worker）。"""
     from sv.server.worker import main as worker_main
 
-    sys.exit(worker_main(args.task_id))
+    sh = args.shard[0] if args.shard else None
+    ns = args.shard[1] if args.shard else 1
+    sys.exit(worker_main(args.task_id, sh, ns))
 
 
 def cmd_ort_check(args):
@@ -317,6 +319,8 @@ def main():
 
     p = sub.add_parser("worker", help="[内部] 执行一个任务（打包模式复用入口）")
     p.add_argument("task_id")
+    p.add_argument("--shard", nargs=2, type=int, metavar=("I", "N"), default=None,
+                   help="[内部] 双路并行分片：本进程跑第 I 路(0基)/共 N 路")
     p.set_defaults(func=cmd_worker)
 
     p = sub.add_parser(

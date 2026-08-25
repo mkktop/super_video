@@ -35,6 +35,59 @@ from .stream import (
 )
 
 
+def shard_starts(starts: list[int], shard: int | None, nshards: int) -> list[int]:
+    """分段交错分片：第 i 段归第 i%nshards 路（两路均衡收尾，优于前后对半）。"""
+    if shard is None or nshards <= 1:
+        return starts
+    return [s for i, s in enumerate(starts) if i % nshards == shard]
+
+
+def concat_segments(work: Path, info: MediaInfo, enc: EncodeOpts,
+                    output_path: Path) -> None:
+    """concat 视频段 + 源音轨/字幕 → 最终输出（-c:v copy，秒级）。
+
+    双路并行时由协调 worker 在两路都完成后调用（各分片 worker 不做合成）。
+    """
+    audio_codec = info.audio[0].codec if info.has_audio else None
+    has_audio = info.has_audio and enc.audio_mode != "none"
+    subs = list(getattr(info, "subtitles", []) or [])
+    seglist = work / "segments.txt"
+    seglist.write_text(
+        "\n".join(f"file '{p.as_posix()}'" for p in sorted(work.glob("seg_*.mp4"))),
+        encoding="utf-8",
+    )
+    cmd = [
+        ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+        "-f", "concat", "-safe", "0", "-i", str(seglist),
+    ]
+    if has_audio or subs:
+        cmd += ["-i", str(info.path)]
+    cmd += ["-map", "0:v:0"]
+    if has_audio or subs:
+        if has_audio:
+            cmd += ["-map", "1:a:0?"]
+        cmd += subtitle_args(enc, subs)
+    cmd += ["-c:v", "copy"]
+    if has_audio:
+        cmd += audio_args(enc, enc.mp4_family, audio_codec)
+    if enc.mp4_family:
+        cmd += ["-movflags", "+faststart"]
+    cmd += [str(output_path)]
+    r = subprocess.run(cmd, capture_output=True, text=True,
+                       creationflags=WINDOWS_CREATE_FLAGS)
+    if r.returncode != 0:
+        raise PipelineError(
+            f"最终合成失败(rc={r.returncode}): {(r.stderr or '')[-500:]}"
+        )
+
+
+def finalize_image_dir(img_dir: Path, total_out: int) -> None:
+    """图片序列收尾：裁掉可能残留的高帧号图（双路时由协调者调用一次）。"""
+    for num, f in iter_image_frames(img_dir):
+        if num > total_out:
+            f.unlink()
+
+
 class SegmentedPipeline:
     """分段流式超分管线（支持断点续跑）。接口与 StreamPipeline 对齐。"""
 
@@ -54,6 +107,8 @@ class SegmentedPipeline:
         interp=None,
         seg_frames: int | None = None,  # 测试/调优：固定每段输入帧数
         cleanup: bool = True,  # 成功后删除工作目录（测试保留以便构造续跑场景）
+        shard: int | None = None,  # 双路并行：本 worker 处理第 shard 路（0 基）
+        nshards: int = 1,
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -69,6 +124,8 @@ class SegmentedPipeline:
         self.interp = interp
         self.seg_frames = seg_frames
         self.cleanup = cleanup
+        self.shard = shard
+        self.nshards = nshards
 
     async def run(self) -> RunStats:
         info, tx = self.info, self.tx
@@ -90,28 +147,39 @@ class SegmentedPipeline:
             except (ValueError, KeyError):
                 pass  # 损坏的 checkpoint 从头跑
 
-        starts = list(range(0, total_in, seg))
+        starts = shard_starts(list(range(0, total_in, seg)), self.shard, self.nshards)
+        sharded = self.nshards > 1  # 分片模式：只处理自己那段，合成/清理由协调者做
         t0 = time.perf_counter()
+        processed_out = 0
         img_mode = self.enc.out_kind != "video"
         img_dir: Path | None = None
         if img_mode:
             # 图片序列：每段直写最终目录（-start_number 全局续编号），无需 concat。
-            # 全新任务先清掉旧编号图（上次更长的运行可能留下高帧号残留）
+            # 全新任务先清掉旧编号图（上次更长的运行可能留下高帧号残帧）
             img_dir = self.output_path
-            if not done:
+            if not done and not sharded:
                 img_dir.mkdir(parents=True, exist_ok=True)
                 for _, f in iter_image_frames(img_dir):
                     f.unlink()
+        local_done = 0  # 本路已完成段的输出帧数（分片模式进度按局部口径上报）
         for s in starts:
             if s in done:
                 continue  # 续跑：跳过已完成段
             if self.cancel_event is not None and self.cancel_event.is_set():
                 raise TaskCanceled()
             n_in = min(seg, total_in - s)
+            if self.shard is not None and self.progress_cb is not None:
+                # StreamPipeline 上报的是全局帧号（seg_start+local）；分片模式下
+                # 换算成本路累计（全局号在交错段间有跳跃，直接累计会把段间隙
+                # 误当进度，两路相加就超 100%）
+                def _cb(frames, total, fps, eta, _loc=local_done, _glob=s * factor):
+                    self.progress_cb(_loc + frames - _glob, total, fps, eta)
+            else:
+                _cb = self.progress_cb
             seg_out = (img_dir / f"%06d.{self.enc.out_kind}") if img_mode else work / f"seg_{s:06d}.mp4"
             pipe = StreamPipeline(
                 info, seg_out, tx, self.enc,
-                progress_cb=self.progress_cb,
+                progress_cb=_cb,
                 cancel_event=self.cancel_event,
                 preview_path=self.preview_path,
                 src_preview_path=self.src_preview_path,
@@ -127,14 +195,25 @@ class SegmentedPipeline:
             )
             await pipe.run()
             done.add(s)
+            local_done += n_in * factor
+            processed_out += n_in * factor
             self._save_ckpt(work, ckpt_file, done)
+
+        if sharded:
+            # 分片 worker 到此为止：不 trim/不 concat/不清理（协调者统一做）
+            elapsed = time.perf_counter() - t0
+            return RunStats(
+                frames=processed_out,
+                elapsed_s=elapsed,
+                fps=processed_out / elapsed if elapsed > 0 else 0.0,
+                out_path=self.output_path,
+                out_bytes=0,
+            )
 
         if img_mode:
             # 成功后裁掉可能残留的高帧号图；统计目录体积作为产物大小
             assert img_dir is not None
-            for num, f in iter_image_frames(img_dir):
-                if num > total_out:
-                    f.unlink()
+            finalize_image_dir(img_dir, total_out)
             elapsed = time.perf_counter() - t0
             if self.cleanup:
                 shutil.rmtree(work, ignore_errors=True)
@@ -147,12 +226,8 @@ class SegmentedPipeline:
             )
 
         # 最终合成：视频段 concat + 源音轨（与 encoder_cmd 同款 copy/aac 逻辑）
-        seglist = work / "segments.txt"
-        seglist.write_text(
-            "\n".join(f"file '{p.as_posix()}'" for p in sorted(work.glob("seg_*.mp4"))),
-            encoding="utf-8",
-        )
-        await asyncio.get_running_loop().run_in_executor(None, self._concat, seglist)
+        await asyncio.get_running_loop().run_in_executor(
+            None, concat_segments, work, info, self.enc, self.output_path)
 
         if self.cleanup:
             shutil.rmtree(work, ignore_errors=True)
@@ -166,37 +241,16 @@ class SegmentedPipeline:
         )
 
     def _save_ckpt(self, work: Path, ckpt_file: Path, done: set[int]) -> None:
-        """原子写 checkpoint（tmp + replace，与 chunked.py 同款防半写）。"""
+        """原子写 checkpoint（tmp + replace，与 chunked.py 同款防半写）。
+
+        双路并行时两 worker 各写各的段：先并入磁盘上已有的 done 集（另一路
+        写入的段不能丢，否则崩溃续跑会把别人做完的段重跑一遍）。
+        """
+        if self.nshards > 1 and ckpt_file.exists():
+            try:
+                done |= set(json.loads(ckpt_file.read_text())["done"])
+            except (ValueError, KeyError, OSError):
+                pass  # 损坏按空集处理，本路集合照写
         tmp = work / "checkpoint.json.tmp"
         tmp.write_text(json.dumps({"done": sorted(done)}))
         tmp.replace(ckpt_file)
-
-    def _concat(self, seglist: Path) -> None:
-        """concat 视频段 + 源音轨/字幕 → 最终输出（-c:v copy，秒级）。"""
-        enc = self.enc
-        audio_codec = self.info.audio[0].codec if self.info.has_audio else None
-        has_audio = self.info.has_audio and enc.audio_mode != "none"
-        subs = list(getattr(self.info, "subtitles", []) or [])
-        cmd = [
-            ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-            "-f", "concat", "-safe", "0", "-i", str(seglist),
-        ]
-        if has_audio or subs:
-            cmd += ["-i", str(self.info.path)]
-        cmd += ["-map", "0:v:0"]
-        if has_audio or subs:
-            if has_audio:
-                cmd += ["-map", "1:a:0?"]
-            cmd += subtitle_args(enc, subs)
-        cmd += ["-c:v", "copy"]
-        if has_audio:
-            cmd += audio_args(enc, enc.mp4_family, audio_codec)
-        if enc.mp4_family:
-            cmd += ["-movflags", "+faststart"]
-        cmd += [str(self.output_path)]
-        r = subprocess.run(cmd, capture_output=True, text=True,
-                           creationflags=WINDOWS_CREATE_FLAGS)
-        if r.returncode != 0:
-            raise PipelineError(
-                f"最终合成失败(rc={r.returncode}): {(r.stderr or '')[-500:]}"
-            )

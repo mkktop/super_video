@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import shutil
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -27,7 +31,7 @@ from sv.models.registry import get_model, model_file
 from sv.paths import TEMP_DIR
 from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
 from sv.pipeline.segmented import SegmentedPipeline
-from sv.pipeline.stream import EncodeOpts, PipelineError, TaskCanceled
+from sv.pipeline.stream import EncodeOpts, PipelineError, RunStats, TaskCanceled
 from sv.server import db, settings
 
 
@@ -48,7 +52,48 @@ def emit(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 
 
-def main(task_id: str) -> int:
+def _spawn_shard_child(task_id: str):
+    """双路并行：拉起子进程跑第 2 路分段（与 runner 拉本进程同款入口形态）。"""
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "worker", task_id, "--shard", "1", "2"]
+    else:
+        cmd = [sys.executable, "-m", "sv.server.worker", task_id, "--shard", "1", "2"]
+    from sv.utils.process import WINDOWS_CREATE_FLAGS
+
+    return subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        creationflags=WINDOWS_CREATE_FLAGS, env={**os.environ, "PYTHONUNBUFFERED": "1"})
+
+
+def _read_child_events(proc, state: dict, started_cb=None) -> None:
+    """子分片进程 stdout 事件泵：聚合帧数/转发日志/捕获成败（守护线程）。
+
+    frames 是该路的全局帧号（含段起点偏移），用增量累计成本路完成数，
+    与协调者同口径相加才是真实总进度（直接相加两个全局号会翻倍）。
+    """
+    assert proc.stdout is not None
+    last = 0
+    for raw in proc.stdout:
+        line = raw.decode("utf-8", "replace").strip()
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # 库 print 等噪音：分片失败以 failed 事件为准
+        et = ev.get("type")
+        if et == "progress":
+            f = ev.get("frames", last)
+            state["frames"] += max(0, f - last)
+            last = f
+        elif et == "log":
+            emit({"type": "log", "line": ev.get("line", "")})
+        elif et == "done":
+            state["done"] = True
+        elif et == "failed":
+            state["error"] = ev.get("error", "并行分片失败")
+        # started 等其余事件忽略（本进程已上报过）
+
+
+def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     task = db.get_task(task_id)
     if task is None:
         emit({"type": "failed", "error": f"任务 {task_id} 不存在"})
@@ -246,25 +291,94 @@ def main(task_id: str) -> int:
     preview_path = preview_dir / f"{task_id}.jpg"
     src_preview_path = preview_dir / f"{task_id}_src.jpg"
 
-    def on_progress(frames, total, fps, eta):
-        emit({
-            "type": "progress", "frames": frames, "total": total,
-            "fps": round(fps, 2), "eta_sec": int(eta),
-        })
+    # ---- 双路并行判定（协调者身份才分叉；分片子进程只跑自己的段防递归）----
+    # 条件：开关开 + onnx 模型 + 无补帧 + 视频输出 + 至少 8 段——每路要各自
+    # 加载一遍推理引擎（TRT 反序列化 ~5-8s），段太少时双路省的计算抵不过
+    # 双倍的引擎加载（91 帧小视频实测 51fps → 29fps 反而变慢）
+    seg_est = min(600, max(60, info.total_frames // 8))
+    n_segs = -(-info.total_frames // seg_est)  # ceil(total/seg)
+    parallel = (
+        shard is None
+        and settings.load().get("parallel_streams") is True
+        and spec.engine == "onnx"
+        and interp is None
+        and out_kind == "video"
+        and n_segs >= 8
+    )
+    child = None
+    child_state: dict = {"frames": 0, "done": False, "error": None}
+
+    if parallel:
+        child = _spawn_shard_child(task_id)
+        threading.Thread(target=_read_child_events, args=(child, child_state),
+                         daemon=True).start()
+        emit({"type": "log", "line": "双路并行已启用（两个进程分段同时推理）"})
+
+        own = {"last": 0, "done": 0}  # 本路帧号 → 增量累计完成数
+
+        def on_progress(frames, total, fps, eta):
+            # 两路各自增量累计之和 = 真实总进度（全局帧号直接相加会翻倍）
+            own["done"] += max(0, frames - own["last"])
+            own["last"] = frames
+            f = own["done"] + child_state["frames"]
+            el = time.perf_counter() - t0
+            fps_all = f / el if el > 0 else 0.0
+            emit({"type": "progress", "frames": f, "total": total,
+                  "fps": round(fps_all, 2),
+                  "eta_sec": int((total - f) / fps_all) if fps_all > 0 else 0})
+    else:
+        def on_progress(frames, total, fps, eta):
+            emit({
+                "type": "progress", "frames": frames, "total": total,
+                "fps": round(fps, 2), "eta_sec": int(eta),
+            })
 
     # 分段管线：取消/崩溃后"继续"可跳过已完成段（checkpoint 在 .tmp/segmented/<task_id>）
+    # 协调者=第 0 路（其余段由子进程跑），分片子进程只跑自己的段；两者都不做
+    # 收尾合成——双路都完成后由协调者统一 concat + 清理
+    my_shard: int | None = shard
+    my_nshards = nshards
+    if parallel:
+        my_shard, my_nshards = 0, 2
+    sharded = my_shard is not None
     pipeline = SegmentedPipeline(
         info, output_path, engine,
         _encode_opts(params, out_kind),
         task_id=task_id,
-        progress_cb=on_progress, preview_path=preview_path,
-        src_preview_path=src_preview_path,
+        progress_cb=on_progress,
+        preview_path=None if sharded else preview_path,
+        src_preview_path=None if sharded else src_preview_path,
         target_scale=None if target_size else target,
         target_size=target_size,
         interp=interp,
+        shard=my_shard, nshards=my_nshards,
+        cleanup=not sharded,
     )
+    work_dir = TEMP_DIR / "segmented" / task_id
     try:
         stats = asyncio.run(pipeline.run())
+        if parallel:
+            # 双路收尾：等子进程退出 + 校验成败 + 合成 + 清理
+            if child_state["error"]:
+                raise PipelineError(f"并行分片失败: {child_state['error']}")
+            try:
+                child.wait(timeout=600)
+            except subprocess.TimeoutExpired:
+                raise PipelineError("并行分片超时未退出")
+            if child.returncode != 0 or not child_state["done"]:
+                raise PipelineError(f"并行分片异常退出 (rc={child.returncode})")
+            from sv.pipeline.segmented import concat_segments
+
+            concat_segments(work_dir, info, _encode_opts(params, out_kind),
+                            output_path)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            stats = RunStats(
+                frames=out_total,
+                elapsed_s=time.perf_counter() - t0,
+                fps=out_total / max(time.perf_counter() - t0, 1e-6),
+                out_path=output_path,
+                out_bytes=output_path.stat().st_size if output_path.exists() else 0,
+            )
     except TaskCanceled:
         emit({"type": "canceled"})
         return 3
@@ -274,6 +388,11 @@ def main(task_id: str) -> int:
     except Exception as e:  # noqa: BLE001 — worker 兜底，任何异常都要上报
         emit({"type": "failed", "error": f"{type(e).__name__}: {e}"})
         return 1
+    finally:
+        if child is not None and child.poll() is None:
+            from sv.utils.process import kill_tree
+
+            kill_tree(child.pid)  # 本路失败/取消时带走分片子进程
 
     emit({
         "type": "done", "frames": stats.frames,
@@ -285,7 +404,13 @@ def main(task_id: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("usage: python -m sv.server.worker <task_id>", file=sys.stderr)
-        sys.exit(2)
-    sys.exit(main(sys.argv[1]))
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="worker")
+    ap.add_argument("task_id")
+    ap.add_argument("--shard", nargs=2, type=int, metavar=("I", "N"),
+                    default=None, help="[内部] 双路并行：本进程跑第 I 路(0基)/共 N 路")
+    args = ap.parse_args()
+    sh = args.shard[0] if args.shard else None
+    ns = args.shard[1] if args.shard else 1
+    sys.exit(main(args.task_id, sh, ns))

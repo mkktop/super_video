@@ -12,6 +12,7 @@ DEFAULTS = {
     "download_proxy": "",  # 模型下载代理："" = 跟随系统代理 | direct = 直连 | http://host:port = 自定义
     "perf_sampling": True,  # 性能监控后台采样（CPU/GPU/内存，2s 一拍）
     "auto_update_check": True,  # 启动时自动检查 GitHub Releases 更新
+    "parallel_streams": False,  # 双路并行：两进程分段同时推理（实测 +17~21%，显存翻倍）
 }
 
 SETTINGS_PATH = ROOT / "data" / "settings.json"
@@ -48,6 +49,8 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 perf_sampling 值: {v}")
             if k == "auto_update_check" and not isinstance(v, bool):
                 raise ValueError(f"非法 auto_update_check 值: {v}")
+            if k == "parallel_streams" and not isinstance(v, bool):
+                raise ValueError(f"非法 parallel_streams 值: {v}")
             data[k] = v
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
