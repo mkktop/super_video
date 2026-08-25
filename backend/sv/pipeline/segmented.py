@@ -162,42 +162,64 @@ class SegmentedPipeline:
                 for _, f in iter_image_frames(img_dir):
                     f.unlink()
         local_done = 0  # 本路已完成段的输出帧数（分片模式进度按局部口径上报）
-        for s in starts:
-            if s in done:
-                continue  # 续跑：跳过已完成段
-            if self.cancel_event is not None and self.cancel_event.is_set():
-                raise TaskCanceled()
-            n_in = min(seg, total_in - s)
-            if self.shard is not None and self.progress_cb is not None:
-                # StreamPipeline 上报的是全局帧号（seg_start+local）；分片模式下
-                # 换算成本路累计（全局号在交错段间有跳跃，直接累计会把段间隙
-                # 误当进度，两路相加就超 100%）
-                def _cb(frames, total, fps, eta, _loc=local_done, _glob=s * factor):
-                    self.progress_cb(_loc + frames - _glob, total, fps, eta)
-            else:
-                _cb = self.progress_cb
-            seg_out = (img_dir / f"%06d.{self.enc.out_kind}") if img_mode else work / f"seg_{s:06d}.mp4"
-            pipe = StreamPipeline(
-                info, seg_out, tx, self.enc,
-                progress_cb=_cb,
-                cancel_event=self.cancel_event,
-                preview_path=self.preview_path,
-                src_preview_path=self.src_preview_path,
-                target_scale=self.target_scale,
-                target_size=self.target_size,
-                interp=self.interp,
-                seek_s=(s / info.fps) if s > 0 else None,
-                max_frames=n_in,
-                with_audio=False,  # 段只编视频，音轨最后统一合成
-                seg_start=s * factor,
-                seg_total=total_out,
-                frame_start=s * factor + 1 if img_mode else 1,
-            )
-            await pipe.run()
-            done.add(s)
-            local_done += n_in * factor
-            processed_out += n_in * factor
-            self._save_ckpt(work, ckpt_file, done)
+        tot: dict[str, float] = {}  # 分段计时累计（剖析用，写 perf_stages.jsonl）
+        gap_prev_end = None
+        try:
+            for s in starts:
+                if s in done:
+                    continue  # 续跑：跳过已完成段
+                if self.cancel_event is not None and self.cancel_event.is_set():
+                    raise TaskCanceled()
+                n_in = min(seg, total_in - s)
+                if self.shard is not None and self.progress_cb is not None:
+                    # StreamPipeline 上报的是全局帧号（seg_start+local）；分片模式下
+                    # 换算成本路累计（全局号在交错段间有跳跃，直接累计会把段间隙
+                    # 误当进度，两路相加就超 100%）
+                    def _cb(frames, total, fps, eta, _loc=local_done, _glob=s * factor):
+                        self.progress_cb(_loc + frames - _glob, total, fps, eta)
+                else:
+                    _cb = self.progress_cb
+                seg_out = (img_dir / f"%06d.{self.enc.out_kind}") if img_mode else work / f"seg_{s:06d}.mp4"
+                _t_gap0 = time.perf_counter()
+                if gap_prev_end is not None:
+                    tot["gap"] = tot.get("gap", 0.0) + (_t_gap0 - gap_prev_end)
+                pipe = StreamPipeline(
+                    info, seg_out, tx, self.enc,
+                    progress_cb=_cb,
+                    cancel_event=self.cancel_event,
+                    preview_path=self.preview_path,
+                    src_preview_path=self.src_preview_path,
+                    target_scale=self.target_scale,
+                    target_size=self.target_size,
+                    interp=self.interp,
+                    seek_s=(s / info.fps) if s > 0 else None,
+                    max_frames=n_in,
+                    with_audio=False,  # 段只编视频，音轨最后统一合成
+                    seg_start=s * factor,
+                    seg_total=total_out,
+                    frame_start=s * factor + 1 if img_mode else 1,
+                )
+                await pipe.run()
+                for k, v in pipe.stage_stats.items():
+                    tot[k] = tot.get(k, 0.0) + v
+                tot["n_segs"] = tot.get("n_segs", 0.0) + 1
+                with (work / "perf_stages.jsonl").open("a", encoding="utf-8") as f:
+                    f.write(json.dumps({"seg": s, **{k: round(v, 3) for k, v in pipe.stage_stats.items()}},
+                                       ensure_ascii=False) + "\n")
+                gap_prev_end = time.perf_counter()
+                done.add(s)
+                local_done += n_in * factor
+                processed_out += n_in * factor
+                self._save_ckpt(work, ckpt_file, done)
+        finally:
+            if tot:
+                frames = tot.get("frames", 0.0)
+                rec = {"summary": True, **{k: round(v, 3) for k, v in tot.items()},
+                       "fps": round(frames / tot["wall"], 2) if tot.get("wall") else 0.0,
+                       "ms_per_frame": {k: round(v * 1000 / frames, 2) for k, v in tot.items()
+                                        if k not in ("frames", "n_segs", "wall") and frames > 0}}
+                with (work / "perf_stages.jsonl").open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
         if sharded:
             # 分片 worker 到此为止：不 trim/不 concat/不清理（协调者统一做）
