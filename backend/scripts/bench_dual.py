@@ -59,10 +59,24 @@ def _setup(args):
         wrap_u8(src, wrap, color=spec.io.get("color", "bgr"),
                 range_01=spec.io.get("range", "0-1") == "0-1")
 
-    def make_session():
-        so = ort.SessionOptions()
-        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-        return ort.InferenceSession(str(wrap), so, providers=["DmlExecutionProvider"])
+    if args.device == "trt":
+        # TRT 链：引擎缓存与产品同源（同图 hash 命中热缓存）；需 .venv-cuda 解释器
+        from sv.engines.nvidia_dlls import register_nvidia_dlls
+        from sv.engines.onnx_engine import _trt_provider_options
+
+        register_nvidia_dlls()
+
+        def make_session():
+            so = ort.SessionOptions()
+            so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+            provs = _trt_provider_options() + [
+                ("CUDAExecutionProvider", {}), ("CPUExecutionProvider", {})]
+            return ort.InferenceSession(str(wrap), so, providers=provs)
+    else:
+        def make_session():
+            so = ort.SessionOptions()
+            so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+            return ort.InferenceSession(str(wrap), so, providers=["DmlExecutionProvider"])
 
     return info, spec, out_dir, make_session
 
@@ -114,7 +128,8 @@ async def main_async(args):
             t0 = time.perf_counter()
             procs = [subprocess.Popen(
                 [sys.executable, str(me), "--src", args.src, "--model", args.model,
-                 "--codec", args.codec, "--child", str(i), str(mid), f"{seek:.6f}"],
+                 "--codec", args.codec, "--device", args.device,
+                 "--child", str(i), str(mid), f"{seek:.6f}"],
                 stdout=subprocess.PIPE, creationflags=WINDOWS_CREATE_FLAGS)
                 for i in range(2)]
             outs = []
@@ -171,6 +186,8 @@ def main():
     ap.add_argument("--src", required=True)
     ap.add_argument("--model", default="animejanai-v3-hd-l2")
     ap.add_argument("--codec", default="h264_nvenc")
+    ap.add_argument("--device", default="dml", choices=["dml", "trt"],
+                    help="trt 需用 .venv-cuda 解释器运行（TRT 引擎缓存与产品同源）")
     ap.add_argument("--child", nargs=3, default=None, help="内部用: <idx> <mid> <seek>")
     ap.add_argument("--only", default=None, help="只跑指定相位: ov1|ov2p|ov2x")
     args = ap.parse_args()
