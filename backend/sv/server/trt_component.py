@@ -221,7 +221,7 @@ def start_install(bus: EventBus) -> tuple[bool, str]:
     if runner.current_id is not None:
         with _state_lock:
             _state.update(installing=False, phase=None)
-        return False, "有任务正在运行，请等任务结束后再安装"
+        return False, "有任务正在处理，请待任务结束后再安装"
 
     arch = detect_gpu_arch()
     _install_thread = threading.Thread(
@@ -248,7 +248,7 @@ def uninstall() -> tuple[bool, str]:
     from .app import runner
 
     if runner.current_id is not None:
-        return False, "有任务正在运行，请等任务结束后再卸载"
+        return False, "有任务正在处理，请待任务结束后再卸载"
     if not COMPONENT_DIR.exists():
         return True, ""
     shutil.rmtree(_OLD, ignore_errors=True)

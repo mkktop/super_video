@@ -144,7 +144,7 @@ class OnnxSrEngine(BaseEngine):
         try:
             self._setup_u8()
         except Exception as e:  # noqa: BLE001 — 优化项，失败必须回退而不是带崩任务
-            print(f"[engine] u8 包装不可用，走原路径: {type(e).__name__}: {e}")
+            print(f"[engine] GPU 前后处理优化不可用，使用标准路径: {type(e).__name__}: {e}")
             self._u8_sess = None
             self.u8_wrapped = False
 
@@ -185,7 +185,7 @@ class OnnxSrEngine(BaseEngine):
         self._u8_sess = sess
         self._u8_in_name = in_name
         self.u8_wrapped = True
-        print(f"[engine] u8 包装生效（前后处理 GPU 化）: {cache.name}")
+        print(f"[engine] GPU 前后处理优化已启用: {cache.name}")
 
     def _validate_u8(self, sess, in_name: str) -> None:
         """包装前后输出逐位对比（≤1/255 容差，覆盖偶/奇尺寸与 pad 路径）。"""
@@ -242,12 +242,12 @@ class OnnxSrEngine(BaseEngine):
             except Exception as e:  # noqa: BLE001
                 if "TensorrtExecutionProvider" in chosen:
                     rest = [p for p in chosen if p != "TensorrtExecutionProvider"]
-                    print(f"[engine] TensorRT 初始化失败({e})，回退 {'/'.join(rest) or 'CPU'}")
+                    print(f"[engine] TensorRT 初始化失败（{e}），已回退至 {'/'.join(rest) or 'CPU'}")
                     chosen = rest
                     continue
                 if self.device == "cpu" or not (set(chosen) - {"CPUExecutionProvider"}):
                     raise
-                print(f"[engine] {chosen} 初始化失败({e})，回落 CPU")
+                print(f"[engine] {chosen} 初始化失败（{e}），已回退至 CPU")
                 chosen = ["CPUExecutionProvider"]
 
     def _infer(self, frame: np.ndarray) -> np.ndarray:

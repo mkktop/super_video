@@ -230,9 +230,9 @@ async function uninstallTrc() {
 
     <NCard title="推理后端与精度" size="small">
       <p class="hint">
-        DirectML：全显卡兼容 · CUDA：NVIDIA 专用 ·
-        TensorRT：N 卡最快推理（需在下方安装加速组件，缺失自动回退 DirectML）·
-        当前实际后端：<NTag size="small" type="info" :bordered="false">
+        DirectML：兼容所有显卡 · CUDA：NVIDIA 显卡专用 ·
+        TensorRT：NVIDIA 显卡高性能推理（需安装下方加速组件，未安装时自动回退 DirectML）·
+        当前后端：<NTag size="small" type="info" :bordered="false">
           {{ store.engine?.backend === 'trt' ? 'CUDA + TensorRT' : store.engine?.backend === 'cuda' ? 'CUDA' : 'DirectML' }}
         </NTag>
       </p>
@@ -243,15 +243,15 @@ async function uninstallTrc() {
         <NRadioButton value="trt">TensorRT</NRadioButton>
       </NRadioGroup>
       <p class="hint" style="margin: 14px 0 12px">
-        FP16：实测提速 1.36~1.73x，画质无感知差异（输出 PSNR 74dB+）·
-        FP32：极少数模型数值异常时回退用
+        FP16：推荐，处理速度提升约 1.4~1.7 倍，画质无可感知差异 ·
+        FP32：供个别模型出现数值异常时使用
       </p>
       <NRadioGroup v-model:value="precision">
         <NRadioButton value="fp16">FP16（推荐）</NRadioButton>
         <NRadioButton value="fp32">FP32</NRadioButton>
       </NRadioGroup>
       <div class="update-row" style="margin-top: 14px">
-        <span>双路并行加速：两个进程分段同时推理，吃满闲置的 GPU（配硬编码器实测近 2 倍；软编码时 CPU 先顶满，收益有限）；显存占用翻倍，低显存显卡或遇到异常时关闭</span>
+        <span>双路并行：由两个进程分段同时处理，提升 GPU 利用率；配合硬件编码器效果最佳，使用软编码时提升有限。显存占用约增加一倍，低显存设备建议关闭</span>
         <NSwitch v-model:value="parallelStreams" size="small" @update:value="saveParallel" />
       </div>
       <div style="margin-top: 14px">
@@ -292,10 +292,9 @@ async function uninstallTrc() {
       <!-- 未安装：安装入口 -->
       <template v-else>
         <p class="hint">
-          NVIDIA 显卡的极致推理加速（实测 1080p→4K 从 ~20fps 提到 ~50fps）。
-          安装需从 GitHub 下载约 {{ fmtGB(trcDownloadBytes) }} 的运行库（GPU 版
-          onnxruntime + CUDA/TensorRT 库），下载速度受网络影响。不安装不影响
-          其他功能，推理走 DirectML。
+          适用于 NVIDIA 显卡（2018 年及之后架构）的推理加速组件，1080p→4K
+          处理速度最高可提升约 2.5 倍。安装需从 GitHub 下载约 1.5 GB
+          运行库，耗时取决于网络环境；未安装时推理使用 DirectML，功能不受影响。
         </p>
         <div class="update-row" v-if="store.trt.error">
           <span style="color: #e88080">上次安装失败：{{ store.trt.error }}</span>
@@ -303,16 +302,16 @@ async function uninstallTrc() {
         </div>
         <div class="update-row" v-else>
           <span>检测到显卡架构：{{ store.trt.gpu_arch ?? '未知（将下载通用包）' }}</span>
-          <NButton size="small" type="primary" :loading="trcBusy" @click="installTrc">下载并安装</NButton>
+          <NButton size="small" type="primary" :loading="trcBusy" @click="installTrc">下载并安装（约 {{ fmtGB(trcDownloadBytes) }}）</NButton>
         </div>
       </template>
     </NCard>
 
     <NCard title="模型下载" size="small">
       <p class="hint">
-        下载源为 GitHub Releases（models-v1）。代理软件开了"系统代理"但下载仍慢时，
-        多半是 PAC 模式不生效或代理规则没覆盖 GitHub CDN 域名——选"自定义代理"填本地
-        代理地址（如 Clash 的 http://127.0.0.1:7890）最稳。
+        下载源为 GitHub Releases。若「跟随系统代理」模式下下载缓慢，可能是代理规则
+        未覆盖 GitHub CDN 域名，可切换为「自定义代理」并填写本地代理地址
+        （如 http://127.0.0.1:7890）。
       </p>
       <NSpace :size="8" align="center">
         <NSelect v-model:value="proxyMode" :options="proxyOptions" size="small" style="width: 170px" />
@@ -333,7 +332,7 @@ async function uninstallTrc() {
         <NSwitch v-model:value="perfSampling" size="small" @update:value="savePerfSampling" />
       </div>
       <p class="hint" style="margin-top: 8px">
-        关闭后采样停止（笔记本省电可关），重新开启立即生效；历史数据保留最近 1 小时，随重启清零。
+        关闭后停止采样，重新开启立即生效；历史数据保留最近 1 小时，应用重启后清零。
       </p>
     </NCard>
 
@@ -371,7 +370,7 @@ async function uninstallTrc() {
       </div>
     </NCard>
 
-    <NCard title="本机环境" size="small">
+    <NCard title="设备信息" size="small">
       <NSpace vertical :size="6">
         <div>GPU：{{ store.gpuName }} <span v-if="store.hardware?.gpus?.[0]?.vram_gb">({{ store.hardware.gpus[0].vram_gb }}GB)</span></div>
         <div>CPU：{{ store.hardware?.cpu }} · {{ store.hardware?.cpu_cores }} 核心</div>

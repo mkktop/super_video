@@ -101,7 +101,7 @@ const hw = computed(() => store.hardware)
 
     <!-- 硬件 -->
     <section>
-      <h2 class="sec-title">本机硬件</h2>
+      <h2 class="sec-title">硬件信息</h2>
       <div class="hw-grid">
         <div class="card hw hw-gpu">
           <div class="hw-head">

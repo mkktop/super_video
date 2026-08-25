@@ -145,11 +145,11 @@ async function startOrReuseSidecar(): Promise<string> {
       await new Promise((r) => setTimeout(r, 500))
     }
     throw new Error(
-      `sidecar 启动超时（已等 60s，常见原因：杀毒软件拦截了未签名的 sidecar.exe，` +
-        `或安装目录不可写）。日志：${logPath}`
+      `后端服务启动超时（已等待 60 秒）。常见原因：安全软件拦截了未签名的 sidecar.exe，` +
+        `或安装目录不可写。日志：${logPath}`
     )
   }
-  throw new Error('8730-8739 无可用端口')
+  throw new Error('端口 8730-8739 均被占用，无法启动后端服务')
 }
 
 async function hasActiveTasks(): Promise<boolean> {

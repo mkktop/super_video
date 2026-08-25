@@ -73,14 +73,14 @@ const av1NvencOk = computed(() => store.hardware?.av1_nvenc ?? false)
 const amfOk = computed(() => store.hardware?.amf ?? false)
 const svtOk = computed(() => store.hardware?.svt_av1 ?? false)
 const codecOptions = computed(() => [
-  { label: 'H.264 · 软编（兼容性好）', value: 'h264' },
-  { label: nvencOk.value ? 'H.264 · 硬编 NVENC（快）' : 'H.264 · 硬编（本机不可用）', value: 'h264_nvenc', disabled: !nvencOk.value },
-  { label: 'H.265 · 软编（体积小）', value: 'h265' },
-  { label: nvencOk.value ? 'H.265 · 硬编 NVENC（快且小）' : 'H.265 · 硬编（本机不可用）', value: 'hevc_nvenc', disabled: !nvencOk.value },
-  { label: av1NvencOk.value ? 'AV1 · 硬编 NVENC（RTX 40+，最小体积）' : 'AV1 · 硬编（本机不可用）', value: 'av1_nvenc', disabled: !av1NvencOk.value },
-  { label: amfOk.value ? 'H.264 · 硬编 AMF（A 卡）' : 'H.264 · 硬编 AMF（需 A 卡）', value: 'h264_amf', disabled: !amfOk.value },
-  { label: amfOk.value ? 'H.265 · 硬编 AMF（A 卡）' : 'H.265 · 硬编 AMF（需 A 卡）', value: 'hevc_amf', disabled: !amfOk.value },
-  { label: svtOk.value ? 'AV1 · 软编 SVT（体积小，速度中等）' : 'AV1 · 软编 SVT（本 ffmpeg 不含）', value: 'av1_svt', disabled: !svtOk.value },
+  { label: 'H.264 · 软件编码（兼容性好）', value: 'h264' },
+  { label: nvencOk.value ? 'H.264 · 硬件编码 NVENC（速度优先）' : 'H.264 · 硬件编码（当前设备不支持）', value: 'h264_nvenc', disabled: !nvencOk.value },
+  { label: 'H.265 · 软件编码（体积较小）', value: 'h265' },
+  { label: nvencOk.value ? 'H.265 · 硬件编码 NVENC（速度与体积均衡）' : 'H.265 · 硬件编码（当前设备不支持）', value: 'hevc_nvenc', disabled: !nvencOk.value },
+  { label: av1NvencOk.value ? 'AV1 · 硬件编码 NVENC（RTX 40 系及以上，体积最小）' : 'AV1 · 硬件编码（当前设备不支持）', value: 'av1_nvenc', disabled: !av1NvencOk.value },
+  { label: amfOk.value ? 'H.264 · 硬件编码 AMF（AMD 显卡）' : 'H.264 · 硬件编码 AMF（需 AMD 显卡）', value: 'h264_amf', disabled: !amfOk.value },
+  { label: amfOk.value ? 'H.265 · 硬件编码 AMF（AMD 显卡）' : 'H.265 · 硬件编码 AMF（需 AMD 显卡）', value: 'hevc_amf', disabled: !amfOk.value },
+  { label: svtOk.value ? 'AV1 · 软件编码 SVT（体积小，速度中等）' : 'AV1 · 软件编码 SVT（当前环境不支持）', value: 'av1_svt', disabled: !svtOk.value },
 ])
 const containerOptions = [
   { label: 'MP4（兼容性最好）', value: 'mp4' },

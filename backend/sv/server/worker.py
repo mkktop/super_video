@@ -265,9 +265,9 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             from sv.engines.trt_runtime import activate_component
 
             if activate_component():
-                emit({"type": "log", "line": "TRT 组件已激活（GPU 版运行时）"})
+                emit({"type": "log", "line": "TensorRT 加速组件已加载"})
         emit({"type": "log", "line":
-              "TensorRT 引擎加载中（新模型/新分辨率首次编译需 1~2 分钟，之后秒级启动）"})
+              "TensorRT 引擎加载中：新模型或新分辨率首次使用需编译引擎（约 1~2 分钟），完成后可直接加载"})
     engine = None
     for _ in range(3):  # 显存不足自动降档：tile 逐步减半
         try:
@@ -282,7 +282,8 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             if not _oom(e) or tile in (1,):
                 raise
             new_tile = 256 if tile == 0 else max(64, tile // 2)
-            emit({"type": "log", "line": f"显存不足，tile {tile or '关'} -> {new_tile} 重试"})
+            emit({"type": "log", "line":
+                  f"显存不足，分块大小调整为 {new_tile} 后重试"})
             tile = new_tile
     emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
 
@@ -312,7 +313,7 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         child = _spawn_shard_child(task_id)
         threading.Thread(target=_read_child_events, args=(child, child_state),
                          daemon=True).start()
-        emit({"type": "log", "line": "双路并行已启用（两个进程分段同时推理）"})
+        emit({"type": "log", "line": "双路并行已启用：两个进程分段同时处理"})
 
         own = {"last": 0, "done": 0}  # 本路帧号 → 增量累计完成数
 

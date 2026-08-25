@@ -156,7 +156,7 @@ function toSr() {
 <template>
   <div class="trim-page">
     <h2 class="title">视频剪切</h2>
-    <p class="subtitle">精确转码 · 帧精确 · 剪出片段后可直接加入超分队列</p>
+    <p class="subtitle">精确转码 · 帧精确 · 剪切完成后可直接加入超分队列</p>
 
     <NButton v-if="!input" dashed block size="large" @click="pick">
       点击选择视频文件
@@ -183,8 +183,8 @@ function toSr() {
         <div v-if="previewBroken" class="preview-broken">
           <div class="pb-title">无法预览：该视频的容器/编码浏览器不支持</div>
           <div class="pb-desc">
-            常见于 AVI/WMV/FLV/TS，或本机无 HEVC 硬解码。剪切不受任何影响——
-            可用下方滑条和入点/出点数字设置区间（时长、帧率信息正常），产物完整无损。
+            常见于 AVI/WMV/FLV/TS 格式，或当前设备不支持 HEVC 硬解码。剪切功能不受影响：
+            可通过下方滑条与入点/出点数值设置区间（时长、帧率信息正常），输出完整无损。
           </div>
         </div>
         <div class="mark-btns">
