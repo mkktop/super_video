@@ -74,7 +74,9 @@ def component_size(comp: Path | None = None) -> int:
 
 
 def status() -> dict:
-    manifest = read_manifest()
+    # 显式传本模块的 COMPONENT_DIR：read_manifest 的默认参读的是 trt_runtime
+    # 模块自己的同名属性，测试替换本模块副本时两者会分叉（CI 无本地组件目录时暴露）
+    manifest = read_manifest(COMPONENT_DIR)
     with _state_lock:
         st = dict(_state)
     return {

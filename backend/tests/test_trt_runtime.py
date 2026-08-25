@@ -92,7 +92,9 @@ def test_detect_gpu_arch_format():
 
 def test_status_with_fake_component(tmp_path, monkeypatch):
     comp = _make_component(tmp_path / "trt-runtime")
+    # 两个模块各持一份 COMPONENT_DIR 副本（Path 不可变），都要替换才不读真目录
     monkeypatch.setattr(tc, "COMPONENT_DIR", comp)
+    monkeypatch.setattr(trt, "COMPONENT_DIR", comp)
     st = tc.status()
     assert st["installed"] is True
     assert st["version"] == 1
