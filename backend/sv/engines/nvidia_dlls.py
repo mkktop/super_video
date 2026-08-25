@@ -11,15 +11,19 @@ import sysconfig
 from pathlib import Path
 
 
+def register_dir(d: Path) -> None:
+    """把一个目录挂进 DLL 搜索路径（add_dll_directory + PATH 前插）。"""
+    try:
+        os.add_dll_directory(str(d))
+    except OSError:
+        pass
+    os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
+
+
 def register_nvidia_dlls() -> None:
     site = Path(sysconfig.get_paths()["purelib"])
 
-    def _register(d: Path) -> None:
-        try:
-            os.add_dll_directory(str(d))
-        except OSError:
-            pass
-        os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
+    _register = register_dir
 
     nv = site / "nvidia"
     if nv.is_dir():

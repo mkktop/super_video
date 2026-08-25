@@ -49,10 +49,37 @@ def _probe_cuda(python_exe: Path) -> tuple[bool, str]:
             [str(python_exe), str(script), str(model)],
             capture_output=True, timeout=120,
             creationflags=WINDOWS_CREATE_FLAGS,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
         )
         line = out.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
         info = json.loads(line)
         result = (bool(info.get("ok")), info.get("error") or info.get("provider", ""))
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, IndexError) as e:
+        result = (False, f"探测失败: {e}")
+    _PROBE_CACHE[key] = result
+    return result
+
+
+def _probe_frozen() -> tuple[bool, str]:
+    """安装版组件探测：sidecar.exe ort-check --session（组件 CUDA 链真会话）。"""
+    key = f"frozen:{sys.executable}"
+    if key in _PROBE_CACHE:
+        return _PROBE_CACHE[key]
+    model = BUNDLED_DIR / "RealESR-AnimeVideo-v3_x4.onnx"
+    if not model.exists():
+        return False, "缺少校验用模型"
+    try:
+        out = subprocess.run(
+            [sys.executable, "ort-check", "--session", str(model)],
+            capture_output=True, timeout=180,
+            creationflags=WINDOWS_CREATE_FLAGS,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+        )
+        line = out.stdout.decode("utf-8", "replace").strip().splitlines()[-1]
+        info = json.loads(line)
+        detail = ("组件 CUDA" + (" + TensorRT" if info.get("trt") else "")
+                  if info.get("ok") else (info.get("error") or "探测失败"))
+        result = (bool(info.get("ok")), detail)
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, IndexError) as e:
         result = (False, f"探测失败: {e}")
     _PROBE_CACHE[key] = result
@@ -69,9 +96,23 @@ def select_engine(force: str | None = None) -> EngineChoice:
     TRT 库缺失时引擎层自动回退，此处只保证解释器可用）。
     force: 'cuda' | 'trt' | 'directml'（环境变量 SV_ENGINE）。
 
-    打包版（PyInstaller frozen）：无独立 venv，worker 复用 sidecar.exe（DirectML）。
+    打包版（PyInstaller frozen）：worker 复用 sidecar.exe；engine=trt/cuda 且
+    TRT 组件已安装（trt-runtime/，含 GPU 版 onnxruntime）时走组件探测，
+    否则照旧 DirectML。
     """
     if getattr(sys, "frozen", False):
+        want = force or os.environ.get("SV_ENGINE")
+        if want in ("cuda", "trt"):
+            from ..engines.trt_runtime import find_component
+
+            if find_component() is not None:
+                ok, detail = _probe_frozen()
+                if ok:
+                    return EngineChoice(want, sys.executable, detail)
+                return EngineChoice("directml", sys.executable,
+                                    f"组件探测失败，回落 DirectML（{detail}）")
+            return EngineChoice("directml", sys.executable,
+                                "TRT 组件未安装，回落 DirectML")
         return EngineChoice("directml", sys.executable, "打包版 DirectML")
     force = force or os.environ.get("SV_ENGINE")
     if force in ("cuda", "trt"):

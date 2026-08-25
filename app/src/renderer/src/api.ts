@@ -61,6 +61,31 @@ export interface Stats {
   bytes: number
 }
 
+/** TRT 可选组件的资产描述（release 上的 7z 分包） */
+export interface TrcPart {
+  url: string
+  size: number
+  sha256: string
+  raw?: number
+}
+
+export interface TrcStatus {
+  installed: boolean
+  version: number | null
+  ort: string | null
+  trt: string | null
+  python: string | null
+  size_bytes: number
+  gpu_arch: string | null
+  assets: { version: number; python: string; ort: string; trt: string; assets: Record<string, TrcPart> }
+  installing: boolean
+  phase: string | null // download | extract | done | error
+  file: string
+  done: number
+  total: number
+  error: string | null
+}
+
 export interface ProbeInfo {
   ok: boolean
   error: string | null
@@ -198,6 +223,15 @@ export const api = {
   },
   async perfHistory(): Promise<{ interval_s: number; samples: PerfSample[] }> {
     return (await fetch(`${baseUrl}/api/perf/history`)).json()
+  },
+  async trtComponent(): Promise<TrcStatus> {
+    return (await fetch(`${baseUrl}/api/trt-component`)).json()
+  },
+  async installTrtComponent(): Promise<Response> {
+    return fetch(`${baseUrl}/api/trt-component/install`, { method: 'POST' })
+  },
+  async uninstallTrtComponent(): Promise<Response> {
+    return fetch(`${baseUrl}/api/trt-component`, { method: 'DELETE' })
   },
   async createTask(body: {
     input: string

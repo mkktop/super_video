@@ -15,6 +15,7 @@ a = Analysis(
         (str(HERE / "sv" / "models" / "registry_json"), "sv/models/registry_json"),
         (str(HERE / "sv" / "models" / "bundled"), "sv/models/bundled"),
         (str(HERE / "sv" / "server" / "presets.json"), "sv/server"),
+        (str(HERE / "sv" / "server" / "trt_component_assets.json"), "sv/server"),
     ],
     hiddenimports=[
         "uvicorn.logging", "uvicorn.loops.auto", "uvicorn.protocols.http.auto",

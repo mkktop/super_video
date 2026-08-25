@@ -103,6 +103,11 @@ class Runner:
             self.engine = select_engine(None if engine_setting == "auto" else engine_setting)
         worker_py = self.engine.python_exe
         env = {**os.environ, "PYTHONPATH": str(BACKEND_DIR), "PYTHONUNBUFFERED": "1"}
+        # frozen worker 的管道 stdout 默认走系统 locale（GBK）：中文事件行会以 GBK
+        # 字节到达本进程，UTF-8 解码出 U+FFFD 再回写直接 UnicodeEncodeError——
+        # 强制 worker 全链 UTF-8（emit 的 JSON 行才是可信的 UTF-8）
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
         # 打包版复用 sidecar.exe 自身作为 worker（cli.py worker 子命令）
         if getattr(sys, "frozen", False):
             spawn_cmd = [worker_py, "worker", task_id]

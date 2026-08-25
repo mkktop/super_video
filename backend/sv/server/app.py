@@ -30,6 +30,7 @@ from ..paths import ROOT, TEMP_DIR
 from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
 from ..pipeline.trim import run_trim
 from . import db
+from . import trt_component
 from .engine_select import select_engine
 from .events import EventBus
 from .hardware import hardware_info
@@ -126,6 +127,28 @@ def get_engine() -> dict:
         runner.engine = select_engine()
     e = runner.engine
     return {"backend": e.backend, "python": e.python_exe, "detail": e.detail}
+
+
+@app.get("/api/trt-component")
+def get_trt_component() -> dict:
+    """TRT 可选组件状态（安装/版本/体积/显卡架构/资产清单/安装进度）。"""
+    return trt_component.status()
+
+
+@app.post("/api/trt-component/install")
+def install_trt_component() -> dict:
+    accepted, msg = trt_component.start_install(bus)
+    if not accepted:
+        raise HTTPException(409, msg)
+    return {"ok": True}
+
+
+@app.delete("/api/trt-component")
+def uninstall_trt_component() -> dict:
+    ok, msg = trt_component.uninstall()
+    if not ok:
+        raise HTTPException(409, msg)
+    return {"ok": True}
 
 
 @app.get("/api/presets")

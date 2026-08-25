@@ -8,6 +8,7 @@ import {
   type Preset,
   type Stats,
   type PerfSample,
+  type TrcStatus,
 } from './api'
 
 export const store = reactive({
@@ -20,6 +21,7 @@ export const store = reactive({
   downloadProgress: {} as Record<string, number>, // model_id -> 0~1
   gpuName: '',
   engine: null as null | { backend: string; python: string; detail: string },
+  trt: null as TrcStatus | null,
   perf: {
     latest: null as PerfSample | null,
     samples: [] as PerfSample[], // 最近 1 小时,与后端环形缓冲同步
@@ -134,6 +136,14 @@ export async function refreshPerf() {
   }
 }
 
+export async function refreshTrt() {
+  try {
+    store.trt = await api.trtComponent()
+  } catch {
+    /* 组件状态失败不致命,设置页进页时再拉 */
+  }
+}
+
 /** 兜底轮询：WS 健康时事件推送是主通道，降频到 8s；WS 断开回到 1.5s 保实时。
  *  页面隐藏时跳过刷新（visibilitychange 恢复时立即刷一次）。 */
 function schedulePoll() {
@@ -155,6 +165,26 @@ export async function refreshModels() {
 function handleWsEvent(raw: MessageEvent) {
   try {
     const ev = JSON.parse(String(raw.data))
+    // TRT 组件安装进度:就地更新状态,必须 return(同 perf,2s 级高频)
+    if (ev.type === 'trt_component') {
+      if (store.trt) {
+        store.trt = {
+          ...store.trt,
+          installing: ev.phase === 'download' || ev.phase === 'extract',
+          phase: ev.phase ?? null,
+          file: ev.file ?? '',
+          done: ev.done ?? store.trt.done,
+          total: ev.total ?? store.trt.total,
+          error: ev.error ?? null,
+        }
+        if (ev.phase === 'done') {
+          // 安装完成:重拉完整状态(版本/体积/资产)与引擎探测结果
+          refreshTrt()
+          api.engine().then((e) => (store.engine = e))
+        }
+      }
+      return
+    }
     // 性能采样 2s 一拍就地入库,必须 return:落入末尾兜底会每拍触发一次全量任务刷新
     if (ev.type === 'perf') {
       const s = ev as PerfSample
@@ -189,6 +219,7 @@ function connectWs() {
     wsOk = true
     refreshTasks()
     refreshPerf()
+    refreshTrt()
     schedulePoll()
   }
   ws.onmessage = handleWsEvent
@@ -229,7 +260,7 @@ export async function initStore() {
   } catch {
     /* 设置读取失败按默认(自动检查开) */
   }
-  await Promise.all([refreshTasks(), refreshStats(), refreshPerf()])
+  await Promise.all([refreshTasks(), refreshStats(), refreshPerf(), refreshTrt()])
   connectWs()
   schedulePoll()
   document.addEventListener('visibilitychange', () => {

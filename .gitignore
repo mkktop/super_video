@@ -9,6 +9,9 @@ __pycache__/
 .tmp/
 models_store/
 output/
+trt-runtime/
+trt-runtime.new/
+trt-runtime.old/
 
 # 用户素材（仅本地）
 samples/

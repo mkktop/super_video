@@ -181,7 +181,83 @@ def cmd_worker(args):
     sys.exit(worker_main(args.task_id))
 
 
+def cmd_ort_check(args):
+    """ORT 后端探测：providers 列表 + 真会话验证，输出一行 JSON。
+
+    打包版先激活 TRT 组件（存在时）；dev 版挂 site-packages 的 NVIDIA DLL。
+    engine_select 的 frozen 探测与现场排障共用本入口。
+    """
+    import json as _json
+    import os as _os
+    import re as _re
+
+    from sv.engines.nvidia_dlls import register_nvidia_dlls
+
+    result: dict = {"ok": False, "providers": [], "cuda": False, "trt": False,
+                    "component": False, "error": None}
+    try:
+        if getattr(sys, "frozen", False):
+            from sv.engines.trt_runtime import activate_component
+
+            result["component"] = activate_component()
+        else:
+            register_nvidia_dlls()
+        import numpy as _np
+        import onnxruntime as _ort
+
+        provs = _ort.get_available_providers()
+        result["providers"] = list(provs)
+        result["cuda"] = "CUDAExecutionProvider" in provs
+        result["trt"] = "TensorrtExecutionProvider" in provs
+        if result["trt"]:
+            # TRT EP 编译在 provider DLL 里，运行时另需 nvinfer_N.dll；
+            # builder_resource/plugin 不算核心库，缺失按 TRT 不可用标注
+            import ctypes
+
+            cands: list[Path] = []
+            if getattr(sys, "frozen", False):
+                from sv.engines.trt_runtime import COMPONENT_DIR as _comp
+
+                cands = [p for p in (_comp / "dlls").glob("*.dll")
+                         if _re.fullmatch(r"nvinfer_\d+\.dll", p.name)]
+            if not cands:
+                import sysconfig
+
+                site = Path(sysconfig.get_paths()["purelib"])
+                cands = [p for p in (site / "tensorrt_libs").glob("*.dll")
+                         if _re.fullmatch(r"nvinfer_\d+\.dll", p.name)]
+            try:
+                ctypes.WinDLL(str(cands[0]))
+            except (OSError, IndexError):
+                result["trt"] = False
+        if args.session:
+            sess = _ort.InferenceSession(
+                str(Path(args.session)), providers=["CUDAExecutionProvider"])
+            inp = sess.get_inputs()[0]
+            fixed = [d if isinstance(d, int) else 0 for d in inp.shape]
+            c = fixed[1] if len(fixed) > 1 and fixed[1] else 3
+            h = fixed[2] if len(fixed) > 2 and fixed[2] else 64
+            w = fixed[3] if len(fixed) > 3 and fixed[3] else 64
+            x = _np.zeros((1, c, h, w), dtype=_np.float32)
+            sess.run([o.name for o in sess.get_outputs()], {inp.name: x})
+            if "CUDAExecutionProvider" not in sess.get_providers():
+                raise RuntimeError(f"会话未使用 CUDA: {sess.get_providers()}")
+        result["ok"] = result["cuda"]
+    except Exception as e:  # noqa: BLE001 — DLL 缺失/驱动问题等都要上报而非崩溃
+        result["error"] = f"{type(e).__name__}: {e}"
+    print(_json.dumps(result, ensure_ascii=False))
+    return 0 if result["ok"] else 1
+
+
 def main():
+    # Windows 管道/重定向下 stdout 默认走系统 locale（GBK）：worker 中文事件行会以
+    # GBK 字节到达 runner（PyInstaller frozen 无视 PYTHONIOENCODING，实测环境变量
+    # 改不动内嵌解释器），sidecar 转发时炸 UnicodeEncodeError——全子命令统一 UTF-8。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
     ap = argparse.ArgumentParser(prog="sv", description="super_video CLI (M0)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -222,6 +298,12 @@ def main():
     p = sub.add_parser("worker", help="[内部] 执行一个任务（打包模式复用入口）")
     p.add_argument("task_id")
     p.set_defaults(func=cmd_worker)
+
+    p = sub.add_parser(
+        "ort-check", help="[内部] ORT 后端探测（组件激活后 CUDA/TRT 应在列）")
+    p.add_argument("--session", default=None,
+                   help="可选：用该模型创建 CUDA 会话并跑一帧（真验证）")
+    p.set_defaults(func=cmd_ort_check)
 
     args = ap.parse_args()
     if not getattr(args, "model_id", True) and args.cmd == "models" and args.action != "list":

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -15,7 +15,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api } from '../api'
-import { checkAppUpdate, refreshModels, store } from '../store'
+import { checkAppUpdate, refreshModels, refreshTrt, store } from '../store'
 
 const message = useMessage()
 const engine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
@@ -34,6 +34,7 @@ const proxyAddr = ref('')
 const savingProxy = ref(false)
 const perfSampling = ref(true)
 const autoCheck = ref(true)
+const trcBusy = ref(false)
 const proxyOptions = [
   { label: '跟随系统代理', value: 'auto' },
   { label: '直连（不走代理）', value: 'direct' },
@@ -61,6 +62,7 @@ onMounted(async () => {
     proxyAddr.value = p
   } else proxyMode.value = 'auto'
   appVersion.value = await window.sv.appVersion()
+  refreshTrt()
   offProgress = window.sv.onUpdateProgress((pct) => {
     downloadPercent.value = pct
   })
@@ -170,6 +172,42 @@ async function saveEngine() {
     message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
   }
 }
+
+// ---- TRT 可选组件 ----
+
+function fmtGB(b: number): string {
+  return (b / 1e9).toFixed(2) + ' GB'
+}
+
+/** 安装需下载的体积（core + 匹配架构的 builder 包） */
+const trcDownloadBytes = computed(() => {
+  const t = store.trt
+  if (!t || t.installed || t.installing) return 0
+  const a = t.assets?.assets ?? {}
+  const core = a.core?.size ?? 0
+  const key = t.gpu_arch && a[`builder-${t.gpu_arch}`] ? `builder-${t.gpu_arch}` : 'builder-ptx'
+  return core + (a[key]?.size ?? 0)
+})
+
+async function installTrc() {
+  trcBusy.value = true
+  const r = await api.installTrtComponent()
+  if (!r.ok) message.error(`无法开始安装: ${(await r.json()).detail ?? r.status}`)
+  // 成功则进度走 WS trt_component 事件;失败恢复按钮
+  trcBusy.value = r.ok
+}
+
+async function uninstallTrc() {
+  trcBusy.value = true
+  const r = await api.uninstallTrtComponent()
+  trcBusy.value = false
+  if (r.ok) {
+    message.success('已卸载，推理回退 DirectML')
+    await refreshTrt()
+  } else {
+    message.error(`${(await r.json()).detail ?? r.status}`)
+  }
+}
 </script>
 
 <template>
@@ -180,8 +218,8 @@ async function saveEngine() {
 
     <NCard title="推理后端与精度" size="small">
       <p class="hint">
-        DirectML：全显卡兼容（实测本机最快）· CUDA：NVIDIA 专用（供 M3 扩散模型）·
-        TensorRT：N 卡最快推理（实验性，需 .venv-cuda + tensorrt 组件；缺失自动回退）·
+        DirectML：全显卡兼容 · CUDA：NVIDIA 专用 ·
+        TensorRT：N 卡最快推理（需在下方安装加速组件，缺失自动回退 DirectML）·
         当前实际后端：<NTag size="small" type="info" :bordered="false">
           {{ store.engine?.backend === 'trt' ? 'CUDA + TensorRT' : store.engine?.backend === 'cuda' ? 'CUDA' : 'DirectML' }}
         </NTag>
@@ -203,6 +241,55 @@ async function saveEngine() {
       <div style="margin-top: 14px">
         <NButton type="primary" size="small" :loading="saving" @click="saveEngine">保存</NButton>
       </div>
+    </NCard>
+
+    <NCard v-if="store.trt" title="TensorRT 加速组件（可选）" size="small">
+      <!-- 安装中：进度 -->
+      <template v-if="store.trt.installing">
+        <p class="hint" style="margin-bottom: 8px">
+          {{ store.trt.phase === 'download'
+            ? `正在下载 ${store.trt.file}（${fmtGB(store.trt.done)} / ${fmtGB(store.trt.total)}）`
+            : `正在解压 ${store.trt.file} …` }}
+        </p>
+        <NProgress
+          :percentage="store.trt.total ? Math.min(100, Math.round(store.trt.done / store.trt.total * 100)) : 0"
+          :height="6"
+          :indicator-placement="'inside'"
+        />
+      </template>
+
+      <!-- 已安装：状态 + 卸载 -->
+      <template v-else-if="store.trt.installed">
+        <div class="update-row">
+          <span>
+            已安装（v{{ store.trt.version }} · onnxruntime-gpu {{ store.trt.ort }} ·
+            TensorRT {{ store.trt.trt }} · 占用 {{ fmtGB(store.trt.size_bytes) }}）
+          </span>
+          <NButton size="small" :loading="trcBusy" @click="uninstallTrc">卸载</NButton>
+        </div>
+        <p class="hint" style="margin-top: 8px">
+          配合上方推理后端选「TensorRT」使用；卸载后自动回退 DirectML。
+          若提示文件被占用，退出应用后重试。
+        </p>
+      </template>
+
+      <!-- 未安装：安装入口 -->
+      <template v-else>
+        <p class="hint">
+          NVIDIA 显卡的极致推理加速（实测 1080p→4K 从 ~20fps 提到 ~50fps）。
+          安装需从 GitHub 下载约 {{ fmtGB(trcDownloadBytes) }} 的运行库（GPU 版
+          onnxruntime + CUDA/TensorRT 库），下载速度受网络影响。不安装不影响
+          其他功能，推理走 DirectML。
+        </p>
+        <div class="update-row" v-if="store.trt.error">
+          <span style="color: #e88080">上次安装失败：{{ store.trt.error }}</span>
+          <NButton size="small" type="primary" :loading="trcBusy" @click="installTrc">重试安装</NButton>
+        </div>
+        <div class="update-row" v-else>
+          <span>检测到显卡架构：{{ store.trt.gpu_arch ?? '未知（将下载通用包）' }}</span>
+          <NButton size="small" type="primary" :loading="trcBusy" @click="installTrc">下载并安装</NButton>
+        </div>
+      </template>
     </NCard>
 
     <NCard title="模型下载" size="small">

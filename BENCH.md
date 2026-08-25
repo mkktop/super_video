@@ -260,3 +260,48 @@ checkpoint/进度/取消聚合）、显存×2、4 个 ffmpeg + 2 个推理进程
 
 真机复验（sidecar 全链路，libx264 默认链）：首任务冷启动含 ~21s 引擎构建后 **39.7fps**；
 第二任务热缓存 **49.5fps / 3.3s**（91 帧 1080p→4K），产物规格/音轨完整。
+
+## TRT 可选组件：安装版吃上 TRT（2026-08-25 晚，v0.1.18）
+
+目标：正式安装版（基础包体积不变）也能吃到 TRT——设置页一键下载约 1.5GB 组件。
+
+**机制（承重实验已验证）**：组件 = 数据目录 `ROOT/trt-runtime`（python/onnxruntime GPU 版包 +
+dlls/ 全部 CUDA/TRT DLL 打平）。frozen worker 进程内在首次 `import onnxruntime` 前往
+`sys.meta_path[0]` 插定向 finder，把 `onnxruntime*` 导入重定向到组件副本（PyInstaller 的
+FrozenImporter 优先于 sys.path，insert 没用，必须 meta_path）；DLL 靠 add_dll_directory +
+PATH 前插。`sidecar.exe ort-check --session <model>` 真会话验证：providers=TRT+CUDA 全过。
+必须在 import 前激活——晚了（DML 版已进 sys.modules）直接拒绝回退，进程边界保证干净。
+
+**资产拆分**（压缩比实测 0.27~0.43）：core 1.33GB（onnxruntime 包 + CUDA 运行库 + TRT 核心
+三 DLL，砍掉 nvrtc 179MB——providers_cuda.dll 静态导入表实测不依赖；cufft 是硬依赖砍了即挂）
++ 8 个分架构 builder 包 44~235MB（nvinfer_builder_resource_smXX，只装显卡对应的一份，
+nvidia-smi compute_cap 探测 12.0→sm120，探测不到装 ptx 通配 JIT 版）。全量资产 2.37GB 上传
+GitHub release `runtime-v1`；用户实下 = core + 一份 builder ≈ 1.4~1.6GB。
+
+**安装链**（复用模型下载原语）：trt_component.py 线程安装 core+builder → `.tmp` 落盘 sha256
+校验 → py7zr 解压到 trt-runtime.new staging → manifest.json 写入（ABI/版本）→ 旧目录换名
+.old 原子替换。进度 WS `trt_component` 事件推送（下载字节数 / 解压旁路采样 2s 一扫）。
+守卫：安装中拒绝重复、有任务在跑拒绝安装/卸载。localhost 彩排全链通过（含 sha 校验+换名）。
+ABI 判据：manifest.python 必须等于 sidecar 自身 cp 版本（3.14），不匹配判不兼容回退 DML。
+
+**版本兼容矩阵**：组件 v1 = cp314 + onnxruntime-gpu 1.24.4 + trt-cu12-libs 10.16.1.11。
+sidecar 大版本 Python 变更时组件自动失效（判不兼容），需产新组件（build_trt_component.py
+bump VERSION 与 RELEASE_TAG 重跑）。
+
+**验证**：frozen exe ort-check（CUDA 真会话）通过；单测 9 条（finder 判据/ABI 拒绝/激活过晚/
+状态机守卫）；彩排安装后 frozen ort-check 复验通过。安装版 e2e 见发版记录。
+
+**遗留**：dev 机 .venv-cuda 侧跑组件安装需手动补 py7zr（打包版已捆绑）；NSIS 卸载会带走
+trt-runtime（属预期）。
+
+**打包版 frozen GBK 坑（e2e 抓获，v0.1.18 修复）**：frozen worker 的管道 stdout 走系统
+locale（GBK），中文事件行以 GBK 字节到达 runner，UTF-8 解码出 U+FFFD，runner 回写自己
+GBK stdout 时 UnicodeEncodeError 直接把任务打成 "runner: 'gbk' codec..." 失败。实测
+**PyInstaller frozen 无视 PYTHONIOENCODING/PYTHONUTF8 环境变量**（bootloader 内嵌解释器
+不吃这套）——正确修法是 cli.main() 入口统一 `sys.stdout/stderr.reconfigure(utf-8)`。
+dev 链路 (.venv python) 从未触发，属典型 frozen-only bug。
+
+**安装版 e2e 终验（D:\soft\sv118-e2e 测试安装）**：静装 242MB 基础包 → 设置页/API 一键
+组件安装（真实 GitHub 下载 core+sm120 1.46GB，sha 校验+解压+原子换名）→ engine=trt 任务
+1080p→4K：热缓存 **51.5fps/3.2s**、冷启动（清 trt_cache）**43.2fps 口径/15s wall**
+（含引擎编译）→ 产物 3840x2160/91 帧/音轨完整，日志「TRT 组件已激活」中文 UTF-8 落盘正确。

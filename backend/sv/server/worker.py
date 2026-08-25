@@ -213,6 +213,14 @@ def main(task_id: str) -> int:
     # 推理后端：设置 engine=trt 时走 TensorRT 链（TRT 不可用引擎层自动回退）
     ort_device = "trt" if settings.load().get("engine") == "trt" else "auto"
     if ort_device == "trt":
+        if getattr(sys, "frozen", False):
+            # 安装版：激活 TRT 组件（GPU 版 onnxruntime 重定向）。必须在
+            # 进程内首次 import onnxruntime 之前（OnnxSrEngine.load 惰性导入）；
+            # 组件缺失/不兼容返回 False → 引擎层自然回退 DML
+            from sv.engines.trt_runtime import activate_component
+
+            if activate_component():
+                emit({"type": "log", "line": "TRT 组件已激活（GPU 版运行时）"})
         emit({"type": "log", "line":
               "TensorRT 引擎加载中（新模型/新分辨率首次编译需 1~2 分钟，之后秒级启动）"})
     engine = None
