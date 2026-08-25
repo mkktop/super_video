@@ -225,3 +225,23 @@ u8 图手术 + 三协程重叠已并入产品链路：
 checkpoint/进度/取消聚合）、显存×2、4 个 ffmpeg + 2 个推理进程、编码必须 NVENC
 （双 libx264 4K 会抢 CPU 成新瓶颈）。性价比显著低于 TRT（+30~50%，管道已就绪）。
 **结论：暂不产品化，优先 TRT；追求极致时两者不冲突（TRT 后 GPU 时间减半，双路绝对增益更小）。**
+
+## TensorRT 落地实测（2026-08-25，TRT 10.16.1.11 cu12-libs + ORT 1.24.4 TRT EP，RTX 5080）
+
+安装坑：pip 默认装 TRT 11.2（cu13）——ORT 1.24.4 的 TRT 后端要 `nvinfer_10.dll`（TRT 10.x ABI），
+须装 `tensorrt-cu12-libs==10.16.*`（纯库 wheel，无 python 版本要求），且 site-packages/tensorrt_libs
+目录要进 PATH（register_nvidia_dlls 目前不覆盖它）。
+
+| 路径 | 推理 ms/帧 | e2e fps | 说明 |
+|---|---|---|---|
+| DML + u8 包装 + 重叠（当前产品） | 36.7 | 20.2~23.3 | 对照组 |
+| TRT 原路径 | 114.0 | 7.5 | CPU 前后处理仍是大头 |
+| TRT + u8 包装（串行） | **13.9（2.6x）** | 32.1 | maxdiff=1/255 |
+| **TRT + u8 包装 + 重叠** | — | **50.7（2.2x）** | 91 帧 2.1s，超过实时 1.7 倍 |
+
+- 推理上限 ~72fps；管线瓶颈已转移：解码读取 t_read 1.11s 占 wall 一半（GPU 利用率反降至 ~50%），
+  下一档瓶颈是软解码（57fps 顶着）——再往上需硬解/多路解码。
+- TRT 引擎缓存 .tmp/trt_cache（每图 6.3MB，sm120 fp16），首任务构建数十秒，之后秒级加载；
+  A/B 校验容差 ≤1 覆盖 TRT fp16 数值差（实测 maxdiff=1 恒定，视觉无差）。
+- 待产品化（dev 机可用，打包版无 .venv-cuda/TRT 自动回退 DML）：①engine=trt 时不再跳过 u8 包装
+  （两者是最佳组合）；②register_nvidia_dlls 补 tensorrt_libs 目录；③首任务引擎构建期的进度提示。

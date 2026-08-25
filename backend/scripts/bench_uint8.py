@@ -178,6 +178,7 @@ def main():
     ap.add_argument("--src", required=True)
     ap.add_argument("--frames", type=int, default=60)
     ap.add_argument("--precision", choices=("fp16", "fp32"), default="fp16")
+    ap.add_argument("--device", choices=("auto", "trt", "cuda", "cpu"), default="auto")
     ap.add_argument("--e2e", action="store_true", help="端到端管线 A/B（plain vs full 包装）")
     args = ap.parse_args()
 
@@ -197,7 +198,7 @@ def main():
     info, frames = decode_frames(Path(args.src), args.frames)
     print(f"frames={len(frames)} {info.width}x{info.height} src={src.name}", flush=True)
 
-    eng = OnnxSrEngine(src, scale, io=spec.io, tile=0, batch=1)
+    eng = OnnxSrEngine(src, scale, io=spec.io, tile=0, batch=1, device=args.device)
     eng.load()
     eng.process(frames[0])
     t0 = time.perf_counter()
@@ -205,13 +206,23 @@ def main():
     plain_ms = (time.perf_counter() - t0) / len(frames) * 1000
     print(f"plain     {plain_ms:7.1f} ms/frame  provider={eng.provider_used}", flush=True)
 
+    def wrap_providers() -> list:
+        """TRT 时带引擎缓存选项，其余后端原样。"""
+        ps: list = list(eng.provider_used)
+        if "TensorrtExecutionProvider" in ps:
+            from sv.engines.onnx_engine import _trt_provider_options
+
+            ps = _trt_provider_options() + [
+                p for p in ps if p != "TensorrtExecutionProvider"]
+        return ps
+
     for mode, wrap_in in (("post", False), ("full", True)):
         dst = wrap_model(src, out_dir / f"wrap_{mode}.onnx", wrap_input=wrap_in)
         so = ort.SessionOptions()
         # 追加尾节点后，全量图优化会重排 fp16 转换模型内部被输出边界保护的 Cast/Clip
         # （DML 上 0x8007023E 崩）；降到 BASIC 挡住该融合
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-        sess = ort.InferenceSession(str(dst), so, providers=eng.provider_used)
+        sess = ort.InferenceSession(str(dst), so, providers=wrap_providers())
         iname = sess.get_inputs()[0].name
         want_fp16 = sess.get_inputs()[0].type == "tensor(float16)"
 
@@ -240,7 +251,7 @@ def main():
         dst = out_dir / "wrap_full.onnx"
         so = ort.SessionOptions()
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-        sess = ort.InferenceSession(str(dst), so, providers=eng.provider_used)
+        sess = ort.InferenceSession(str(dst), so, providers=wrap_providers())
         u8 = U8Engine(sess, scale)
         with Sampler() as sampler:
             r_plain = e2e_run(info, eng, "h264_nvenc", sampler, "e2e_plain", out_dir)
