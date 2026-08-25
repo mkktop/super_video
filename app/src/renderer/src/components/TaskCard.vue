@@ -145,7 +145,7 @@ function onOpenFolder() {
       </div>
     </div>
 
-    <n-collapse v-if="task.error" class="err">
+    <n-collapse v-if="task.error && task.status === 'failed'" class="err">
       <n-collapse-item title="错误信息" name="err">
         <div class="err-text">{{ task.error }}</div>
       </n-collapse-item>

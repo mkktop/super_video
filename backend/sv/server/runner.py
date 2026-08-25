@@ -15,6 +15,17 @@ from .events import EventBus
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
+def error_hint(line: str) -> str | None:
+    """worker 非标准输出行 → 任务 error 提示。
+
+    引擎信息行（[engine] 前缀，如 u8 包装生效/后端回退）是正常状态不是错误，
+    不能进 error 字段——任务卡会把 error 渲染成"错误信息"吓到用户。
+    """
+    if not line or line.startswith("[engine]"):
+        return None
+    return line[-300:]
+
+
 class Runner:
     def __init__(self, bus: EventBus):
         self.bus = bus
@@ -114,7 +125,9 @@ class Runner:
             try:
                 ev = json.loads(line)
             except json.JSONDecodeError:
-                db.update_task(task_id, error=line[-300:] if line else None)
+                hint = error_hint(line)
+                if hint is not None:
+                    db.update_task(task_id, error=hint)
                 continue  # 非标准输出行（库的 print 等）忽略
             et = ev.get("type")
             if et == "started":
@@ -144,6 +157,7 @@ class Runner:
                 preview_src=final.get("src_preview"),
                 elapsed_s=final.get("elapsed", 0) or 0,
                 progress_frames=t.get("total_frames", 0),
+                error=None,  # 成功任务不能残留运行期的日志尾部
             )
             self.bus.publish({"type": "task_status", "task_id": task_id, "status": "done"})
         elif final.get("type") == "canceled" or rc == 3 or canceled_by_user:
