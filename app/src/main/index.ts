@@ -106,11 +106,14 @@ async function startOrReuseSidecar(): Promise<string> {
   }
   // 2) 全新拉起（detached：独立于 Electron 生命周期）
   const root = findRoot()
-  const logPath = path.join(root, '.tmp', 'sidecar.log')
+  const isPackaged = app.isPackaged
+  // 数据目录放安装目录同级（更新时旧版卸载器会清空安装目录，数据在里面会被
+  // 连带删掉——v0.1.20 及之前的坑）；sidecar 侧同名 SV_DATA，另含一次性迁移
+  const dataRoot = isPackaged ? path.join(path.dirname(root), 'super_video_data') : root
+  const logPath = path.join(dataRoot, '.tmp', 'sidecar.log')
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
   const logFd = fs.openSync(logPath, 'a')
 
-  const isPackaged = app.isPackaged
   const py = isPackaged
     ? path.join(root, 'sidecar', 'sidecar.exe')
     : path.join(root, '.venv', 'Scripts', 'python.exe')
@@ -127,7 +130,9 @@ async function startOrReuseSidecar(): Promise<string> {
       detached: true,
       stdio: ['ignore', logFd, logFd],
       windowsHide: true,
-      env: isPackaged ? { ...process.env, SV_ROOT: root } : process.env,
+      env: isPackaged
+        ? { ...process.env, SV_ROOT: root, SV_DATA: dataRoot }
+        : process.env,
     })
     sidecar.unref()
     fs.closeSync(logFd)

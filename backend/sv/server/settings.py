@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..paths import ROOT
+from ..paths import DATA_ROOT
 
 DEFAULTS = {
     "engine": "auto",  # auto | cuda | trt（CUDA+TensorRT，需 .venv-cuda + tensorrt 组件）| directml
@@ -15,7 +15,7 @@ DEFAULTS = {
     "parallel_streams": False,  # 双路并行：两进程分段同时推理（实测 +17~21%，显存翻倍）
 }
 
-SETTINGS_PATH = ROOT / "data" / "settings.json"
+SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
 
 
 def _valid_proxy(v: str) -> bool:

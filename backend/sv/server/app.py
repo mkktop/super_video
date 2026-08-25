@@ -26,7 +26,7 @@ from ..models.registry import (
     load_registry,
     model_dir,
 )
-from ..paths import ROOT, TEMP_DIR
+from ..paths import ROOT, TEMP_DIR, migrate_legacy_data
 from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
 from ..pipeline.trim import run_trim
 from . import db
@@ -67,6 +67,10 @@ def _presets() -> list[dict]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 一次性迁移 ≤v0.1.20 遗留在安装目录里的数据（模型/组件/设置/缓存）。
+    # 必须在 init_db 之前——任务库也在 .tmp 里
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, migrate_legacy_data)
     db.init_db()
     runner.start()
     perf.start()
@@ -195,7 +199,7 @@ def get_settings() -> dict:
 
 @app.get("/api/log-tail")
 def log_tail(n: int = 120) -> dict:
-    p = ROOT / ".tmp" / "sidecar.log"
+    p = TEMP_DIR / "sidecar.log"
     if not p.exists():
         return {"lines": []}
     lines = p.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]

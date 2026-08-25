@@ -9,7 +9,7 @@ import uuid
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-from ..paths import ROOT
+from ..paths import TEMP_DIR
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -35,7 +35,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at);
 
 def db_path() -> Path:
     env = os.environ.get("SV_DB")
-    return Path(env).resolve() if env else ROOT / ".tmp" / "sidecar.db"
+    return Path(env).resolve() if env else TEMP_DIR / "sidecar.db"
 
 
 def connect() -> sqlite3.Connection:

@@ -18,9 +18,9 @@ import os
 import sys
 from pathlib import Path
 
-from ..paths import ROOT
+from ..paths import DATA_ROOT
 
-COMPONENT_DIR = ROOT / "trt-runtime"
+COMPONENT_DIR = DATA_ROOT / "trt-runtime"
 
 # 组件须与本 sidecar 的 Python ABI 一致（pyd 是按版本编译的）
 EXPECTED_ABI = f"cp{sys.version_info.major}{sys.version_info.minor}"

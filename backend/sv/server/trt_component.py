@@ -18,13 +18,13 @@ import threading
 from pathlib import Path
 
 from ..engines.trt_runtime import COMPONENT_DIR, read_manifest
-from ..paths import ROOT
+from ..paths import DATA_ROOT, TEMP_DIR
 from ..utils.process import WINDOWS_CREATE_FLAGS
 from .events import EventBus
 
 _ASSET_FILE = Path(__file__).parent / "trt_component_assets.json"
-_STAGING = ROOT / "trt-runtime.new"
-_OLD = ROOT / "trt-runtime.old"
+_STAGING = DATA_ROOT / "trt-runtime.new"
+_OLD = DATA_ROOT / "trt-runtime.old"
 
 _state_lock = threading.Lock()
 _state: dict = {
@@ -142,7 +142,7 @@ def _install(bus: EventBus, arch: str | None) -> None:
     parts = [("core", core)] + (
         [(f"builder-{key}", assets[f"builder-{key}"])] if f"builder-{key}" in assets else [])
     total_dl = sum(p["size"] for _, p in parts)
-    tmp_dir = ROOT / ".tmp" / "trt_component"
+    tmp_dir = TEMP_DIR / "trt_component"
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     def report(done, total, label):
