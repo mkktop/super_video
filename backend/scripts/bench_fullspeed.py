@@ -313,11 +313,13 @@ async def run_seq(info, engine, enc: EncodeOpts, out: Path, *, seek_s=None,
     return {"wall": wall, "frames": n, "fps": n / wall}
 
 
-async def run_overlap(info, engine, enc: EncodeOpts, out: Path, *, qdepth=3):
+async def run_overlap(info, engine, enc: EncodeOpts, out: Path, *, qdepth=3,
+                      seek_s=None, max_frames=None):
     """读-推-写三协程重叠：推理挪到线程（session.run 释放 GIL），读下一帧/写上一帧并行。"""
     scale = engine.scale
     fw, fh = info.width * scale, info.height * scale
-    dec = await spawn(decoder_cmd(info.path, cfr_fps=info.fps_str if info.vfr else None))
+    dec = await spawn(decoder_cmd(info.path, cfr_fps=info.fps_str if info.vfr else None,
+                                  seek_s=seek_s, max_frames=max_frames))
     encp = await spawn(encoder_cmd(info.path, out, fw, fh, fw, fh, info.fps_str,
                                    enc, False, None), stdin_pipe=True)
     dec_err: list[str] = []

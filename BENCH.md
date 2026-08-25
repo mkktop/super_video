@@ -245,3 +245,18 @@ checkpoint/进度/取消聚合）、显存×2、4 个 ffmpeg + 2 个推理进程
   A/B 校验容差 ≤1 覆盖 TRT fp16 数值差（实测 maxdiff=1 恒定，视觉无差）。
 - 待产品化（dev 机可用，打包版无 .venv-cuda/TRT 自动回退 DML）：①engine=trt 时不再跳过 u8 包装
   （两者是最佳组合）；②register_nvidia_dlls 补 tensorrt_libs 目录；③首任务引擎构建期的进度提示。
+
+## TRT 产品化落地（2026-08-25 同日）
+
+- `engine=trt` 不再跳过 u8 包装（TRT+包装=最佳组合）；包装 session 复用主链 provider
+  构造（TRT 引擎缓存选项+逐级回退），修过一个回归：曾把包装 session 误建到原始模型文件
+  （marker 缓存潜伏，首帧才炸），已加防回归测试。
+- `register_nvidia_dlls` 补 `site-packages/tensorrt_libs`（TRT 后端找 nvinfer_10.dll 的前提）。
+- worker 在 TRT 引擎加载前发 log 事件，runner 转发进 sidecar 日志（日志页可见"首次编译
+  1~2 分钟"提示）；包装缓存按源模型 mtime 失效（同名重下载自动重建）。
+- 升级复用旧后端修复：`/api/health` 上报 `sv.__version__`（随发版与 app 版本同步 bump）；
+  Electron 复用前比对版本——旧版空闲则结束换新（detached 进程安装器杀不到），有任务
+  则暂用并提示。多显卡策略不变：N 卡 dev 机走 TRT，打包版/无 TRT 组件自动回退 DML。
+
+真机复验（sidecar 全链路，libx264 默认链）：首任务冷启动含 ~21s 引擎构建后 **39.7fps**；
+第二任务热缓存 **49.5fps / 3.3s**（91 帧 1080p→4K），产物规格/音轨完整。

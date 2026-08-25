@@ -130,9 +130,13 @@ class OnnxSrEngine(BaseEngine):
     # ---- uint8 直进直出图手术（前后处理全在 GPU，推理 3.8x，见 u8_wrap.py）----
 
     def _try_u8_wrap(self) -> None:
-        """惰性生成包装模型并做逐位校验；任何失败静默回退原路径。"""
-        if not self.u8_wrap_enabled or self.device == "trt":
-            return  # TRT 自有引擎缓存链路，包装会触发引擎重建，不掺和
+        """惰性生成包装模型并做逐位校验；任何失败静默回退原路径。
+
+        TRT 同样包装（实测 TRT+包装是最佳组合：推理 13.9ms vs 原路径 114ms，
+        见 BENCH.md）——TRT 引擎按图各自构建/缓存，代价只是首任务多一次编译。
+        """
+        if not self.u8_wrap_enabled:
+            return
         if self.tile or self.fixed_hw is not None or self.batch > 1:
             return
         if self.session is None or len(self.session.get_outputs()) != 1:
@@ -152,7 +156,9 @@ class OnnxSrEngine(BaseEngine):
 
         cache_dir = TEMP_DIR / "u8_wrap"
         cache = cache_dir / f"{self.model_path.stem}_u8.onnx"
-        if not cache.exists():
+        # 源模型重新下载/更新后（同名新文件）包装缓存作废重建
+        if (not cache.exists()
+                or cache.stat().st_mtime < self.model_path.stat().st_mtime):
             wrap_u8(self.model_path, cache,
                     color=self.color, range_01=self.value_range == "0-1")
         provider = self.provider_used[0] if self.provider_used else "x"
@@ -163,7 +169,15 @@ class OnnxSrEngine(BaseEngine):
             ort.GraphOptimizationLevel.ORT_DISABLE_ALL if self.graph_opt == "disable"
             else ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
         )
-        sess = ort.InferenceSession(str(cache), so, providers=self.provider_used)
+        # 复用主 session 的 provider 链构造（含 TRT 引擎缓存选项与逐级回退）
+        available = set(ort.get_available_providers())
+        if self.device == "trt":
+            chosen: list = [p for p in _TRT_CHAIN if p in available] or ["CPUExecutionProvider"]
+        elif self.device == "cpu":
+            chosen = ["CPUExecutionProvider"]
+        else:
+            chosen = [p for p in _PROVIDER_ORDER if p in available] or ["CPUExecutionProvider"]
+        sess = self._try_session(ort, so, chosen, model_path=cache)
         in_name = sess.get_inputs()[0].name
         if not marker.exists():  # 每模型×每后端一次 A/B 逐位校验，通过后落标记
             self._validate_u8(sess, in_name)
@@ -215,15 +229,16 @@ class OnnxSrEngine(BaseEngine):
             so.graph_optimization_level = level
         return so
 
-    def _try_session(self, ort, so, chosen: list[str]):
+    def _try_session(self, ort, so, chosen: list[str], model_path: Path | None = None):
         """按 provider 链建 session，逐层回退：TRT 失败去 TRT 重试，GPU 失败回落 CPU。"""
+        model = str(model_path or self.model_path)
         while True:
             providers: list = chosen
             if "TensorrtExecutionProvider" in chosen:
                 providers = _trt_provider_options() + [
                     p for p in chosen if p != "TensorrtExecutionProvider"]
             try:
-                return ort.InferenceSession(str(self.model_path), so, providers=providers)
+                return ort.InferenceSession(model, so, providers=providers)
             except Exception as e:  # noqa: BLE001
                 if "TensorrtExecutionProvider" in chosen:
                     rest = [p for p in chosen if p != "TensorrtExecutionProvider"]

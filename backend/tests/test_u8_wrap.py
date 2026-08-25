@@ -113,6 +113,21 @@ def test_io_convention_matrix(tmp_path, color, range_):
         _assert_close(plain.process(f), wrapped.process(f))
 
 
+def test_wrap_marker_rebuild_and_uint8_io():
+    """清标记强制走完整校验链：包装 session 必须 uint8 直进（防回归：曾误把包装
+    session 建到原始 float 模型文件上，marker 存在时静默潜伏到首帧才炸）。"""
+    from sv.paths import TEMP_DIR
+
+    for f in (TEMP_DIR / "u8_wrap").glob(f"{V3.stem}_u8.ok.*"):
+        f.unlink()
+    wrapped = OnnxSrEngine(V3, 4, io=IO_V3, u8_wrap=True)
+    wrapped.load()
+    assert wrapped.u8_wrapped is True
+    assert wrapped._u8_sess.get_inputs()[0].type == "tensor(uint8)"
+    out = wrapped.process(np.zeros((96, 128, 3), np.uint8))
+    assert out.shape == (384, 512, 3) and out.dtype == np.uint8
+
+
 def test_wrap_failure_falls_back(tmp_path, monkeypatch):
     """图手术失败（如 onnx 图不兼容）：静默回退原路径，功能不受影响。"""
     pytest.importorskip("onnx")

@@ -13,13 +13,21 @@ from pathlib import Path
 
 def register_nvidia_dlls() -> None:
     site = Path(sysconfig.get_paths()["purelib"])
+
+    def _register(d: Path) -> None:
+        try:
+            os.add_dll_directory(str(d))
+        except OSError:
+            pass
+        os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
+
     nv = site / "nvidia"
-    if not nv.exists():
-        return
-    for bin_dir in sorted(nv.glob("*/bin")):
-        if bin_dir.is_dir():
-            try:
-                os.add_dll_directory(str(bin_dir))
-            except OSError:
-                pass
-            os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+    if nv.is_dir():
+        for bin_dir in sorted(nv.glob("*/bin")):
+            if bin_dir.is_dir():
+                _register(bin_dir)
+    # TensorRT 运行库（pip tensorrt-cu12-libs）：DLL 直接躺在 tensorrt_libs/ 下，
+    # ORT 的 TRT 后端要找 nvinfer_10.dll，不挂路径会静默回退 CUDA
+    trt = site / "tensorrt_libs"
+    if trt.is_dir():
+        _register(trt)

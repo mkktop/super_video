@@ -212,6 +212,9 @@ def main(task_id: str) -> int:
     tile = int(params.get("tile") or spec.tile_hint)
     # 推理后端：设置 engine=trt 时走 TensorRT 链（TRT 不可用引擎层自动回退）
     ort_device = "trt" if settings.load().get("engine") == "trt" else "auto"
+    if ort_device == "trt":
+        emit({"type": "log", "line":
+              "TensorRT 引擎加载中（新模型/新分辨率首次编译需 1~2 分钟，之后秒级启动）"})
     engine = None
     for _ in range(3):  # 显存不足自动降档：tile 逐步减半
         try:

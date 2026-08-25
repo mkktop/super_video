@@ -43,24 +43,62 @@ function tryConnect(port: number, timeoutMs = 800): Promise<boolean> {
   })
 }
 
-async function healthy(port: number): Promise<boolean> {
-  if (!(await tryConnect(port))) return false
+async function sidecarInfo(port: number): Promise<{ version: string } | null> {
+  if (!(await tryConnect(port))) return null
   try {
     const r = await fetch(`http://127.0.0.1:${port}/api/health`)
-    if (!r.ok) return false
+    if (!r.ok) return null
     // 必须是我们自己的 sidecar：校验健康标记。仅凭 200 会误复用端口上
     // 恰好对任意路径返回 2xx 的其他程序（其他电脑上实测踩过）
     const body = (await r.json()) as { ok?: boolean; version?: string }
     return body?.ok === true && typeof body.version === 'string'
+      ? { version: body.version }
+      : null
   } catch {
-    return false
+    return null
+  }
+}
+
+async function healthy(port: number): Promise<boolean> {
+  return (await sidecarInfo(port)) !== null
+}
+
+/** 结束占用端口的进程（升级后残留的旧版 sidecar 用；sidecar 是 detached 的，安装器杀不到） */
+async function killPortOwner(port: number): Promise<void> {
+  const { execFile } = await import('node:child_process')
+  try {
+    const ps = `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ` +
+      `Select-Object -ExpandProperty OwningProcess -Unique | ` +
+      `ForEach-Object { Stop-Process -Id $_ -Force; "killed $_" }`
+    const out = await new Promise<string>((resolve, reject) => {
+      execFile('powershell.exe', ['-NoProfile', '-Command', ps], {
+        windowsHide: true, timeout: 15000,
+      }, (err, stdout) => (err ? reject(err) : resolve(stdout)))
+    })
+    if (out.trim()) console.log(`[sidecar] 结束旧版进程(端口 ${port}): ${out.trim()}`)
+  } catch (e) {
+    console.warn(`[sidecar] 结束旧版进程失败(端口 ${port}):`, e)
   }
 }
 
 async function startOrReuseSidecar(): Promise<string> {
-  // 1) 复用已有 sidecar（UI 重启场景，任务继续跑）
+  // 1) 复用已有 sidecar（UI 重启场景，任务继续跑）——版本不一致的旧实例不复用：
+  //    空闲则结束换新；正跑任务则暂用并在日志里提示（跑完重启应用完成切换）
   for (let p = 8730; p < 8740; p++) {
-    if (await healthy(p)) {
+    const info = await sidecarInfo(p)
+    if (info) {
+      if (info.version !== app.getVersion()) {
+        baseUrl = `http://127.0.0.1:${p}`
+        if (await hasActiveTasks()) {
+          console.log(
+            `[sidecar] 复用旧版 ${info.version} 实例 ${baseUrl}（有任务在跑，` +
+              `任务完成后重启应用以切换到 ${app.getVersion()}）`)
+          return baseUrl
+        }
+        console.log(`[sidecar] 旧版 ${info.version} 空闲，结束并拉起 ${app.getVersion()}`)
+        await killPortOwner(p)
+        continue
+      }
       baseUrl = `http://127.0.0.1:${p}`
       console.log(`[sidecar] 复用已有实例 ${baseUrl}`)
       return baseUrl

@@ -141,6 +141,10 @@ class Runner:
                 self.bus.publish(ev | {"task_id": task_id})
             elif et in ("done", "failed", "canceled"):
                 final = ev
+            elif et == "log":
+                # 状态类日志（TRT 编译提示等）落 sidecar 日志（日志页可见），不进任务 error
+                print(f"[task:{task_id[:8]}] {ev.get('line', '')}", flush=True)
+                self.bus.publish(ev | {"task_id": task_id})
             else:
                 self.bus.publish(ev | {"task_id": task_id})
 
