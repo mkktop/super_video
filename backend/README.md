@@ -107,6 +107,6 @@ tests/                 30 个测试文件（管线/引擎/服务层/并行/组�
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 176 项（管线/引擎/服务层/并行/组件/下载器/图片超分/回归；从 backend 目录跑）
+$py -m pytest tests/ -q          # 182 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/回归；从 backend 目录跑）
 $py scripts/bench.py             # 速度与内存基准表
 ```

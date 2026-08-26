@@ -3,10 +3,16 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { NButton, NSlider } from 'naive-ui'
 import { mediaSrc } from '../api'
 
-const props = defineProps<{ srcPath: string; outPath: string }>()
+const props = defineProps<{
+  srcPath?: string
+  outPath?: string
+  /** 直接给资源地址（模型对比产物走 HTTP+token，非本地文件）——优先于路径 */
+  srcUrl?: string
+  outUrl?: string
+}>()
 
-const srcUrl = mediaSrc(props.srcPath)
-const outUrl = mediaSrc(props.outPath)
+const srcUrl = props.srcUrl ?? mediaSrc(props.srcPath ?? '')
+const outUrl = props.outUrl ?? mediaSrc(props.outPath ?? '')
 
 const srcV = ref<HTMLVideoElement | null>(null)
 const outV = ref<HTMLVideoElement | null>(null)

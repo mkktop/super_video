@@ -257,6 +257,21 @@ watch(
   },
 )
 
+// 模型对比页"用此模型"入口：预填输入后再预选模型与倍率
+// （pendingModel 先于 page 设置，故同时盯两个信号）
+watch([() => ui.page, () => ui.pendingModel], () => {
+  if (ui.page !== 'newtask' || !ui.pendingModel) return
+  const spec = store.models.find((m) => m.id === ui.pendingModel)
+  if (spec?.vram_ok) {
+    modelId.value = spec.id
+    const want = ui.pendingScale
+    targetScale.value =
+      want && spec.scale.includes(want) ? want : Math.min(...spec.scale)
+  }
+  ui.pendingModel = null
+  ui.pendingScale = null
+})
+
 watch([targetScale, resMode, effW, effH, outKind, container], () => void autoFillOutput())
 
 async function pickOutputFile() {

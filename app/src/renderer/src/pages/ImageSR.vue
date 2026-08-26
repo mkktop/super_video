@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   NButton,
   NInputNumber,
@@ -14,6 +14,19 @@ import { api } from '../api'
 import { refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
+
+// 模型对比页"用此模型处理图片"入口：进页预选模型与倍率
+onMounted(() => {
+  if (!ui.pendingModel) return
+  const spec = store.models.find((m) => m.id === ui.pendingModel)
+  if (spec?.vram_ok) {
+    modelId.value = spec.id
+    const want = ui.pendingScale
+    if (want && spec.scale.includes(want)) targetScale.value = want
+  }
+  ui.pendingModel = null
+  ui.pendingScale = null
+})
 
 const files = ref<string[]>([])
 const modelId = ref('')

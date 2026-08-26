@@ -12,6 +12,7 @@ const items = computed(() => [
   },
   { key: 'newtask', label: '新建任务', icon: 'plus' },
   { key: 'models', label: '模型市场', icon: 'cube' },
+  { key: 'mcompare', label: '模型对比', icon: 'vs' },
   { key: 'trim', label: '视频剪切', icon: 'cut' },
   { key: 'imagesr', label: '图片超分', icon: 'image' },
   { key: 'perf', label: '性能', icon: 'pulse' },
@@ -58,7 +59,12 @@ const miniPerf = computed(() => {
             <circle cx="5.7" cy="6.1" r="1.15" fill="currentColor" />
             <path d="M3.5 11.5l3-3 2.3 2.3L10.8 9l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
-          <svg v-else-if="it.icon === 'tasks'" width="16" height="16" viewBox="0 0 16 16">
+          <svg v-else-if="it.icon === 'vs'" width="16" height="16" viewBox="0 0 16 16">
+            <rect x="1.5" y="3" width="9" height="10" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
+            <rect x="5.5" y="3" width="9" height="10" rx="1.6" fill="#141517" stroke="currentColor" stroke-width="1.2" />
+            <path d="M3.5 6.5l5 3-5 3" fill="none" stroke="currentColor" stroke-width="0" />
+          </svg>
+          <svg v-else-if="it.icon === 'tasks'"  width="16" height="16" viewBox="0 0 16 16">
             <path d="M5.5 3.5h8M5.5 8h8M5.5 12.5h8M2.5 3.5h.01M2.5 8h.01M2.5 12.5h.01" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
           </svg>
           <svg v-else-if="it.icon === 'cube'" width="16" height="16" viewBox="0 0 16 16">

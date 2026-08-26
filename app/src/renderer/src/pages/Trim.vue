@@ -10,7 +10,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api, mediaSrc, type ProbeInfo, type TrimJob } from '../api'
-import { openWizardWith } from '../store'
+import { openWizardWith, ui } from '../store'
 
 const message = useMessage()
 
@@ -170,6 +170,17 @@ function openFolder() {
 function toSr() {
   if (job.value?.output) openWizardWith(job.value.output)
 }
+
+/** 当前入出点区间直达模型对比页（不实际剪切落盘，对比时自行取段） */
+function toCompare() {
+  if (!input.value || selDur.value <= 0.05) return
+  ui.pendingCompare = {
+    input: input.value,
+    start_s: startSec.value,
+    end_s: endSec.value,
+  }
+  ui.page = 'mcompare'
+}
 </script>
 
 <template>
@@ -250,6 +261,10 @@ function toSr() {
         </NButton>
         <NButton type="primary" :disabled="busy || selDur <= 0.05" @click="startCut(true)">
           剪切并去超分 →
+        </NButton>
+        <!-- 不落盘：只把当前入出点区间带去模型对比页（用精确选好的这段试模型） -->
+        <NButton :disabled="busy || selDur <= 0.05" @click="toCompare">
+          拿这段对比模型 →
         </NButton>
         <NButton v-if="busy" quaternary type="warning" @click="cancelCut">取消</NButton>
       </div>

@@ -31,6 +31,7 @@ from ..models.registry import (
 from ..paths import ROOT, TEMP_DIR, migrate_legacy_data
 from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
 from ..pipeline.trim import run_trim
+from . import compare
 from . import db
 from . import trt_component
 from .engine_select import select_engine
@@ -112,6 +113,7 @@ async def lifespan(app: FastAPI):
     db.init_db()
     await loop.run_in_executor(None, sweep_orphan_workdirs)
     _start_trim_worker()
+    compare.start(bus)
     runner.start()
     perf.start()
     yield
@@ -305,6 +307,7 @@ def get_models() -> list[dict]:
                 f"需要约 {spec.vram_gb}GB 显存，本机 {gpu_vram}GB"
             ),
             "denoise_levels": denoise_levels,
+            "engine": spec.engine,  # onnx | torch（torch 需独立 CUDA 环境，暂不参与模型对比）
         })
     return out
 
@@ -955,6 +958,110 @@ def cancel_trim(job_id: str) -> dict:
     if job["state"] == "queued":  # 还没被 worker 领走：直接落终态
         job.update(state="canceled", error=None)
     return {"ok": True}
+
+
+# ---- 模型对比 ----
+
+
+class CompareCreate(BaseModel):
+    kind: str  # image | video
+    input: str
+    start_s: float = 0.0
+    end_s: float = 0.0
+    models: list[str]
+    scale: int
+
+
+@app.post("/api/compare", status_code=201)
+def create_compare(body: CompareCreate) -> dict:
+    """创建模型对比作业：同一素材 × 多模型并排处理（详见 sv/server/compare.py）。"""
+    if body.kind not in ("image", "video"):
+        raise HTTPException(400, "kind 仅支持 image / video")
+    input_path = Path(body.input)
+    if not input_path.exists():
+        raise HTTPException(400, f"输入文件不存在: {body.input}")
+    if not (2 <= len(body.models) <= compare.MAX_MODELS):
+        raise HTTPException(400, f"请选择 2~{compare.MAX_MODELS} 个模型对比")
+    if len(set(body.models)) != len(body.models):
+        raise HTTPException(400, "模型列表存在重复")
+    if body.scale <= 0:
+        raise HTTPException(400, "scale 需为正整数")
+    try:
+        specs = load_registry()
+        for mid in body.models:
+            if mid not in specs:
+                raise HTTPException(404, f"未知模型 {mid}")
+            if specs[mid].engine == "torch":
+                raise HTTPException(400, f"{specs[mid].name} 是 torch 引擎，暂不参与对比")
+            if body.scale not in specs[mid].scale:
+                raise HTTPException(400, (
+                    f"{specs[mid].name} 不支持 x{body.scale}（可选 {specs[mid].scale}），"
+                    "请选择所有模型共同支持的倍率"))
+    except KeyError as e:
+        raise HTTPException(404, str(e)) from e
+
+    if body.kind == "video":
+        from ..pipeline.probe import UnsupportedMedia, probe
+
+        try:
+            info = probe(input_path)
+        except (UnsupportedMedia, FileNotFoundError) as e:
+            raise HTTPException(422, str(e))
+        start = max(0.0, float(body.start_s))
+        end = min(float(body.end_s), info.duration_s)
+        if end <= start:
+            raise HTTPException(400, "出点必须晚于入点")
+        if end - start > compare.MAX_SEG_S:
+            end = start + compare.MAX_SEG_S  # 超长自动截断，不拒绝
+    else:
+        if input_path.suffix.lower() not in _IMAGE_EXTS:
+            raise HTTPException(400, "图片对比仅支持 png/jpg/webp/bmp/tiff")
+        from PIL import Image, ImageOps
+
+        try:
+            with Image.open(str(input_path)) as im:
+                ImageOps.exif_transpose(im).size
+        except OSError as e:
+            raise HTTPException(400, f"无法读取图片: {e}") from e
+        start = end = 0.0
+    job = compare.create(body.kind, input_path, start, end, body.models, body.scale)
+    return _compare_view(job)
+
+
+def _compare_view(job: dict) -> dict:
+    """对外视图：路径收敛成 asset key，不暴露磁盘绝对路径。"""
+    return job | {
+        "entries": [
+            {k: v for k, v in e.items()
+             if k not in ("output", "still")} | {"has_output": bool(e.get("output"))}
+            for e in job["entries"]
+        ],
+    }
+
+
+@app.get("/api/compare/{job_id}")
+def compare_status(job_id: str) -> dict:
+    job = compare.get(job_id)
+    if job is None:
+        raise HTTPException(404)
+    return _compare_view(job)
+
+
+@app.post("/api/compare/{job_id}/cancel")
+def cancel_compare(job_id: str) -> dict:
+    if not compare.request_cancel(job_id):
+        raise HTTPException(409, "作业已结束")
+    return {"ok": True}
+
+
+@app.get("/api/compare/{job_id}/asset/{key:path}")
+def compare_asset(job_id: str, key: str):
+    """对比产物文件：key 为白名单标识（seg/src_still/<model_id>），不开放任意路径。"""
+    p = compare.asset_path(job_id, key)
+    if p is None:
+        raise HTTPException(404)
+    media = "video/mp4" if p.suffix == ".mp4" else "image/png"
+    return FileResponse(p, media_type=media)
 
 
 @app.post("/api/tasks/{task_id}/resume")

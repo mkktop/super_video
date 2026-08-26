@@ -16,6 +16,7 @@ import Home from './pages/Home.vue'
 import NewTask from './pages/NewTask.vue'
 import Trim from './pages/Trim.vue'
 import ImageSR from './pages/ImageSR.vue'
+import CompareModels from './pages/CompareModels.vue'
 import Tasks from './pages/Tasks.vue'
 import Models from './pages/Models.vue'
 import Perf from './pages/Perf.vue'
@@ -74,6 +75,7 @@ onMounted(() => {
             <Home v-if="ui.page === 'home'" />
             <Trim v-else-if="ui.page === 'trim'" />
             <ImageSR v-else-if="ui.page === 'imagesr'" />
+            <CompareModels v-else-if="ui.page === 'mcompare'" />
             <Tasks v-else-if="ui.page === 'tasks'" />
             <Models v-else-if="ui.page === 'models'" />
             <Perf v-else-if="ui.page === 'perf'" />

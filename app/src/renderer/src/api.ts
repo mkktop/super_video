@@ -48,6 +48,7 @@ export interface ModelInfo {
   speed: string
   vram_gb: number
   description: string
+  engine?: 'onnx' | 'torch'
   tile_hint: number
   installed: boolean
   bundled?: boolean
@@ -136,6 +137,37 @@ export interface Task {
   elapsed_s: number
   queue_position: number | null
   updated_at: number
+}
+
+/** 模型对比作业（详见后端 sv/server/compare.py） */
+export interface CompareEntry {
+  model_id: string
+  status: 'queued' | 'running' | 'done' | 'failed' | 'canceled'
+  pct: number
+  error: string | null
+  has_output: boolean
+  fps: number
+  elapsed_s: number
+  out_bytes: number
+  out_w: number
+  out_h: number
+}
+
+export interface CompareJob {
+  id: string
+  kind: 'image' | 'video'
+  input: string
+  start_s: number
+  end_s: number
+  scale: number
+  status: 'queued' | 'running' | 'done' | 'failed' | 'canceled'
+  error: string | null
+  entries: CompareEntry[]
+}
+
+/** 对比产物资源地址（静帧/成片，key: seg | src_still | out/<mid> | still/<mid>） */
+export function compareAssetUrl(id: string, key: string): string {
+  return withToken(`${baseUrl}/api/compare/${id}/asset/${key}`)
 }
 
 export interface TrimJob {
@@ -282,6 +314,31 @@ export const api = {
   },
   async cancelTrim(id: string): Promise<Response> {
     return _fetch(`${baseUrl}/api/trim/${id}/cancel`, { method: 'POST' })
+  },
+
+  // ---- 模型对比 ----
+
+  async createCompare(body: {
+    kind: 'image' | 'video'
+    input: string
+    start_s?: number
+    end_s?: number
+    models: string[]
+    scale: number
+  }): Promise<CompareJob> {
+    const r = await _fetch(`${baseUrl}/api/compare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) throw new Error(`${(await r.json()).detail ?? r.status}`)
+    return r.json()
+  },
+  async compareStatus(id: string): Promise<CompareJob> {
+    return (await _fetch(`${baseUrl}/api/compare/${id}`)).json()
+  },
+  async cancelCompare(id: string): Promise<Response> {
+    return _fetch(`${baseUrl}/api/compare/${id}/cancel`, { method: 'POST' })
   },
   async createTrim(body: {
     input: string

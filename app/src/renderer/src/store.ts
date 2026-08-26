@@ -64,9 +64,13 @@ export const ui = reactive({
     | 'logs'
     | 'settings'
     | 'compare'
-    | 'imagesr',
+    | 'imagesr'
+    | 'mcompare',
   compareTaskId: null as string | null,
   pendingInput: null as string | null, // 跳转新建任务页时预填的输入（剪切→超分衔接）
+  pendingModel: null as string | null, // 跳转时预选的模型（模型对比→新建任务/图片超分衔接）
+  pendingScale: null as number | null,
+  pendingCompare: null as { input: string; start_s: number; end_s: number } | null, // 剪切页→模型对比：带区间直达
 })
 
 /** 跳转新建任务页并预填输入文件 */

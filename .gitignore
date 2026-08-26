@@ -8,6 +8,7 @@ __pycache__/
 # 运行时产物
 .tmp/
 models_store/
+compare/
 output/
 trt-runtime/
 trt-runtime.new/
