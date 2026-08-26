@@ -13,6 +13,7 @@ import {
 
 export const store = reactive({
   ready: false,
+  initError: '', // 初始化失败信息（非空=显示错误横幅+重试按钮，不再永久卡 loading）
   connected: false,
   tasks: [] as Task[],
   stats: { total: 0, done: 0, frames: 0, bytes: 0 } as Stats,
@@ -274,25 +275,39 @@ function watchUpdateEvents() {
 }
 
 export async function initStore() {
-  await initBase()
-  store.models = await api.models()
-  store.presets = await api.presets()
-  store.hardware = (await api.hardware()) as NonNullable<typeof store.hardware>
-  store.gpuName = store.hardware.gpus?.[0]?.name ?? '未知显卡'
-  store.engine = await api.engine()
+  // 关键四连（models/presets/hardware/engine）任一失败都要落地为可重试的错误，
+  // 不能让 ready 永远 false——那会永久卡在"正在连接后端服务…"且无任何提示
   try {
-    store.settings = await api.settings()
-  } catch {
-    /* 设置读取失败按默认(自动检查开) */
+    await initBase()
+    store.models = await api.models()
+    store.presets = await api.presets()
+    store.hardware = (await api.hardware()) as NonNullable<typeof store.hardware>
+    store.gpuName = store.hardware.gpus?.[0]?.name ?? '未知显卡'
+    store.engine = await api.engine()
+    try {
+      store.settings = await api.settings()
+    } catch {
+      /* 设置读取失败按默认(自动检查开) */
+    }
+    await Promise.all([refreshTasks(), refreshStats(), refreshPerf(), refreshTrt()])
+    store.initError = ''
+    store.ready = true
+    connectWs()
+    schedulePoll()
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshTasks()
+    })
+    // 启动只检查一次更新,可在设置中关闭;异步进行不阻塞界面就绪
+    if (store.settings.auto_update_check !== false) void checkAppUpdate()
+    watchUpdateEvents()
+  } catch (e) {
+    store.initError = String(e)
   }
-  await Promise.all([refreshTasks(), refreshStats(), refreshPerf(), refreshTrt()])
-  connectWs()
-  schedulePoll()
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) refreshTasks()
-  })
-  // 启动只检查一次更新,可在设置中关闭;异步进行不阻塞界面就绪
-  if (store.settings.auto_update_check !== false) void checkAppUpdate()
-  watchUpdateEvents()
-  store.ready = true
+}
+
+/** 初始化失败后的重试（错误横幅按钮触发） */
+export async function retryInit() {
+  if (store.ready) return
+  store.initError = ''
+  await initStore()
 }

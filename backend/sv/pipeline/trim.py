@@ -15,16 +15,24 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..paths import TEMP_DIR, ffmpeg_bin, ffprobe_bin
-from ..utils.process import WINDOWS_CREATE_FLAGS
+from ..utils.process import WINDOWS_CREATE_FLAGS, kill_tree
 from .probe import MediaInfo, probe
+
+# 单段 ffmpeg 超时：驱动异常/坏文件挂起时不能永久堵死 trim 队列
+FFMPEG_TIMEOUT_S = 1800.0
 
 
 class TrimError(RuntimeError):
     pass
+
+
+class TrimCanceled(Exception):
+    """外部请求取消（cancel 端点已杀当前 ffmpeg 段）。"""
 
 
 @dataclass
@@ -104,27 +112,43 @@ def plan_segments(
 # ---- ffmpeg 执行 ----
 
 
-def _run_ffmpeg(cmd: list[str], seg_dur: float, progress_cb, p_from: float, p_to: float) -> None:
-    """跑一段 ffmpeg；-progress pipe:1 的 out_time 映射到 [p_from, p_to) 进度区间。"""
+def _run_ffmpeg(cmd: list[str], seg_dur: float, progress_cb, p_from: float, p_to: float,
+                on_spawn=None, cancel_check=None) -> None:
+    """跑一段 ffmpeg；-progress pipe:1 的 out_time 映射到 [p_from, p_to) 进度区间。
+
+    on_spawn(proc) 把进程句柄交给调用方（取消端点 kill 用）；
+    看门狗线程兜底超时——stdout 挂起无输出时 for 循环醒不过来。
+    cancel_check() 为真（外部取消杀了进程）抛 TrimCanceled——必须区别于
+    TrimError，否则硬编回退逻辑会把"被取消"当成"硬编失败"再跑一遍软编。
+    """
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         creationflags=WINDOWS_CREATE_FLAGS,
     )
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        text = line.decode("utf-8", "replace").strip()
-        if text.startswith(("out_time_us=", "out_time_ms=")):
-            try:
-                us = int(text.split("=", 1)[1])
-            except ValueError:
-                continue
-            done = min(1.0, (us / 1e6) / seg_dur) if seg_dur > 0 else 1.0
-            if progress_cb:
-                progress_cb(p_from + (p_to - p_from) * done)
-    proc.wait()
-    err = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
-    if proc.returncode != 0:
-        raise TrimError(f"ffmpeg 失败(rc={proc.returncode}): {err[-400:]}")
+    if on_spawn is not None:
+        on_spawn(proc)
+    timer = threading.Timer(FFMPEG_TIMEOUT_S, kill_tree, args=(proc.pid,))
+    timer.start()
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            text = line.decode("utf-8", "replace").strip()
+            if text.startswith(("out_time_us=", "out_time_ms=")):
+                try:
+                    us = int(text.split("=", 1)[1])
+                except ValueError:
+                    continue
+                done = min(1.0, (us / 1e6) / seg_dur) if seg_dur > 0 else 1.0
+                if progress_cb:
+                    progress_cb(p_from + (p_to - p_from) * done)
+        proc.wait()
+        err = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
+        if proc.returncode != 0:
+            if cancel_check is not None and cancel_check():
+                raise TrimCanceled()
+            raise TrimError(f"ffmpeg 失败(rc={proc.returncode}): {err[-400:]}")
+    finally:
+        timer.cancel()
 
 
 def _copy_args(input: Path, start: float, dur: float, out: Path) -> list[str]:
@@ -190,16 +214,19 @@ def _concat(a: Path, b: Path, out: Path, work: Path) -> None:
 def _encode_whole(
     input: Path, info: MediaInfo, start: float, end: float, out: Path,
     nvenc: bool, progress_cb, p_from: float, p_to: float, notices: list[str],
+    on_spawn=None, cancel_check=None,
 ) -> None:
     try:
         _run_ffmpeg(_encode_args(input, start, end - start, out, info, nvenc),
-                    end - start, progress_cb, p_from, p_to)
+                    end - start, progress_cb, p_from, p_to, on_spawn, cancel_check)
+    except TrimCanceled:
+        raise  # 取消不得触发硬编回退（回退=取消后再跑一遍软编）
     except TrimError:
         if not nvenc:
             raise
         notices.append("硬件编码失败，已回退软件编码")
         _run_ffmpeg(_encode_args(input, start, end - start, out, info, False),
-                    end - start, progress_cb, p_from, p_to)
+                    end - start, progress_cb, p_from, p_to, on_spawn, cancel_check)
 
 
 def run_trim(
@@ -210,6 +237,8 @@ def run_trim(
     output: str | Path,
     nvenc: bool = False,
     progress_cb=None,  # cb(progress: 0~1)
+    on_spawn=None,  # on_spawn(proc)：每段 ffmpeg 拉起时上报句柄（取消用）
+    cancel_check=None,  # cancel_check() -> bool：外部请求取消
 ) -> TrimResult:
     if mode not in ("smart", "fast", "exact"):
         raise TrimError(f"未知剪切模式 {mode}")
@@ -248,13 +277,14 @@ def run_trim(
     # —— 纯复制（fast / 起点在关键帧的 smart）——
     if not enc_segs:
         s, e = cpy_segs[0][1], cpy_segs[0][2]
-        _run_ffmpeg(_copy_args(input_path, s, e - s, output), e - s, progress_cb, 0.0, 1.0)
+        _run_ffmpeg(_copy_args(input_path, s, e - s, output), e - s, progress_cb,
+                    0.0, 1.0, on_spawn, cancel_check)
         return TrimResult(output, start_s, actual_start, e - s, mode if mode != "smart" else "fast", notices)
 
     # —— 纯转码（exact / 降级）——
     if not cpy_segs:
         _encode_whole(input_path, info, start_s, end_s, output, nvenc,
-                      progress_cb, 0.0, 1.0, notices)
+                      progress_cb, 0.0, 1.0, notices, on_spawn, cancel_check)
         return TrimResult(output, start_s, start_s, end_s - start_s, "exact", notices)
 
     # —— smart 两段式：B 复制(0→60%) → 实测校验 → A 转码(60→87%) → concat(87→100%) ——
@@ -263,16 +293,16 @@ def run_trim(
     seg_b = work / "seg_b.mp4"
     seg_a = work / "seg_a.mp4"
     _run_ffmpeg(_copy_args(input_path, c_s, c_e - c_s, seg_b), c_e - c_s,
-                progress_cb, 0.0, 0.6)
+                progress_cb, 0.0, 0.6, on_spawn, cancel_check)
     b_dur = probe(seg_b).duration_s
     # 流复制按包边界截断，正常会有 ±0.2s 级漂移；差出 0.5s 以上才是切错了段
     if abs(b_dur - (c_e - c_s)) > 0.5:
         notices.append("复制段时长异常，已整段转码兜底")
         _encode_whole(input_path, info, start_s, end_s, output, nvenc,
-                      progress_cb, 0.6, 1.0, notices)
+                      progress_cb, 0.6, 1.0, notices, on_spawn, cancel_check)
         return TrimResult(output, start_s, start_s, end_s - start_s, "exact", notices)
     _run_ffmpeg(_encode_args(input_path, e_s, e_e - e_s, seg_a, info, nvenc),
-                e_e - e_s, progress_cb, 0.6, 0.87)
+                e_e - e_s, progress_cb, 0.6, 0.87, on_spawn, cancel_check)
     _concat(seg_a, seg_b, output, work)
     for f in (seg_a, seg_b):
         f.unlink(missing_ok=True)

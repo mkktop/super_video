@@ -18,6 +18,8 @@ jobs:
         run: pip install -r backend/requirements.txt
 
       - name: 下载 ffmpeg/ffprobe 到 bin/
+        # n8.1 分支内滚动（BtbN 只保留最近 autobuild，硬 pin 具体 tag 会 404）；
+        # 大版本锁在 8.1——升 9.x 前必须本地全量验证后再改这里的两处路径
         shell: pwsh
         run: |
           curl -L -o ff.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip
@@ -30,6 +32,8 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/ -q
 
+      # 注：TEMP_DIR 是仓库根 .tmp（无 SV_DATA 时 DATA_ROOT=ROOT）；upload 步骤
+      # 不带 working-directory，path 相对仓库根——勿改成 backend/.tmp
       - name: 测试产物（失败时）
         if: failure()
         uses: actions/upload-artifact@v4
@@ -37,3 +41,30 @@ jobs:
           name: pytest-output
           path: .tmp/
           if-no-files-found: ignore
+
+  frontend-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: 安装依赖
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型检查
+        working-directory: app
+        run: npx vue-tsc --noEmit -p tsconfig.json
+
+      - name: 构建
+        working-directory: app
+        run: pnpm build

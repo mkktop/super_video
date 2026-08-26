@@ -15,6 +15,12 @@ os.environ.setdefault("SV_DB", str(TEMP_DIR / "test_fp16.db"))
 BASE = BUNDLED_DIR / "RealESRGANv2-animevideo-xsx2.onnx"
 
 
+@pytest.fixture(autouse=True)
+def _tmp_settings(tmp_path, monkeypatch):
+    """precision 写盘测试指向临时文件，不碰开发机真实设置。"""
+    monkeypatch.setattr(settings, "SETTINGS_PATH", tmp_path / "settings.json")
+
+
 def test_bundled_fp16_shipped():
     """bundled 两模型的 fp16 变体随仓库分发，选择时优先命中。"""
     for name in ("RealESRGANv2-animevideo-xsx2.onnx", "RealESR-AnimeVideo-v3_x4.onnx"):

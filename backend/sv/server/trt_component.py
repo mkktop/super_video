@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from ..engines.trt_runtime import COMPONENT_DIR, read_manifest
@@ -36,6 +37,7 @@ _state: dict = {
     "error": None,
 }
 _install_thread: threading.Thread | None = None
+_arch_cache: str | None = None
 
 
 def load_assets() -> dict:
@@ -49,21 +51,28 @@ def load_assets() -> dict:
 
 
 def detect_gpu_arch() -> str | None:
-    """N 卡计算能力 → builder 资产键（12.0→sm120）；非 N 卡/失败返回 None。"""
+    """N 卡计算能力 → builder 资产键（12.0→sm120）；非 N 卡/失败返回 None。
+
+    结果进程内缓存（架构不会热变；设置页轮询 status() 不能每次拉 nvidia-smi）。
+    """
+    global _arch_cache
+    if _arch_cache is not None:
+        return _arch_cache
+    arch = None
     try:
         out = subprocess.run(
             ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
             capture_output=True, timeout=8, creationflags=WINDOWS_CREATE_FLAGS,
         )
-        if out.returncode != 0:
-            return None
-        first = out.stdout.decode("utf-8", "replace").strip().splitlines()[0]
-        m = re.match(r"(\d+)\.(\d+)", first.strip())
-        if not m:
-            return None
-        return f"sm{m.group(1)}{m.group(2)}"
+        if out.returncode == 0:
+            first = out.stdout.decode("utf-8", "replace").strip().splitlines()[0]
+            m = re.match(r"(\d+)\.(\d+)", first.strip())
+            if m:
+                arch = f"sm{m.group(1)}{m.group(2)}"
     except (OSError, subprocess.TimeoutExpired, IndexError):
-        return None
+        pass
+    _arch_cache = arch
+    return arch
 
 
 def component_size(comp: Path | None = None) -> int:
@@ -71,6 +80,19 @@ def component_size(comp: Path | None = None) -> int:
     if not d.is_dir():
         return 0
     return sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+
+
+_size_cache: tuple[float, int] = (0.0, 0)  # (ts, bytes)：rglob 数 GB 组件目录是重活，
+_SIZE_TTL = 30.0                            # 轮询接口不能每次全量扫描；装/卸载时主动失效
+
+
+def _cached_size() -> int:
+    global _size_cache
+    ts, size = _size_cache
+    if time.time() - ts > _SIZE_TTL:
+        size = component_size()
+        _size_cache = (time.time(), size)
+    return size
 
 
 def status() -> dict:
@@ -85,7 +107,7 @@ def status() -> dict:
         "ort": (manifest or {}).get("ort"),
         "trt": (manifest or {}).get("trt"),
         "python": (manifest or {}).get("python"),
-        "size_bytes": component_size() if manifest is not None else 0,
+        "size_bytes": _cached_size() if manifest is not None else 0,
         "gpu_arch": detect_gpu_arch(),
         "assets": load_assets(),
         **{k: st[k] for k in ("installing", "phase", "file", "done", "total", "error")},
@@ -127,7 +149,8 @@ def _progress_sampler(stop: threading.Event, dest: Path, total: int) -> None:
 
 
 def _publish(bus: EventBus, **ev) -> None:
-    bus.publish({"type": "trt_component", **ev})
+    # 安装线程不是事件循环线程：asyncio.Queue 非线程安全，必须回到循环线程投递
+    bus.publish_threadsafe({"type": "trt_component", **ev})
 
 
 def _install(bus: EventBus, arch: str | None) -> None:
@@ -195,7 +218,15 @@ def _install(bus: EventBus, arch: str | None) -> None:
             shutil.rmtree(_OLD)
         if COMPONENT_DIR.exists():
             COMPONENT_DIR.rename(_OLD)
-        _STAGING.rename(COMPONENT_DIR)
+        try:
+            _STAGING.rename(COMPONENT_DIR)
+        except OSError:
+            # 换名失败必须恢复原组件：否则组件丢失且 _OLD 残留占盘
+            if _OLD.exists() and not COMPONENT_DIR.exists():
+                _OLD.rename(COMPONENT_DIR)
+            raise
+        global _size_cache
+        _size_cache = (0.0, 0)  # 装载内容变了，体积缓存失效
         shutil.rmtree(_OLD, ignore_errors=True)
         with _state_lock:
             _state.update(phase="done", installing=False, done=0, total=0, error=None)
@@ -225,19 +256,9 @@ def start_install(bus: EventBus) -> tuple[bool, str]:
 
     arch = detect_gpu_arch()
     _install_thread = threading.Thread(
-        target=_install_safe, args=(bus, arch), daemon=True, name="trt-install")
+        target=_install, args=(bus, arch), daemon=True, name="trt-install")
     _install_thread.start()
     return True, ""
-
-
-def _install_safe(bus: EventBus, arch: str | None) -> None:
-    try:
-        _install(bus, arch)
-    except Exception as e:  # noqa: BLE001 — 线程体兜底
-        shutil.rmtree(_STAGING, ignore_errors=True)
-        with _state_lock:
-            _state.update(phase="error", installing=False, error=str(e))
-        _publish(bus, phase="error", error=str(e))
 
 
 def uninstall() -> tuple[bool, str]:
@@ -262,5 +283,7 @@ def uninstall() -> tuple[bool, str]:
         return False, f"文件被占用，请退出应用后重试（{e}）"
     from ..server import engine_select
 
+    global _size_cache
+    _size_cache = (0.0, 0)  # 卸载后体积缓存失效
     engine_select._PROBE_CACHE.clear()  # noqa: SLF001
     return True, ""

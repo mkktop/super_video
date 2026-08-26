@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import {
   NButton,
   NCard,
@@ -11,9 +11,11 @@ import {
 } from 'naive-ui'
 import { api, type Task } from '../api'
 import { openCompare, refreshStats, refreshTasks, store } from '../store'
+import { fmtBytes, fmtEta } from '../utils'
 
 const props = defineProps<{ task: Task }>()
 const message = useMessage()
+const previewBroken = ref(false) // 预览 404/损坏时兜底（done 但预览生成失败不再显示破图图标）
 const canCompare = computed(
   () => !!props.task.preview_src && !!props.task.preview_path,
 )
@@ -38,21 +40,9 @@ const statusMeta: Record<Task['status'], { label: string; type: 'default' | 'inf
   canceled: { label: '已取消', type: 'warning' },
 }
 
-function fmtEta(sec: number): string {
-  if (!sec || sec < 0) return '--'
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = sec % 60
-  return h ? `${h}时${m}分` : m ? `${m}分${s}秒` : `${s}秒`
-}
-
 function fmtElapsed(sec: number): string {
   if (!sec || sec < 0) return '--'
   return sec < 60 ? `${Math.round(sec)}秒` : fmtEta(Math.round(sec))
-}
-
-function fmtBytes(b: number): string {
-  return b > 1e9 ? `${(b / 1e9).toFixed(2)}GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)}MB` : `${b}B`
 }
 
 const scaleLabel = computed(() => {
@@ -159,11 +149,13 @@ function onOpenFolder() {
 
     <div class="row3">
       <img
-        v-if="task.preview_path || task.status === 'done'"
+        v-if="(task.preview_path || task.status === 'done') && !previewBroken"
         :src="api.previewUrl(task.id, task.updated_at)"
         class="preview"
         @click="canCompare && openCompare(task.id)"
+        @error="previewBroken = true"
       />
+      <div v-else-if="task.status === 'done'" class="preview-broken">无预览</div>
       <div class="spacer" />
       <NButton v-if="canCompare" size="small" quaternary type="info" @click="openCompare(task.id)">
         全页对比
@@ -202,6 +194,17 @@ function onOpenFolder() {
 .err { margin-top: 8px; }
 .err-text { color: #f87171; font-size: 12px; word-break: break-all; white-space: pre-wrap; }
 .row3 { display: flex; align-items: flex-end; gap: 10px; margin-top: 10px; }
+.preview-broken {
+  width: 88px;
+  height: 50px;
+  border-radius: 6px;
+  background: #1d1f22;
+  color: #6b7076;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .preview {
   max-height: 96px; max-width: 45%; border-radius: 6px; border: 1px solid #2a2d31;
   object-fit: contain; cursor: pointer;

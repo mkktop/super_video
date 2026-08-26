@@ -80,7 +80,21 @@ def test_interp_pipeline_doubles_fps():
 
     clip = TEMP_DIR / "stream_in.mp4"
     if not clip.exists():
-        pytest.skip("先跑 test_stream 生成样例")
+        # 自足：字母序 test_m3 先于 test_stream，全新环境（CI）没人先生成
+        import subprocess as _sp
+
+        from sv.paths import ffmpeg_bin
+        from sv.utils.process import WINDOWS_CREATE_FLAGS as _WCF
+
+        TEMP_DIR.mkdir(exist_ok=True)
+        _sp.run(
+            [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24",
+             "-f", "lavfi", "-i", "sine=frequency=440",
+             "-t", "3", "-c:v", "libx264", "-crf", "20", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-shortest", str(clip)],
+            check=True, creationflags=_WCF,
+        )
     info = probe(clip)
     r = Rife2x(RIFE_ONNX)
     r.load()

@@ -42,6 +42,11 @@ def shard_starts(starts: list[int], shard: int | None, nshards: int) -> list[int
     return [s for i, s in enumerate(starts) if i % nshards == shard]
 
 
+def _concat_line(p: Path) -> str:
+    """concat 清单一行：file '路径'——路径内的单引号按 demuxer 语法转义成 '\\''。"""
+    return "file '" + p.as_posix().replace("'", "'\\''") + "'"
+
+
 def concat_segments(work: Path, info: MediaInfo, enc: EncodeOpts,
                     output_path: Path) -> None:
     """concat 视频段 + 源音轨/字幕 → 最终输出（-c:v copy，秒级）。
@@ -53,7 +58,7 @@ def concat_segments(work: Path, info: MediaInfo, enc: EncodeOpts,
     subs = list(getattr(info, "subtitles", []) or [])
     seglist = work / "segments.txt"
     seglist.write_text(
-        "\n".join(f"file '{p.as_posix()}'" for p in sorted(work.glob("seg_*.mp4"))),
+        "\n".join(_concat_line(p) for p in sorted(work.glob("seg_*.mp4"))),
         encoding="utf-8",
     )
     cmd = [
@@ -200,7 +205,20 @@ class SegmentedPipeline:
                     frame_start=s * factor + 1 if img_mode else 1,
                 )
                 await pipe.run()
-                for k, v in pipe.stage_stats.items():
+                stats = pipe.stage_stats
+                # 段产出帧数校验：非末段短产=解码/probe 异常，硬失败不入 checkpoint
+                # （静默固化的短段会让 concat 总帧数 < 预期 → 音画漂移且续跑无法自愈）；
+                # 末段短产容忍（VFR/probe 帧数估算偏差的已知取舍），记录缺口供剖析。
+                expect = n_in * factor
+                got = int(stats.get("frames", 0.0))
+                if got != expect:
+                    last_seg = s + n_in >= total_in
+                    if not last_seg or got > expect:
+                        raise PipelineError(
+                            f"段 {s} 产出 {got} 帧 ≠ 预期 {expect} 帧（解码异常，本段未入 checkpoint，重试可恢复）"
+                        )
+                    tot["tail_short"] = tot.get("tail_short", 0.0) + (expect - got)
+                for k, v in stats.items():
                     tot[k] = tot.get(k, 0.0) + v
                 tot["n_segs"] = tot.get("n_segs", 0.0) + 1
                 with (work / "perf_stages.jsonl").open("a", encoding="utf-8") as f:
@@ -208,8 +226,8 @@ class SegmentedPipeline:
                                        ensure_ascii=False) + "\n")
                 gap_prev_end = time.perf_counter()
                 done.add(s)
-                local_done += n_in * factor
-                processed_out += n_in * factor
+                local_done += got
+                processed_out += got
                 self._save_ckpt(work, ckpt_file, done)
         finally:
             if tot:

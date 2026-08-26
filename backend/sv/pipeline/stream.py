@@ -20,7 +20,7 @@ _MP4_AUDIO_COPY_OK = {"aac", "mp3", "ac3", "eac3", "alac"}
 _TEXT_SUBS = {
     "subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "sami",
     "microdvd", "subviewer", "vplayer", "realtext", "stl", "pjs", "jacosub",
-    "mpl2", "subviewer1", "pjs",
+    "mpl2", "subviewer1",
 }
 
 CONTAINERS = ("mp4", "mkv", "mov")
@@ -161,7 +161,10 @@ def audio_args(enc: EncodeOpts, mp4_family: bool, audio_codec: str | None) -> li
         return ["-c:a", "flac"]
     if enc.audio_mode == "aac":
         return ["-c:a", "aac", "-b:a", "192k"]
-    copyable = mp4_family and audio_codec in _MP4_AUDIO_COPY_OK
+    if not mp4_family:
+        # mkv 混流能力宽（flac/mp3/dts/truehd…皆可），auto 尽量无损 copy 少一代有损
+        return ["-c:a", "copy"] if audio_codec else []
+    copyable = audio_codec in _MP4_AUDIO_COPY_OK
     return ["-c:a", "copy"] if copyable else ["-c:a", "aac", "-b:a", "192k"]
 
 
@@ -350,6 +353,10 @@ class StreamPipeline:
                         t_read += time.perf_counter() - _t
                     except asyncio.IncompleteReadError as e:
                         if len(e.partial) == 0:
+                            # 干净 EOF：先放行攒了不满一批的尾帧（总帧数 % batch != 0
+                            # 时最多 batch-1 帧），再放哨兵——直接 return 会静默丢尾批
+                            if items:
+                                await q_in.put(items if batch > 1 else items[0])
                             await q_in.put(None)
                             self.stage_stats["read"] = t_read
                             return
@@ -461,6 +468,7 @@ class StreamPipeline:
             tail = " | ".join(dec_err) + " || " + " | ".join(enc_err)
             raise PipelineError(f"管线中断({type(e).__name__}): {tail}") from e
         except TaskCanceled:
+            await self._reap(p_dec, p_enc)
             raise
         except Exception:
             await self._reap(p_dec, p_enc)

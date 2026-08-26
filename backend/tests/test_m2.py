@@ -11,6 +11,14 @@ from sv.paths import MODELS_DIR, TEMP_DIR
 os.environ["SV_DB"] = str(TEMP_DIR / "test_sidecar_m2.db")
 
 
+@pytest.fixture(autouse=True)
+def _tmp_settings(tmp_path, monkeypatch):
+    """设置读写指向临时文件：中途断言失败也不会把代理/引擎设置残留在开发机真实配置。"""
+    from sv.server import settings as _settings
+
+    monkeypatch.setattr(_settings, "SETTINGS_PATH", tmp_path / "settings.json")
+
+
 @pytest.fixture(scope="module")
 def client():
     if Path(os.environ["SV_DB"]).exists():
@@ -35,11 +43,27 @@ def test_probe_endpoint(client):
     assert r.status_code == 400
     clip = TEMP_DIR / "srv_tiny.mp4"
     if not clip.exists():
-        pytest.skip("测试片段不存在（先跑 test_server）")
+        _make_tiny(clip)  # 自足：字母序 test_m2 先于 test_server，全新环境没人先生成
     r = client.post("/api/probe", json={"path": str(clip)})
     assert r.status_code == 200
     d = r.json()
     assert d["ok"] is True and d["width"] == 160 and d["has_audio"]
+
+
+def _make_tiny(path: Path):
+    import subprocess
+
+    from sv.utils.process import WINDOWS_CREATE_FLAGS
+    from sv.paths import ffmpeg_bin
+
+    subprocess.run(
+        [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24",
+         "-f", "lavfi", "-i", "sine=frequency=440",
+         "-t", "2", "-c:v", "libx264", "-crf", "22", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-shortest", str(path)],
+        check=True, creationflags=WINDOWS_CREATE_FLAGS,
+    )
 
 
 def test_settings_roundtrip(client):

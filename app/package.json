@@ -1,6 +1,6 @@
 {
   "name": "super-video-app",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "super_video 桌面端 —— AI 视频超分",
   "main": "out/main/index.js",
   "private": true,
@@ -60,7 +60,9 @@
     "@vitejs/plugin-vue": "^6.0.8",
     "electron": "^43.4.1",
     "electron-builder": "^26.0.12",
-    "electron-vite": "^5.0.0"
+    "electron-vite": "^5.0.0",
+    "typescript": "~5.8.3",
+    "vue-tsc": "^2.2.12"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",

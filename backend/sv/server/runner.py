@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+from ..paths import TEMP_DIR
 from ..utils.process import WINDOWS_CREATE_FLAGS, kill_tree
 from . import db
 from .engine_select import EngineChoice, select_engine
@@ -34,6 +35,7 @@ class Runner:
         self._cancel_requested: str | None = None  # Windows 硬杀无法优雅上报，靠标记区分取消/崩溃
         self._stopping = asyncio.Event()
         self._loop_task: asyncio.Task | None = None
+        self._engine_pick = None  # start() 的后台探测 future（首个任务消费，防赋值赛跑）
         self.engine: EngineChoice | None = None  # worker 解释器/后端（start 时决定）
 
     # ---- 生命周期 ----
@@ -43,20 +45,52 @@ class Runner:
         # 否则上一次 stop() 置位的 _stopping 会让本实例的循环立即退出、队列假死
         self._stopping = asyncio.Event()
         self._cancel_requested = None
+        self._reap_orphan_workers()
         recovered = db.recover_running()
         if recovered:
             self.bus.publish({"type": "recovered", "count": recovered})
-        # 后端选择（探测 CUDA，耗时最多 2 分钟）放线程里做，不阻塞事件循环
+        # 后端选择（探测 CUDA，耗时最多 2 分钟）放线程里做，不阻塞事件循环；
+        # 持有 future 供首个任务 await（避免与 _run_one 的赋值赛跑，/api/engine 闪旧值）
         loop = asyncio.get_running_loop()
-
-        def _pick():
-            self.engine = select_engine()
-
-        loop.run_in_executor(None, _pick)
+        self._engine_pick = loop.run_in_executor(None, select_engine)
         self._loop_task = loop.create_task(self._loop())
+
+    def _reap_orphan_workers(self) -> None:
+        """上个 sidecar 被强杀后残留的 worker（含双路分片子进程）：发现即连坐杀。
+
+        孤儿的 stdout 管道已死（事件再也写不出去），放任继续跑只会与重启后的
+        新 worker 双写同一任务的分段文件（seg_*.mp4 交错损坏）；杀掉后
+        checkpoint 仍在，recover 入队续跑即可。owner.pid 由 _run_one 落盘。
+        """
+        seg_root = TEMP_DIR / "segmented"
+        if not seg_root.is_dir():
+            return
+        try:
+            import psutil
+        except ImportError:
+            return
+        for pid_file in seg_root.glob("*/owner.pid"):
+            try:
+                pid = int(pid_file.read_text().strip())
+                p = psutil.Process(pid)
+                if p.is_running() and "worker" in " ".join(p.cmdline()):
+                    kill_tree(pid)  # 树杀：带走分片子进程
+                    print(f"[runner] 清杀孤儿 worker pid={pid} task={pid_file.parent.name}",
+                          flush=True)
+            except (OSError, ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            finally:
+                try:
+                    pid_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     async def stop(self) -> None:
         self._stopping.set()
+        # 正在跑的任务按"已取消"收尾（checkpoint 保留、可续跑），而不是落成
+        # failed + "worker 异常退出"的吓人报错——与用户手动取消同语义
+        if self.current_id is not None:
+            self._cancel_requested = self.current_id
         if self.proc is not None and self.proc.returncode is None:
             kill_tree(self.proc.pid)
         if self._loop_task:
@@ -77,6 +111,7 @@ class Runner:
                 self.bus.publish({"type": "task_status", "task_id": task["id"],
                                   "status": "failed", "error": str(e)})
             finally:
+                (TEMP_DIR / "segmented" / task["id"] / "owner.pid").unlink(missing_ok=True)
                 self.current_id = None
                 self.proc = None
 
@@ -85,8 +120,14 @@ class Runner:
         self.current_id = task_id
         self.bus.publish({"type": "task_status", "task_id": task_id, "status": "running"})
 
-        # 每个任务启动时按当前设置选择后端（设置热切换，下一任务生效）。
-        # 探测首次可达分钟级（TRT 真会话），放线程池避免卡住事件循环
+        # 消费 start() 的后台探测（同时把结果给 /api/engine 一个确定性初值）；
+        # 之后每个任务仍按当前设置重新选择（设置热切换，下一任务生效）
+        pick, self._engine_pick = self._engine_pick, None
+        if pick is not None:
+            try:
+                self.engine = await asyncio.wait_for(asyncio.shield(pick), timeout=300)
+            except Exception:  # noqa: BLE001 — 探测失败走下面的每任务选择
+                pass
         from .settings import load as load_settings
 
         engine_setting = load_settings().get("engine", "auto")
@@ -104,6 +145,14 @@ class Runner:
 
         loop = asyncio.get_running_loop()
         self.engine = await loop.run_in_executor(None, _select)
+
+        # 引擎探测期（可达分钟级）收到取消：不再拉 worker，直接按取消收尾
+        if self._cancel_requested == task_id:
+            self._cancel_requested = None
+            self._cleanup_partial(task)
+            db.update_task(task_id, status="canceled")
+            self.bus.publish({"type": "task_status", "task_id": task_id, "status": "canceled"})
+            return
         worker_py = self.engine.python_exe
         env = {**os.environ, "PYTHONPATH": str(BACKEND_DIR), "PYTHONUNBUFFERED": "1"}
         # frozen worker 的管道 stdout 默认走系统 locale（GBK）：中文事件行会以 GBK
@@ -125,6 +174,13 @@ class Runner:
             stderr=asyncio.subprocess.STDOUT,  # stderr 混入 stdout 按日志行处理
             creationflags=WINDOWS_CREATE_FLAGS,
         )
+        # owner.pid：sidecar 被强杀后，下个实例靠它清杀孤儿 worker（_reap_orphan_workers）
+        try:
+            pid_file = TEMP_DIR / "segmented" / task_id / "owner.pid"
+            pid_file.parent.mkdir(parents=True, exist_ok=True)
+            pid_file.write_text(str(self.proc.pid))
+        except OSError:
+            pass
 
         final: dict = {}
         assert self.proc.stdout is not None
@@ -202,8 +258,10 @@ class Runner:
             db.update_task(task_id, status="canceled")
             self.bus.publish({"type": "task_status", "task_id": task_id, "status": "canceled"})
             return True
-        if t["status"] == "running" and self.current_id == task_id and self.proc is not None:
+        if t["status"] == "running" and self.current_id == task_id:
+            # 探测期（proc 未起）只落标记：_run_one 拉起 worker 前会检查并直接收尾
             self._cancel_requested = task_id
-            kill_tree(self.proc.pid)  # Windows: 硬杀；退出处理按标记归为 canceled
+            if self.proc is not None and self.proc.returncode is None:
+                kill_tree(self.proc.pid)  # Windows: 硬杀；退出处理按标记归为 canceled
             return True
         return False  # done/failed/canceled 无需取消

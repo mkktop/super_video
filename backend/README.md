@@ -1,6 +1,6 @@
-# super_video backend (M0)
+# super_video backend
 
-视频超分核心管线：ffmpeg 流式管道 + ONNX Runtime 推理 + CLI。M0 范围见根目录 `PLAN.md`。
+视频超分核心管线：ffmpeg 流式管道 + ONNX Runtime / PyTorch / TensorRT 推理 + FastAPI sidecar + CLI。里程碑范围见根目录 `PLAN.md`。
 
 ## 环境
 
@@ -53,21 +53,38 @@ cd app && pnpm install && pnpm build && npx electron .   # 或 pnpm dev
 
 ```
 sv/
-├─ paths.py            项目路径 / ffmpeg 定位
+├─ paths.py            项目路径 / ffmpeg 定位 / 数据目录迁移
 ├─ pipeline/
-│  ├─ probe.py         ffprobe 封装 + M0 输入校验（10bit/HDR/VFR 拒绝）
-│  ├─ stream.py        核心流式管线（解码→逐帧推理→编码，管道不落盘）
-│  └─ tile.py          大图分块（重叠切分 + 无缝拼合）
+│  ├─ probe.py         ffprobe 封装 + 探测缓存（接受 10bit/VFR→CFR 化，拒绝 HDR）
+│  ├─ stream.py        核心流式管线（解码→逐帧/批量推理→编码，管道不落盘）
+│  ├─ segmented.py     分段流式管线（checkpoint 断点续跑 + 双路分片）
+│  ├─ chunked.py       torch 引擎的分块 checkpoint 管线
+│  ├─ tile.py          大图分块（重叠切分 + 无缝拼合）
+│  └─ trim.py          视频剪切（smart/fast/exact 三模式，可取消）
 ├─ engines/
 │  ├─ base.py          引擎接口 + 分块调度
-│  └─ onnx_engine.py   ONNX 引擎（EP 回退、固定尺寸模型、0-1/0-255 范围）
+│  ├─ onnx_engine.py   ONNX 引擎（EP 回退链、u8 图手术、批量）
+│  ├─ torch_engine.py  PyTorch 引擎（CUDA 环境，fp16 autocast）
+│  ├─ trt_runtime.py   TensorRT 可选组件的发现/激活
+│  ├─ u8_wrap.py       uint8 直进直出图手术（前后处理 GPU 化）
+│  └─ rife.py          RIFE 补帧（RGB uint8 契约）
+├─ server/
+│  ├─ app.py           FastAPI 路由 + 本地 token 鉴权 + trim 队列
+│  ├─ runner.py        串行任务调度（取消杀树、退出语义、孤儿清杀）
+│  ├─ worker.py        任务 worker 子进程（stdout JSON 事件协议）
+│  ├─ db.py            SQLite 任务表（WAL）
+│  ├─ engine_select.py 解释器/后端选择（CUDA/TRT/DML 探测）
+│  ├─ trt_component.py TRT 组件安装/卸载/状态
+│  ├─ perf.py          性能采样（CPU/GPU/任务资源）
+│  └─ events.py        WS 广播总线（线程安全发布）
 ├─ models/
 │  ├─ registry.py      manifest 注册表
-│  ├─ manager.py       下载 / sha256 校验
+│  ├─ manager.py       下载 / sha256 校验 / 7z 成员提取
+│  ├─ fp16.py          fp16 变体转换（原子写）
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
-scripts/               calibrate_color.py（IO 校准）、bench.py（基准）
-tests/                 tile / stream / e2e 三层测试
+scripts/               calibrate_color.py（IO 校准）、build_trt_component.py、bench_*.py（基准）
+tests/                 26+ 个测试文件（管线/引擎/服务层/并行/组件/回归）
 ```
 
 ## 模型 IO 约定（校准结论，2026-08-23 实测）
@@ -79,9 +96,17 @@ tests/                 tile / stream / e2e 三层测试
 
 范围与通道序由 `scripts/calibrate_color.py` 的 PSNR 对照实验确定；新模型入库前必须跑一遍校准。
 
+## 已知取舍（2026-08-26 审查拍板，勿顺手"修复"）
+
+- **前端 `webSecurity: false`**：为 `<video>` 直读 file://（Chromium 原生加载器带 Range/moov
+  尾部探测）。自定义协议方案有 moov 在尾 MP4 黑屏的历史坑，在 CSP 收敛 + 本地 token 鉴权下
+  保持现状（`app/src/main/index.ts` 有同款注释）。
+- **ONNX 路径量化用截断**（`astype(uint8)`）而非 round：与 u8 包装图内 Cast 一致是刻意的，
+  两路径靠 ≤1/255 逐位 A/B 校验把关；torch 路径用 round，两引擎 ≤1/255 系统性差异不可感知。
+
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 15 项（tile/管道往返/真模型端到端）
+$py -m pytest tests/ -q          # 156 项（管线/引擎/服务层/并行/组件/下载器/回归；从 backend 目录跑）
 $py scripts/bench.py             # 速度与内存基准表
 ```

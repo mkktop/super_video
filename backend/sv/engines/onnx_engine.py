@@ -64,6 +64,7 @@ class OnnxSrEngine(BaseEngine):
         tile_overlap: int = 16,
         batch: int = 1,
         u8_wrap: bool = True,
+        validate_hw: tuple[int, int] | None = None,  # 源帧 (H,W)：u8 校验形状
     ):
         self.model_path = Path(model_path)
         self.scale = scale
@@ -79,6 +80,7 @@ class OnnxSrEngine(BaseEngine):
         self.tile_overlap = tile_overlap
         self.batch = max(1, batch)
         self.u8_wrap_enabled = u8_wrap  # uint8 直进直出图手术（BENCH.md 2026-08-25）
+        self.validate_hw = validate_hw
         self.session = None
         self.provider_used: list[str] = []
         self.fixed_hw: tuple[int, int] | None = None
@@ -188,11 +190,20 @@ class OnnxSrEngine(BaseEngine):
         print(f"[engine] GPU 前后处理优化已启用: {cache.name}")
 
     def _validate_u8(self, sess, in_name: str) -> None:
-        """包装前后输出逐位对比（≤1/255 容差，覆盖偶/奇尺寸与 pad 路径）。"""
+        """包装前后输出逐位对比（≤1/255 容差，覆盖偶/奇尺寸与 pad 路径）。
+
+        测试形状必须用源帧真实尺寸（validate_hw）：GPU 会话跑过 96x128 这类
+        小形状后，真实尺寸的执行路径被不可逆拖慢（v0.2.3 结论，实测 +50%）。
+        未提供时（临时 session / CPU）退回小形状。
+        """
+        h, w = self.validate_hw if self.validate_hw else (96, 128)
+        # 对齐尺寸时取 -1 变体，覆盖 pad 补边分支；已非对齐则本体即覆盖
+        oh = h - 1 if h % self.pad == 0 and h > self.pad else h
+        ow = w - 1 if w % self.pad == 0 and w > self.pad else w
         rng = np.random.default_rng(7)
-        for f in (np.zeros((96, 128, 3), np.uint8),
-                  rng.integers(0, 256, (96, 128, 3), dtype=np.uint8),
-                  rng.integers(0, 256, (95, 127, 3), dtype=np.uint8)):
+        for f in (np.zeros((h, w, 3), np.uint8),
+                  rng.integers(0, 256, (h, w, 3), dtype=np.uint8),
+                  rng.integers(0, 256, (oh, ow, 3), dtype=np.uint8)):
             a = self._infer(f)
             b = self._run_u8(sess, in_name, f)
             diff = int(np.abs(a.astype(np.int16) - b.astype(np.int16)).max())
@@ -277,6 +288,9 @@ class OnnxSrEngine(BaseEngine):
         y = np.squeeze(y, axis=0).transpose(1, 2, 0).astype(np.float32)  # CHW -> HWC
         if self.value_range == "0-1":
             y = y * 255.0
+        # 截断（非 round）是刻意的：与 u8 包装图内 Cast 的量化方式保持一致，
+        # 两路径才能通过 ≤1/255 的逐位 A/B 校验。torch_engine 用 round 带来的
+        # ≤1/255 系统性差异经 2026-08-26 审查拍板接受，不统一（不可感知）。
         y = np.clip(y, 0, 255).astype(np.uint8)
         if self.color == "bgr":
             y = y[..., ::-1]

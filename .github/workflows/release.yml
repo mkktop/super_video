@@ -27,10 +27,28 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
 
+      # 版本号三方一致性：tag / app/package.json / backend sv/__init__.py 必须对齐。
+      # 错位时产物名与 latest.yml 版本不符 → electron-updater 永远报"已是最新"，
+      # 或主进程误判旧版实例反复杀端口重启（v0.2.3 审查发现的发布事故面）
+      - name: 版本一致性校验
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $pkg = (Get-Content app/package.json -Raw | ConvertFrom-Json).version
+          $sv = (Select-String -Path backend/sv/__init__.py -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
+          Write-Host "tag=$tag package.json=$pkg sv=$sv"
+          if ($tag -ne $pkg -or $tag -ne $sv) {
+            Write-Host "::error::版本号不一致：tag=$tag package.json=$pkg sv/__init__.py=$sv（三处都改成同一版本再打 tag）"
+            exit 1
+          }
+
       - name: 后端依赖
         run: pip install -r backend/requirements.txt pyinstaller
 
       - name: 下载 ffmpeg/ffprobe 到 bin/（打进安装包）
+        # n8.1 分支内滚动（BtbN 只保留最近 autobuild，硬 pin 具体 tag 会 404）；
+        # 大版本锁在 8.1——升 9.x 前必须本地全量验证后再改这里的两处路径
         shell: pwsh
         run: |
           curl -L -o ff.zip https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-8.1.zip
@@ -38,6 +56,10 @@ jobs:
           New-Item -ItemType Directory -Force bin | Out-Null
           Move-Item ff/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/ffmpeg.exe bin/
           Move-Item ff/ffmpeg-n8.1-latest-win64-gpl-8.1/bin/ffprobe.exe bin/
+
+      - name: 后端测试（发布门禁：未经测试的 commit 不得直接出安装包）
+        working-directory: backend
+        run: python -m pytest tests/ -q
 
       - name: PyInstaller 打 sidecar（bundled 模型随包）
         working-directory: backend
@@ -47,10 +69,11 @@ jobs:
         working-directory: backend
         run: dist/sidecar/sidecar.exe selftest
 
-      - name: 前端构建
+      - name: 前端构建（类型检查 + 打包）
         working-directory: app
         run: |
-          pnpm install
+          pnpm install --frozen-lockfile
+          npx vue-tsc --noEmit -p tsconfig.json
           pnpm build
 
       - name: 打安装包（不发布，资产由 softprops 统一上传）
@@ -69,6 +92,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 模型资产同步到 models-v1 Release（注册表驱动，缺什么补什么）
+        # 仅 tag 发版时执行：workflow_dispatch 的 commit 上移动 models-v1 tag 是意外行为
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

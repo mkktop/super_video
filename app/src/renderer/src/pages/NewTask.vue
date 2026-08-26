@@ -26,6 +26,7 @@ const message = useMessage()
 const inputs = ref<string[]>([])
 const probeInfo = ref<ProbeInfo | null>(null)
 const probing = ref(false)
+let probeSeq = 0 // 快速连续重选文件时丢弃迟到的旧 probe 响应（旧数据覆盖新文件）
 const modelId = ref('')
 const targetScale = ref(2)
 const resMode = ref<'scale' | 'custom'>('scale')
@@ -172,11 +173,13 @@ const canSubmit = computed(
 
 // ---- 文件选择 ----
 async function setInput(files: string[]) {
+  const seq = ++probeSeq
   inputs.value = files
   probeInfo.value = null
   if (files.length === 1) {
     probing.value = true
     const r = await api.probe(files[0])
+    if (seq !== probeSeq) return // 已重选其他文件：丢弃过期响应
     probing.value = false
     if (r.ok) {
       probeInfo.value = (await r.json()) as ProbeInfo

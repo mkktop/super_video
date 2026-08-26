@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('sv', {
-  backendInfo: () => ipcRenderer.invoke('backend:info') as Promise<{ baseUrl: string }>,
+  backendInfo: () => ipcRenderer.invoke('backend:info') as Promise<{ baseUrl: string; token?: string }>,
   appVersion: () => ipcRenderer.invoke('app:version') as Promise<string>,
   checkUpdate: () => ipcRenderer.invoke('app:check-update') as Promise<{
     status: string

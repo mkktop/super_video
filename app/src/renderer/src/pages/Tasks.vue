@@ -83,7 +83,9 @@ function onDrop() {
         @dragend="resetDrag"
       />
     </NSpace>
-    <div v-if="!store.ready" class="loading">正在连接后端服务…</div>
+    <div v-if="!store.ready" class="loading">
+      {{ store.initError ? '后端连接失败，请使用上方提示中的"重试"按钮' : '正在连接后端服务…' }}
+    </div>
   </div>
 </template>
 

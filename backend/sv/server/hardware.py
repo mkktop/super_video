@@ -19,11 +19,16 @@ def _gpu_names() -> list[str]:
             capture_output=True, timeout=8, creationflags=WINDOWS_CREATE_FLAGS,
         )
         if out.returncode == 0:
-            for line in out.stdout.decode("utf-8", "replace").strip().splitlines():
-                name, _, vram = line.partition(",")
+            # csv 解析：GPU 名含逗号时 nvidia-smi 会给字段加引号，手写 partition(",") 会错位
+            import csv
+            import io
+
+            for row in csv.reader(io.StringIO(out.stdout.decode("utf-8", "replace"))):
+                if len(row) < 2:
+                    continue
                 gpus.append({
-                    "name": name.strip(),
-                    "vram_gb": round(float(re.sub(r"[^\d.]", "", vram or "0")) / 1024, 1),
+                    "name": row[0].strip(),
+                    "vram_gb": round(float(re.sub(r"[^\d.]", "", row[1]) or 0) / 1024, 1),
                 })
             return gpus
     except (OSError, subprocess.TimeoutExpired, ValueError):

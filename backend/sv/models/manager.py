@@ -99,12 +99,10 @@ def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = 
     d = model_dir(spec.id)
     d.mkdir(parents=True, exist_ok=True)
     targets = list(only_files) if only_files is not None else list(spec.files)
+    # 进度口径：total 只算 targets，done 基线必须为 0——曾把非 targets 的已存在
+    # 文件大小累进 done 初值（total 却不含它们），子集下载进度一上来就 >100%
     total = sum(f.get("size", 0) for f in targets)
-    done = sum(
-        f.get("size", 0) for f in spec.files
-        if f not in targets
-        and (p := _resolve(spec, f["name"])) is not None
-    )
+    done = 0
     for f in targets:
         url = f["url"]
         name = f["name"]
@@ -115,7 +113,7 @@ def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = 
         member = f.get("archive")  # 7z 包内成员路径（vs-mlrt 系模型）
 
         if dest.exists() and (not expect_sha or _sha256(dest) == expect_sha):
-            done += dest.stat().st_size
+            done += expect_size if expect_size else dest.stat().st_size
             continue
         if not url:
             raise DownloadError(

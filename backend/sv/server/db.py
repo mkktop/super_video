@@ -146,11 +146,11 @@ def next_queued() -> dict | None:
         ).fetchone()
         if r is None:
             return None
-        c.execute(
+        cur = c.execute(
             "UPDATE tasks SET status='running', updated_at=? WHERE id=? AND status='queued'",
             (time.time(), r["id"]),
         )
-        if c.total_changes == 0:
+        if cur.rowcount == 0:
             return None  # 并发竞争下被别人取走
         return _row2dict(r)
 

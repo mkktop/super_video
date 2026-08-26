@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -24,6 +24,7 @@ const job = ref<TrimJob | null>(null)
 const polling = ref<ReturnType<typeof setInterval> | null>(null)
 const videoEl = ref<HTMLVideoElement | null>(null)
 const previewBroken = ref(false) // 浏览器解不了的格式（AVI/WMV 等）：无预览但剪切不受影响
+let probeSeq = 0 // 快速重选文件时丢弃迟到的旧 probe 响应（旧数据覆盖新文件的竞态）
 
 const videoUrl = computed(() => (input.value ? mediaSrc(input.value) : ''))
 const duration = computed(() => probeInfo.value?.duration_s ?? 0)
@@ -51,12 +52,14 @@ async function pick() {
 }
 
 async function load(path: string) {
+  const seq = ++probeSeq
   input.value = path
   probeInfo.value = null
   job.value = null
   previewBroken.value = false
   probing.value = true
   const r = await api.probe(path)
+  if (seq !== probeSeq) return // 已重选其他文件：丢弃过期响应
   probing.value = false
   if (r.ok) {
     probeInfo.value = (await r.json()) as ProbeInfo
@@ -114,23 +117,28 @@ async function startCut(andSr: boolean) {
       mode: 'exact',
       output: output.value || undefined,
     })
+    jobId.value = r.job_id
     job.value = { state: 'queued', progress: 0, input: input.value, start_s: startSec.value,
       end_s: endSec.value, mode: 'exact', output: r.output, error: null }
+    let failures = 0
     polling.value = setInterval(async () => {
       try {
         const j = await api.trimStatus(r.job_id)
+        failures = 0
         job.value = j
-        if (j.state === 'done' || j.state === 'failed') {
+        if (j.state === 'done' || j.state === 'failed' || j.state === 'canceled') {
           stopPolling()
           if (j.state === 'done') {
             message.success(`剪切完成: ${j.duration_s?.toFixed(1) ?? '?'}s`)
             if (andSr) openWizardWith(j.output)
-          } else {
+          } else if (j.state === 'failed') {
             message.error(`剪切失败: ${j.error}`)
           }
         }
       } catch {
-        stopPolling()
+        // 单次瞬时失败（网络抖动）不能永久停轮询——按钮会永远禁用、进度永卡；
+        // 连续多次失败才认为真断了
+        if (++failures >= 10) stopPolling()
       }
     }, 400)
   } catch (e) {
@@ -143,6 +151,18 @@ function stopPolling() {
     clearInterval(polling.value)
     polling.value = null
   }
+}
+
+// 组件随页面切换即卸载：不停轮询会泄漏持有闭包的 interval（反复进出累积）
+onBeforeUnmount(stopPolling)
+
+const jobId = ref('')
+
+async function cancelCut() {
+  if (!jobId.value) return
+  try {
+    await api.cancelTrim(jobId.value)
+  } catch { /* 状态轮询会兜底呈现 */ }
 }
 
 function openFolder() {
@@ -231,6 +251,7 @@ function toSr() {
         <NButton type="primary" :disabled="busy || selDur <= 0.05" @click="startCut(true)">
           剪切并去超分 →
         </NButton>
+        <NButton v-if="busy" quaternary type="warning" @click="cancelCut">取消</NButton>
       </div>
 
       <NCard v-if="job" size="small" :bordered="true" class="result" :class="job.state">
@@ -248,6 +269,9 @@ function toSr() {
             <NButton size="small" @click="openFolder">打开所在文件夹</NButton>
             <NButton size="small" type="primary" @click="toSr">去超分</NButton>
           </div>
+        </template>
+        <template v-else-if="job.state === 'canceled'">
+          <div class="res-line warn">已取消剪切</div>
         </template>
         <template v-else>
           <div class="res-line err">✗ 剪切失败: {{ job.error }}</div>
@@ -309,6 +333,7 @@ function toSr() {
 .res-line { font-size: 13.5px; margin-bottom: 8px; }
 .res-line.ok { color: #34d399; }
 .res-line.err { color: #f87171; }
+.res-line.warn { color: #fbbf24; }
 .res-detail { font-size: 12.5px; color: #9aa0a6; margin-bottom: 6px; word-break: break-all; }
 .res-detail.warn { color: #fbbf24; }
 .res-btns { display: flex; gap: 8px; margin-top: 8px; }

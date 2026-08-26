@@ -167,7 +167,10 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             manager.ensure_downloaded(rife_spec)
             precision = settings.load().get("precision", "fp32")
             rife_weight = model_file(rife_spec, 1, precision)
-            if precision == "fp16" and not rife_weight.stem.endswith("_fp16"):
+            # spec.fp16=False（转换不可用）必须尊重——曾在此无条件强转，DML 加载
+            # 崩溃被下面的 except 吞掉，用户开的补帧无声失效
+            if (precision == "fp16" and rife_spec.fp16
+                    and not rife_weight.stem.endswith("_fp16")):
                 rife_weight = ensure_fp16_file(rife_weight)
             interp = Rife2x(rife_weight)
             interp.load()
@@ -274,11 +277,11 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         emit({"type": "log", "line":
               "TensorRT 引擎加载中：新模型或新分辨率首次使用需编译引擎（约 1~2 分钟），完成后可直接加载"})
     engine = None
-    for _ in range(3):  # 显存不足自动降档：tile 逐步减半
+    for attempt in range(3):  # 显存不足自动降档：tile 逐步减半
         try:
             engine = OnnxSrEngine(
                 weight, scale, io=spec.io, tile=tile, batch=batch,
-                device=ort_device)
+                device=ort_device, validate_hw=(info.height, info.width))
             engine.load()
             import numpy as np
             # 预热兼显存探测。必须用源帧真实尺寸：DML 会话一旦跑过 64x64 这类
@@ -287,7 +290,9 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             engine.process(np.zeros((info.height, info.width, 3), dtype=np.uint8))
             break
         except Exception as e:  # noqa: BLE001
-            if not _oom(e) or tile in (1,):
+            # 最后一次尝试仍失败必须 raise：带着没加载成功的 engine 继续走，
+            # 后面会以更难懂的方式崩（如 provider_used AttributeError）
+            if not _oom(e) or tile in (1,) or attempt == 2:
                 raise
             new_tile = 256 if tile == 0 else max(64, tile // 2)
             emit({"type": "log", "line":

@@ -41,7 +41,14 @@ def ensure_fp16_file(fp32_file: Path) -> Path:
 
 
 def convert_file(src: Path, dst: Path) -> None:
-    """fp32 -> fp16，IO 保持 fp32（引擎代码零改动）。"""
+    """fp32 -> fp16，IO 保持 fp32（引擎代码零改动）。
+
+    tmp + 原子换名：中途崩溃/磁盘满只留孤 .tmp，不会留下半写的 fp16 文件被
+    ensure_fp16_file 当有效变体永久使用（那会让之后所有 fp16 任务加载失败且
+    不自愈）。tmp 名带 pid——双路并行两进程可能同时转换同一权重。
+    """
+    import os
+
     from onnx import load_model
     from onnxconverter_common.float16 import (
         DEFAULT_OP_BLOCK_LIST,
@@ -54,7 +61,12 @@ def convert_file(src: Path, dst: Path) -> None:
         op_block_list=list(DEFAULT_OP_BLOCK_LIST) + _BLOCK_LIST_EXTRA,
     )
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_bytes(m16.SerializeToString())
+    tmp = dst.with_name(f"{dst.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_bytes(m16.SerializeToString())
+        tmp.replace(dst)
+    finally:
+        tmp.unlink(missing_ok=True)  # 换名成功后 tmp 已不存在；失败清残片
 
 
 def ensure_fp16(spec: ModelSpec) -> list[Path]:

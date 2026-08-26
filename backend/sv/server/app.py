@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import queue
 import shutil
 import threading
@@ -12,11 +13,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from .. import __version__
 from ..models import manager
 from ..models.registry import (
     BUNDLED_DIR,
@@ -44,6 +46,42 @@ bus = EventBus()
 runner = Runner(bus)
 perf = PerfSampler(bus, runner)
 _download_lock = asyncio.Lock()
+
+
+def _expected_tokens() -> set[str]:
+    """本地令牌（未配置=开发/测试模式不鉴权）。
+
+    监听 127.0.0.1 并非浏览器隔离：任意网页可直接 POST 本端口（CORS 挡不住
+    no-cors/表单 POST，WS 更不受 CORS 约束）。带上随机 token 后恶意页面无从
+    获得令牌，本机 API 不再是 drive-by 攻击面。
+
+    两个来源取并集：
+    - SV_TOKEN 环境变量：Electron 拉起 sidecar 时注入（本次会话令牌）；
+    - TEMP_DIR/sidecar.token 文件：UI 重启生成新 token 复用旧 sidecar 时，
+      旧进程 env 里还是老 token——按文件实时校验才能接受新 token。
+    """
+    toks: set[str] = set()
+    env_tok = os.environ.get("SV_TOKEN")
+    if env_tok:
+        toks.add(env_tok)
+    try:
+        f = TEMP_DIR / "sidecar.token"
+        if f.is_file():
+            t = f.read_text(encoding="utf-8").strip()
+            if t:
+                toks.add(t)
+    except OSError:
+        pass
+    return toks
+
+
+async def _token_auth(request: Request, call_next):
+    toks = _expected_tokens()
+    if toks and request.method != "OPTIONS" and request.url.path != "/api/health":
+        got = request.headers.get("x-sv-token") or request.query_params.get("token")
+        if got not in toks:
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
 
 # 硬件探测含 nvidia-smi/NVENC 试编码，按 60s 缓存
 _hw_cache: tuple[float, dict] = (0.0, {})
@@ -73,6 +111,7 @@ async def lifespan(app: FastAPI):
     await loop.run_in_executor(None, migrate_legacy_data)
     db.init_db()
     await loop.run_in_executor(None, sweep_orphan_workdirs)
+    _start_trim_worker()
     runner.start()
     perf.start()
     yield
@@ -80,12 +119,11 @@ async def lifespan(app: FastAPI):
     perf.stop()
 
 
-from .. import __version__
-
 app = FastAPI(title="super_video sidecar", version=__version__, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
+app.middleware("http")(_token_auth)
 
 
 # ---- 模型 ----
@@ -209,8 +247,20 @@ def log_tail(n: int = 120) -> dict:
     p = TEMP_DIR / "sidecar.log"
     if not p.exists():
         return {"lines": []}
-    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
-    return {"lines": lines}
+    # 从文件尾按块回读，不整读（日志大时全量 read_text 是内存尖峰）
+    try:
+        with p.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            data = b""
+            while size > 0 and data.count(b"\n") <= n:
+                step = min(4096, size)
+                size -= step
+                f.seek(size)
+                data = f.read(step) + data
+        return {"lines": data.decode("utf-8", "replace").splitlines()[-n:]}
+    except OSError:
+        return {"lines": []}
 
 
 @app.put("/api/settings")
@@ -341,11 +391,16 @@ async def download_model(model_id: str) -> dict:
 
     async def _do():
         async with _download_lock:
+            # 排队窗口内前一个下载可能已完成：复查后直接补发完成事件，不重跑
+            if manager.is_downloaded(spec):
+                bus.publish({"type": "model_download", "model_id": model_id, "done": True})
+                return
             loop = asyncio.get_running_loop()
             total = sum(f.get("size", 0) for f in spec.files) or 1
 
             def cb(done, tot, label):
-                bus.publish({
+                # executor 线程回调：asyncio.Queue 非线程安全，必须回事件循环线程投递
+                bus.publish_threadsafe({
                     "type": "model_download", "model_id": model_id,
                     "progress": round(done / total, 4),
                 })
@@ -382,6 +437,12 @@ _CODECS = {
 }
 _AUDIO_MODES = ("auto", "copy", "aac", "flac", "none")
 _CONTAINERS = ("mp4", "mkv", "mov")
+
+
+_PRESETS_XCODE = (
+    "ultrafast", "superfast", "veryfast", "faster", "fast",
+    "medium", "slow", "slower", "veryslow",
+)
 
 
 @app.post("/api/tasks", status_code=201)
@@ -465,6 +526,16 @@ def create_task(body: TaskCreate) -> dict:
     if not (0 <= int(crf) <= 51):
         raise HTTPException(400, "crf 范围 0-51")
     params["crf"] = int(crf)
+    preset = params.get("preset", "medium")
+    if preset not in _PRESETS_XCODE:
+        raise HTTPException(400, f"preset 仅支持 {' / '.join(_PRESETS_XCODE)}")
+    params["preset"] = preset
+    for k, hi in (("batch", 16), ("chunk", 1024)):
+        v = params.get(k)
+        if v is not None:
+            if not isinstance(v, int) or isinstance(v, bool) or not (1 <= v <= hi):
+                raise HTTPException(400, f"{k} 需为 1~{hi} 的整数")
+            params[k] = v
 
     res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
     if out_kind == "video":
@@ -596,19 +667,42 @@ class TrimCreate(BaseModel):
 
 _trim_jobs: dict[str, dict] = {}
 _trim_queue: "queue.Queue[str]" = queue.Queue()
+_trim_thread: threading.Thread | None = None
+
+
+def _start_trim_worker() -> None:
+    """lifespan 里启动（import 即起线程对测试不友好；幂等防多次启停重启）"""
+    global _trim_thread
+    if _trim_thread is not None and _trim_thread.is_alive():
+        return
+    _trim_thread = threading.Thread(target=_trim_worker, daemon=True, name="trim-worker")
+    _trim_thread.start()
 
 
 def _trim_worker() -> None:
+    from ..pipeline.trim import TrimCanceled
+    from ..utils.process import kill_tree
+
     while True:
         jid = _trim_queue.get()
         job = _trim_jobs.get(jid)
         if job is None:
             continue
+        if job.get("cancel_requested"):  # 排队期被取消：不再执行
+            job.update(state="canceled", error=None)
+            continue
+        job["proc"] = None
+
+        def _spawn_hook(proc, _job=job):
+            _job["proc"] = proc  # 取消端点据此 kill
+
         try:
             res = run_trim(
                 job["input"], job["start_s"], job["end_s"], job["mode"], job["output"],
                 nvenc=bool(cached_hardware().get("nvenc")),
                 progress_cb=lambda p: job.update(state="running", progress=round(p, 4)),
+                on_spawn=_spawn_hook,
+                cancel_check=lambda: bool(job.get("cancel_requested")),
             )
             job.update(
                 state="done", progress=1.0, output=str(res.output),
@@ -616,11 +710,12 @@ def _trim_worker() -> None:
                 duration_s=round(res.duration_s, 3),
                 mode=res.mode, notices=res.notices,
             )
-        except Exception as e:  # noqa: BLE001 — 后台线程兜底，任何异常写入状态
-            job.update(state="failed", error=str(e))
-
-
-threading.Thread(target=_trim_worker, daemon=True, name="trim-worker").start()
+        except (TrimCanceled, Exception) as e:  # noqa: BLE001 — 后台线程兜底
+            if job.get("cancel_requested") or isinstance(e, TrimCanceled):
+                job.update(state="canceled", error=None)
+                bus.publish_threadsafe({"type": "trim", "job_id": jid, "state": "canceled"})
+            else:
+                job.update(state="failed", error=str(e))
 
 
 def _ts_label(t: float) -> str:
@@ -654,8 +749,9 @@ def create_trim(body: TrimCreate) -> dict:
     _trim_jobs[jid] = {
         "state": "queued", "progress": 0.0, "input": str(input_path),
         "start_s": body.start_s, "end_s": body.end_s, "mode": body.mode,
-        "output": output, "error": None,
+        "output": output, "error": None, "cancel_requested": False,
     }
+    _start_trim_worker()  # 懒启动（幂等）：TestClient 不触发 lifespan 也能跑
     _trim_queue.put(jid)
     return {"job_id": jid, "output": output}
 
@@ -665,7 +761,27 @@ def trim_status(job_id: str) -> dict:
     job = _trim_jobs.get(job_id)
     if job is None:
         raise HTTPException(404)
-    return job
+    # proc（Popen 句柄）等内部字段不能进 JSON
+    return {k: v for k, v in job.items() if k != "proc"}
+
+
+@app.post("/api/trim/{job_id}/cancel")
+def cancel_trim(job_id: str) -> dict:
+    """取消排队/进行中的剪切：杀当前 ffmpeg 段，后续段不再执行。"""
+    from ..utils.process import kill_tree
+
+    job = _trim_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404)
+    if job["state"] not in ("queued", "running"):
+        raise HTTPException(409, "任务已结束")
+    job["cancel_requested"] = True
+    proc = job.get("proc")
+    if proc is not None and proc.poll() is None:
+        kill_tree(proc.pid)
+    if job["state"] == "queued":  # 还没被 worker 领走：直接落终态
+        job.update(state="canceled", error=None)
+    return {"ok": True}
 
 
 @app.post("/api/tasks/{task_id}/resume")
@@ -711,6 +827,10 @@ def task_preview(task_id: str, src: int = 0):
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
+    toks = _expected_tokens()
+    if toks and ws.query_params.get("token") not in toks:  # WS 不受 CORS 约束，必须自查令牌
+        await ws.close(code=4401)
+        return
     await ws.accept()
     q = bus.subscribe()
     # 客户端不发消息；并发挂一个 receive 作断连哨兵，否则 q.get() 永远发现不了断开

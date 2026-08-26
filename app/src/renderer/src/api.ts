@@ -1,8 +1,22 @@
-/** sidecar HTTP/WS 客户端。baseUrl 由主进程注入（sidecar 端口动态探测）。 */
+/** sidecar HTTP/WS 客户端。baseUrl/token 由主进程注入（sidecar 端口动态探测，
+ *  token 是本地 API 鉴权令牌——防浏览器里恶意网页直接打 127.0.0.1 的 drive-by）。 */
 export let baseUrl = ''
+let token = ''
+
+/** 统一 fetch：自动带 token 头（401 时 sidecar 会拒绝无令牌请求） */
+function _fetch(url: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers)
+  if (token) headers.set('X-SV-Token', token)
+  return fetch(url, { ...init, headers })
+}
+
+/** 无需鉴权的资源地址（<img>/<video> 等无法带请求头）追加 token 查询参数 */
+function withToken(url: string): string {
+  return token ? `${url}${url.includes('?') ? '&' : '?'}token=${token}` : url
+}
 
 export function wsUrl(): string {
-  return baseUrl.replace('http', 'ws') + '/ws'
+  return withToken(baseUrl.replace('http', 'ws') + '/ws')
 }
 
 /** 本地视频的 file:// 源地址（webSecurity:false 下 <video> 原生加载，
@@ -22,6 +36,7 @@ export function mediaSrc(p: string): string {
 export async function initBase(): Promise<void> {
   const info = await window.sv.backendInfo()
   baseUrl = info.baseUrl
+  token = info.token ?? ''
 }
 
 export interface ModelInfo {
@@ -124,7 +139,7 @@ export interface Task {
 }
 
 export interface TrimJob {
-  state: 'queued' | 'running' | 'done' | 'failed'
+  state: 'queued' | 'running' | 'done' | 'failed' | 'canceled'
   progress: number
   input: string
   start_s: number
@@ -163,42 +178,42 @@ export interface PerfSample {
 
 export const api = {
   async models(): Promise<ModelInfo[]> {
-    return (await fetch(`${baseUrl}/api/models`)).json()
+    return (await _fetch(`${baseUrl}/api/models`)).json()
   },
   async hardware(): Promise<Record<string, unknown>> {
-    return (await fetch(`${baseUrl}/api/hardware`)).json()
+    return (await _fetch(`${baseUrl}/api/hardware`)).json()
   },
   async engine(): Promise<{ backend: string; python: string; detail: string }> {
-    return (await fetch(`${baseUrl}/api/engine`)).json()
+    return (await _fetch(`${baseUrl}/api/engine`)).json()
   },
   async presets(): Promise<Preset[]> {
-    return (await fetch(`${baseUrl}/api/presets`)).json()
+    return (await _fetch(`${baseUrl}/api/presets`)).json()
   },
   async probe(path: string): Promise<Response> {
-    return fetch(`${baseUrl}/api/probe`, {
+    return _fetch(`${baseUrl}/api/probe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
     })
   },
   async settings(): Promise<Record<string, unknown>> {
-    return (await fetch(`${baseUrl}/api/settings`)).json()
+    return (await _fetch(`${baseUrl}/api/settings`)).json()
   },
   async saveSettings(body: Record<string, unknown>): Promise<Response> {
-    return fetch(`${baseUrl}/api/settings`, {
+    return _fetch(`${baseUrl}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
   },
   async logTail(n = 120): Promise<{ lines: string[] }> {
-    return (await fetch(`${baseUrl}/api/log-tail?n=${n}`)).json()
+    return (await _fetch(`${baseUrl}/api/log-tail?n=${n}`)).json()
   },
   async downloadModel(id: string): Promise<Response> {
-    return fetch(`${baseUrl}/api/models/${id}/download`, { method: 'POST' })
+    return _fetch(`${baseUrl}/api/models/${id}/download`, { method: 'POST' })
   },
   async deleteModel(id: string): Promise<Response> {
-    return fetch(`${baseUrl}/api/models/${id}`, { method: 'DELETE' })
+    return _fetch(`${baseUrl}/api/models/${id}`, { method: 'DELETE' })
   },
   async importModel(body: {
     path: string
@@ -209,29 +224,29 @@ export const api = {
     value_range: string
     tile: number
   }): Promise<Response> {
-    return fetch(`${baseUrl}/api/models/import`, {
+    return _fetch(`${baseUrl}/api/models/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
   },
   async tasks(): Promise<Task[]> {
-    return (await fetch(`${baseUrl}/api/tasks`)).json()
+    return (await _fetch(`${baseUrl}/api/tasks`)).json()
   },
   async stats(): Promise<Stats> {
-    return (await fetch(`${baseUrl}/api/stats`)).json()
+    return (await _fetch(`${baseUrl}/api/stats`)).json()
   },
   async perfHistory(): Promise<{ interval_s: number; samples: PerfSample[] }> {
-    return (await fetch(`${baseUrl}/api/perf/history`)).json()
+    return (await _fetch(`${baseUrl}/api/perf/history`)).json()
   },
   async trtComponent(): Promise<TrcStatus> {
-    return (await fetch(`${baseUrl}/api/trt-component`)).json()
+    return (await _fetch(`${baseUrl}/api/trt-component`)).json()
   },
   async installTrtComponent(): Promise<Response> {
-    return fetch(`${baseUrl}/api/trt-component/install`, { method: 'POST' })
+    return _fetch(`${baseUrl}/api/trt-component/install`, { method: 'POST' })
   },
   async uninstallTrtComponent(): Promise<Response> {
-    return fetch(`${baseUrl}/api/trt-component`, { method: 'DELETE' })
+    return _fetch(`${baseUrl}/api/trt-component`, { method: 'DELETE' })
   },
   async createTask(body: {
     input: string
@@ -239,30 +254,33 @@ export const api = {
     model_id: string
     params: Record<string, unknown>
   }): Promise<Response> {
-    return fetch(`${baseUrl}/api/tasks`, {
+    return _fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
   },
   async cancel(id: string): Promise<Response> {
-    return fetch(`${baseUrl}/api/tasks/${id}/cancel`, { method: 'POST' })
+    return _fetch(`${baseUrl}/api/tasks/${id}/cancel`, { method: 'POST' })
   },
   async remove(id: string): Promise<Response> {
-    return fetch(`${baseUrl}/api/tasks/${id}`, { method: 'DELETE' })
+    return _fetch(`${baseUrl}/api/tasks/${id}`, { method: 'DELETE' })
   },
   async reorderTasks(ids: string[]): Promise<Response> {
-    return fetch(`${baseUrl}/api/tasks/reorder`, {
+    return _fetch(`${baseUrl}/api/tasks/reorder`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
     })
   },
   async resume(id: string): Promise<Response> {
-    return fetch(`${baseUrl}/api/tasks/${id}/resume`, { method: 'POST' })
+    return _fetch(`${baseUrl}/api/tasks/${id}/resume`, { method: 'POST' })
   },
   previewUrl(id: string, updatedAt: number, src = false): string {
-    return `${baseUrl}/api/tasks/${id}/preview?t=${updatedAt}${src ? '&src=1' : ''}`
+    return withToken(`${baseUrl}/api/tasks/${id}/preview?t=${updatedAt}${src ? '&src=1' : ''}`)
+  },
+  async cancelTrim(id: string): Promise<Response> {
+    return _fetch(`${baseUrl}/api/trim/${id}/cancel`, { method: 'POST' })
   },
   async createTrim(body: {
     input: string
@@ -271,7 +289,7 @@ export const api = {
     mode: string
     output?: string
   }): Promise<{ job_id: string; output: string }> {
-    const r = await fetch(`${baseUrl}/api/trim`, {
+    const r = await _fetch(`${baseUrl}/api/trim`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -280,7 +298,7 @@ export const api = {
     return r.json()
   },
   async trimStatus(id: string): Promise<TrimJob> {
-    const r = await fetch(`${baseUrl}/api/trim/${id}`)
+    const r = await _fetch(`${baseUrl}/api/trim/${id}`)
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     return r.json()
   },

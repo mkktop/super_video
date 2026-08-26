@@ -2,15 +2,12 @@
 import { computed } from 'vue'
 import { NButton, NProgress, NTag } from 'naive-ui'
 import { store, ui } from '../store'
+import { fmtBytes, fmtEta } from '../utils'
 import PerfRings from '../components/PerfRings.vue'
 
 const running = computed(() => store.tasks.find((t) => t.status === 'running'))
 // 统计走 /api/stats 全量聚合：任务列表有历史上限，直接数列表会漏旧任务
 const stats = computed(() => store.stats)
-
-function fmtBytes(b: number): string {
-  return b > 1e9 ? `${(b / 1e6 / 1024).toFixed(2)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${b} B`
-}
 
 function fmtFrames(n: number): string {
   return n > 10000 ? `${(n / 10000).toFixed(1)} 万` : String(n)
@@ -21,14 +18,6 @@ const runPercent = computed(() => {
   if (!r || !r.total_frames) return 0
   return Math.min(100, Math.round((r.progress_frames / r.total_frames) * 100))
 })
-
-function fmtEta(sec: number): string {
-  if (!sec || sec < 0) return '—'
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = Math.floor(sec % 60)
-  return h ? `${h}时${m}分` : m ? `${m}分${s}秒` : `${s}秒`
-}
 
 const hw = computed(() => store.hardware)
 </script>
@@ -48,8 +37,8 @@ const hw = computed(() => store.hardware)
         </div>
       </div>
       <div class="hero-chip">
-        <span class="chip-dot" />
-        推理引擎就绪 · {{ store.gpuName }}
+        <span class="chip-dot" :class="{ off: !store.engine }" />
+        {{ store.engine ? `推理引擎就绪 · ${store.engine.backend}` : '推理引擎未就绪' }} · {{ store.gpuName }}
       </div>
     </section>
 
@@ -198,6 +187,7 @@ h1 {
   background: #34d399;
   box-shadow: 0 0 8px rgba(52, 211, 153, 0.9);
 }
+.chip-dot.off { background: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.8); }
 
 .card {
   background: #1e2023;

@@ -53,5 +53,9 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 parallel_streams 值: {v}")
             data[k] = v
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # tmp + 原子换名：写一半崩溃/断电不留损坏的 JSON——load() 会静默吞
+    # JSONDecodeError 回默认值，用户的全部设置就丢了
+    tmp = SETTINGS_PATH.with_name(SETTINGS_PATH.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(SETTINGS_PATH)
     return data

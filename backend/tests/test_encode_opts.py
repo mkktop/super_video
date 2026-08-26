@@ -72,10 +72,11 @@ def test_audio_args_modes():
     assert audio_args(EncodeOpts(audio_mode="flac"), False, "x") == ["-c:a", "flac"]
     a = audio_args(EncodeOpts(audio_mode="aac"), True, "aac")
     assert a[:2] == ["-c:a", "aac"] and "-b:a" in a
-    # auto：mp4 家族可拷则拷；mkv 下 aac 源转 aac；不可拷转 aac
+    # auto：mp4 家族可拷则拷；mkv 混流宽一律无损 copy；mp4 不可拷转 aac
     assert audio_args(EncodeOpts(), True, "aac") == ["-c:a", "copy"]
-    assert audio_args(EncodeOpts(), False, "flac")[1] == "aac"
+    assert audio_args(EncodeOpts(), False, "flac") == ["-c:a", "copy"]
     assert audio_args(EncodeOpts(), True, "opus")[1] == "aac"
+    assert audio_args(EncodeOpts(), False, None) == []
 
 
 def test_subtitle_args_by_container():
@@ -151,7 +152,10 @@ def _create_ok(clip, params):
 def test_validation_new_params(clip):
     for bad in ({"container": "avi"}, {"audio_mode": "mp3"}, {"subtitle_mode": "always"},
                 {"audio_mode": "flac"},  # FLAC 只允许 mkv
-                {"codec": "vp9"}):
+                {"codec": "vp9"},
+                {"preset": "turbo"},  # preset 白名单（曾直接进 ffmpeg argv 无校验）
+                {"batch": 0}, {"batch": "x"},  # batch 需 1~16 整数（worker int() 会炸）
+                {"chunk": 0}):
         with pytest.raises(HTTPException) as e:
             _create(clip, bad)
         assert e.value.status_code == 400

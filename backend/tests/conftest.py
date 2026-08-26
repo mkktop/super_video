@@ -1,9 +1,33 @@
+import os
 import sys
+import uuid
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 _DML_CACHE: bool | None = None
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _isolated_sv_db(tmp_path_factory):
+    """每个测试模块独享 SV_DB。
+
+    历史问题：多个模块在 import 期（collection 阶段）改写 os.environ["SV_DB"]，
+    全量运行时所有模块实际共用字母序最后一个模块的库——"每模块独立库"只在
+    单文件运行时成立，跨模块状态污染只是还没咬人。db.db_path() 每次调用
+    实时读 env，这里在每模块的测试期覆盖成独一文件，import 期的赋值被
+    运行期覆盖，隔离真实生效（模块自带的 client fixture 会 unlink 本值）。
+    """
+    old = os.environ.get("SV_DB")
+    os.environ["SV_DB"] = str(
+        tmp_path_factory.mktemp(f"svdb_{uuid.uuid4().hex[:6]}") / "tasks.db")
+    yield
+    if old is None:
+        os.environ.pop("SV_DB", None)
+    else:
+        os.environ["SV_DB"] = old
 
 
 def dml_available() -> bool:

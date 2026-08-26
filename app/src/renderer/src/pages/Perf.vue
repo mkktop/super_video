@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { NTag } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
+import { fmtEta } from '../utils'
 import TrendChart from '../components/TrendChart.vue'
 import type { ChartSeries } from '../components/TrendChart.vue'
 import PerfRings from '../components/PerfRings.vue'
@@ -38,14 +39,6 @@ const runPercent = computed(() => {
   if (!r || !r.total_frames) return 0
   return Math.min(100, Math.round((r.progress_frames / r.total_frames) * 100))
 })
-
-function fmtEta(sec: number): string {
-  if (!sec || sec < 0) return '—'
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = Math.floor(sec % 60)
-  return h ? `${h}时${m}分` : m ? `${m}分${s}秒` : `${s}秒`
-}
 
 // ---- 趋势系列 ----
 const pctSeries: ChartSeries[] = [

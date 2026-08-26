@@ -18,7 +18,7 @@ from rich.table import Table
 
 from sv.engines.onnx_engine import OnnxSrEngine
 from sv.models import manager as model_manager
-from sv.models.registry import get_model, load_registry, model_file
+from sv.models.registry import get_model, load_registry, local_files, model_file
 from sv.paths import TEMP_DIR, ffmpeg_bin
 from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
 from sv.pipeline.stream import EncodeOpts, PipelineError, StreamPipeline, TaskCanceled
@@ -111,13 +111,15 @@ def cmd_run(args):
     engine = OnnxSrEngine(
         model_path, scale, io=spec.io, device=args.device,
         tile=args.tile or spec.tile_hint,
+        validate_hw=(info.height, info.width),
     )
     t0 = time.perf_counter()
     engine.load()
     console.print(f"[dim]模型加载 {time.perf_counter()-t0:.1f}s | EP: {engine.provider_used}[/dim]")
 
-    # 预热一帧（首次 DML 图编译较慢，不计入统计）
-    engine.process(np.zeros((64, 64, 3), dtype=np.uint8))
+    # 预热一帧（首次 DML 图编译较慢，不计入统计）。必须用源帧真实尺寸：
+    # 64x64 这类小形状会不可逆拖慢后续真实尺寸的执行路径（v0.2.3 结论）
+    engine.process(np.zeros((info.height, info.width, 3), dtype=np.uint8))
 
     out = Path(args.output) if args.output else info.path.with_name(
         info.path.stem + f"_{scale}x" + ".mp4"
@@ -140,7 +142,6 @@ def cmd_run(args):
         )
 
         def cb(frames, total, fps, eta):
-            mm, ss = divmod(int(eta), 60)
             prog.update(
                 task, completed=frames,
                 frames=f"{frames}/{total}",

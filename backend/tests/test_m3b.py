@@ -100,23 +100,37 @@ def test_chunked_resume_skips_done_chunks():
 
 
 def test_torch_engine_matches_onnx():
-    """torch 引擎可用时跑一帧（CUDA 环境才有 torch，主 venv 自动跳过）。"""
+    """torch 引擎可用时跑一帧（CUDA 环境才有 torch，主 venv 自动跳过）。
+
+    放子进程跑：全量套件里此前已加载 onnxruntime(-dml/gpu) 等库，进程内再
+    加载 torch 的 cudnn DLL 会 WinError 127（DLL 搜索状态被污染，实测顺序
+    依赖单跑就好）；子进程拿干净的 DLL 空间，测试不再与执行顺序耦合。
+    """
+    import subprocess
+    import sys
+
     if not PTH.exists():
         pytest.skip("未下载 torch 权重")
-    try:
-        import torch  # noqa: F401
-    except ImportError:
+    code = (
+        "import sys; sys.path.insert(0, r'%s'); "
+        "import numpy as np; "
+        "from sv.engines.torch_engine import TorchSrEngine; "
+        "eng = TorchSrEngine(r'%s', 4, io={'arch': 'rrdbnet'}, tile=128); "
+        "eng.load(); "
+        "rng = np.random.default_rng(2); "
+        "frame = np.clip(rng.normal(120, 50, (64, 64, 3)), 0, 255).astype(np.uint8); "
+        "out = eng.process(frame); "
+        "assert out.shape == (256, 256, 3) and out.dtype == np.uint8; "
+        "assert int(out.std()) > 3; print('OK')"
+        % (Path(__file__).resolve().parents[1], PTH)
+    )
+    r = subprocess.run([sys.executable, "-c", code],
+                       capture_output=True, timeout=300,
+                       cwd=str(Path(__file__).resolve().parents[1]))
+    out = r.stdout.decode("utf-8", "replace").strip()
+    if "ModuleNotFoundError" in (r.stderr.decode("utf-8", "replace")) and "torch" in r.stderr.decode():
         pytest.skip("当前解释器无 torch")
-
-    from sv.engines.torch_engine import TorchSrEngine
-
-    eng = TorchSrEngine(PTH, 4, io={"arch": "rrdbnet"}, tile=128)
-    eng.load()
-    rng = np.random.default_rng(2)
-    frame = np.clip(rng.normal(120, 50, (64, 64, 3)), 0, 255).astype(np.uint8)
-    out = eng.process(frame)
-    assert out.shape == (256, 256, 3) and out.dtype == np.uint8
-    assert int(out.std()) > 3
+    assert r.returncode == 0 and out.endswith("OK"), r.stderr.decode("utf-8", "replace")[-500:]
 
 
 def test_import_custom_model(client_like=None):

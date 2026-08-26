@@ -1,10 +1,12 @@
 /**
  * Electron 主进程：窗口管理 + sidecar 生命周期。
  * 关键策略：sidecar detached 拉起 —— UI 崩溃/退出时任务进程不受影响；
- * 有任务运行时退出 UI 不杀 sidecar，重启后自动复用。
+ * 有任务运行时退出 UI 不杀 sidecar，重启后自动复用（启动时先探测复用，
+ * 只有复用失败才清理残留进程——见 whenReady 的顺序）。
  */
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import crypto from 'node:crypto'
 import net from 'node:net'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -16,6 +18,7 @@ import fs from 'node:fs'
 let mainWindow: BrowserWindow | null = null
 let sidecar: ChildProcess | null = null
 let baseUrl = ''
+let apiToken = '' // 本地 API 令牌：写 dataRoot/.tmp/sidecar.token + spawn env，renderer 经 backend:info 取
 
 function findRoot(): string {
   if (app.isPackaged) return process.resourcesPath  // 安装包布局：resources/{bin,sidecar}
@@ -142,6 +145,16 @@ async function startOrReuseSidecar(): Promise<string> {
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
   const logFd = fs.openSync(logPath, 'a')
 
+  // 本地 API 令牌：写 token 文件（复用中的旧 sidecar 按文件实时校验，能接受新令牌）
+  // + 随 spawn env 注入（本会话）。renderer 经 backend:info 取走，用于请求头/WS 参数
+  apiToken = crypto.randomBytes(24).toString('hex')
+  try {
+    fs.writeFileSync(path.join(dataRoot, '.tmp', 'sidecar.token'), apiToken, 'utf-8')
+  } catch (e) {
+    console.warn('[sidecar] 令牌文件写入失败（API 将不鉴权）:', e)
+    apiToken = ''
+  }
+
   const py = isPackaged
     ? path.join(root, 'sidecar', 'sidecar.exe')
     : path.join(root, '.venv', 'Scripts', 'python.exe')
@@ -159,9 +172,13 @@ async function startOrReuseSidecar(): Promise<string> {
       stdio: ['ignore', logFd, logFd],
       windowsHide: true,
       env: isPackaged
-        ? { ...process.env, SV_ROOT: root, SV_DATA: dataRoot }
-        : process.env,
+        ? { ...process.env, SV_ROOT: root, SV_DATA: dataRoot, SV_TOKEN: apiToken }
+        : { ...process.env, SV_TOKEN: apiToken },
     })
+    // 缺 exe/被杀软拦截时 spawn 异步抛 'error'；不挂监听会成为主进程未捕获异常，
+    // 秒退也不再傻等满 60s 才报"启动超时"（exit 日志可见）
+    sidecar.on('error', (e) => console.error('[sidecar] 启动失败:', e))
+    sidecar.on('exit', (code) => console.log(`[sidecar] 进程退出 code=${code}`))
     sidecar.unref()
     fs.closeSync(logFd)
     // 首次启动杀软可能全量扫描 sidecar 目录（155MB），20s 不够，放宽到 60s
@@ -172,12 +189,19 @@ async function startOrReuseSidecar(): Promise<string> {
       }
       await new Promise((r) => setTimeout(r, 500))
     }
-    throw new Error(
-      `后端服务启动超时（已等待 60 秒）。常见原因：安全软件拦截了未签名的 sidecar.exe，` +
-        `或安装目录不可写。日志：${logPath}`
-    )
+    // 超时清掉这个起不来的进程再试下一端口（不留孤儿等下次启动 reap）
+    if (sidecar.pid) {
+      try {
+        spawnSync('taskkill', ['/pid', String(sidecar.pid), '/T', '/F'],
+          { windowsHide: true, timeout: 8000 })
+      } catch { /* 可能已退出 */ }
+    }
+    sidecar = null
+    continue
   }
-  throw new Error('端口 8730-8739 均被占用，无法启动后端服务')
+  throw new Error(
+    `后端服务启动超时（每端口已等待 60 秒）。常见原因：安全软件拦截了未签名的 sidecar.exe，` +
+      `或安装目录不可写。日志：${logPath}`)
 }
 
 async function hasActiveTasks(): Promise<boolean> {
@@ -186,20 +210,21 @@ async function hasActiveTasks(): Promise<boolean> {
     const tasks = (await r.json()) as Array<{ status: string }>
     return tasks.some((t) => t.status === 'running' || t.status === 'queued')
   } catch {
-    return false
+    return true // 探测失败按"有任务"保守处理：宁可不断旧实例的任务也不能误杀
   }
 }
 
-/** 启动兜底：清理上次异常退出可能残留的 sidecar 进程（自杀自清） */
+/** 启动兜底：清理上次异常退出残留的 sidecar 进程（自杀自清）。
+ *  只在复用失败后调用——能被复用的 sidecar（可能正跑任务）绝不能杀；
+ *  taskkill /T 树杀连带 worker/ffmpeg 子进程，避免 Stop-Process 留孤儿。 */
 async function reapStaleSidecars(): Promise<void> {
   const root = findRoot()
   const own = path.join(root, 'sidecar', 'sidecar.exe')
-  // 杀掉指向本安装目录 sidecar.exe 的所有进程（含端口已释放的孤儿）
   const { execFile } = await import('node:child_process')
   try {
     const ps = `Get-CimInstance Win32_Process -Filter "Name='sidecar.exe'" | ` +
       `Where-Object { $_.ExecutablePath -eq '${own.replace(/'/g, "''")}' } | ` +
-      `ForEach-Object { Stop-Process -Id $_.ProcessId -Force; "killed $($_.ProcessId)" }`
+      `ForEach-Object { & taskkill.exe /pid $_.ProcessId /T /F | Out-Null; "killed $($_.ProcessId)" }`
     const out = await new Promise<string>((resolve, reject) => {
       execFile('powershell.exe', ['-NoProfile', '-Command', ps], {
         windowsHide: true, timeout: 15000,
@@ -265,6 +290,8 @@ function createWindow() {
       // 关闭同源限制：允许 <video> 直接用 file:// 播本地视频——Chromium 原生文件
       // 加载器自带 Range 与 moov 尾部索引处理（自定义协议不做尾部探测，moov 在尾的
       // 大 MP4 直接黑屏；转 faststart 影子文件又要吃磁盘）。纯本地单用户工具，风险可控
+      // 【2026-08-26 审查复核，拍板保持】：CSP 收敛 + 本地 token 鉴权后同源放宽的
+      // 剩余风险小于换自定义协议后视频源兼容性回退的风险；勿在无逐源验证的情况下改回
       webSecurity: false,
     },
   })
@@ -283,6 +310,7 @@ function createWindow() {
 
 // 单实例：二次启动聚焦已有窗口（sidecar 复用机制天然支持，但避免双 UI 抢队列）
 const gotLock = app.requestSingleInstanceLock()
+const isSecondInstance = !gotLock
 if (!gotLock) {
   app.quit()
 } else {
@@ -324,9 +352,22 @@ function normalizeNotes(raw: unknown): string {
 
 /** Release 正文是仓库根 RELEASE_NOTES.md 全量，按 "## vX.Y.Z" 分节，只取目标版本那一节 */
 function sliceNotes(notes: string, version: string): string {
-  const section = notes.split('\n## ').find((s) => s.startsWith(`v${version}`))
+  // 版本号后必须紧跟空白/结尾：找 v0.2.3 不能命中 v0.2.30 开头的节
+  const re = new RegExp(`^v${version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`)
+  const section = notes.split('\n## ').find((s) => re.test(s))
   if (!section) return notes
   return section.slice(`v${version}`.length).trim()
+}
+
+/** 语义化版本比较：a > b（远端更旧时不得提示"可更新"，否则成了降级安装） */
+function newerVersion(a: string, b: string): boolean {
+  const pa = a.replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0)
+  const pb = b.replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0)
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d > 0
+  }
+  return false
 }
 
 /** electron-updater 的 GitHub provider 把 release 正文渲染成 HTML（<h1>/<ul>…），
@@ -385,6 +426,11 @@ function setupAutoUpdate(): void {
       readyVersion = info.version
       broadcast('app:update-ready', info.version)
     })
+    // EventEmitter 无 error 监听器即抛未捕获异常（离线点"检查更新"就崩主进程）
+    autoUpdater.on('error', (e) => {
+      console.error('[updater] error:', e)
+      broadcast('app:update-error', String(e))
+    })
   } catch (e) {
     console.error('[updater] 初始化失败:', e)
   }
@@ -404,7 +450,7 @@ async function checkUpdateManually(): Promise<{
   try {
     const r = await getAutoUpdater().checkForUpdates()
     const newVersion = r?.updateInfo?.version
-    if (newVersion && newVersion !== current) {
+    if (newVersion && newerVersion(newVersion, current)) {
       return {
         status: 'available',
         current,
@@ -440,13 +486,20 @@ function installUpdate(): void {
 }
 
 app.whenReady().then(async () => {
+  // 顺序即语义：先探测复用（健康且版本一致的存量 sidecar——可能正跑任务——
+  // 绝不能杀）；复用失败才清残留僵尸再拉新。曾先无条件 reap 再复用，
+  // 把"UI 崩溃后重启接着看任务"的场景一刀杀掉了（与文件头承诺矛盾）
   try {
-    await reapStaleSidecars()
     await startOrReuseSidecar()
   } catch (e) {
-    dialog.showErrorBox('sidecar 启动失败', String(e))
-    app.quit()
-    return
+    await reapStaleSidecars()
+    try {
+      await startOrReuseSidecar()
+    } catch (e2) {
+      dialog.showErrorBox('sidecar 启动失败', `${e2}`)
+      app.quit()
+      return
+    }
   }
   createWindow()
   setupAutoUpdate()
@@ -460,12 +513,14 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  // 第二实例的 quit 不能杀 sidecar——它属于正在运行的第一实例（含其任务）
+  if (isSecondInstance) return
   // 任何情况下退出都连带关掉 sidecar（用户明确要求）；
   // 若真有任务在跑，由 worker 的停止信号自行收尾
   killSidecar()
 })
 
-ipcMain.handle('backend:info', () => ({ baseUrl }))
+ipcMain.handle('backend:info', () => ({ baseUrl, token: apiToken }))
 
 ipcMain.handle('app:version', () => app.getVersion())
 

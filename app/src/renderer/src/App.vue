@@ -9,7 +9,7 @@ import {
   zhCN,
   type GlobalThemeOverrides,
 } from 'naive-ui'
-import { initStore, ui } from './store'
+import { initStore, retryInit, store, ui } from './store'
 import TitleBar from './components/TitleBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import Home from './pages/Home.vue'
@@ -42,7 +42,9 @@ const themeOverrides: GlobalThemeOverrides = {
 }
 
 onMounted(() => {
-  initStore()
+  initStore().catch((e) => {
+    store.initError = String(e)
+  })
 })
 </script>
 
@@ -60,6 +62,12 @@ onMounted(() => {
         <div class="body">
           <Sidebar v-if="ui.page !== 'compare'" />
           <main class="page" :class="{ 'page-full': ui.page === 'compare' }">
+            <!-- 后端初始化失败：给出原因与重试入口，替代无限 loading -->
+            <div v-if="store.initError" class="init-error">
+              <div class="init-error-title">后端服务连接失败</div>
+              <div class="init-error-detail">{{ store.initError }}</div>
+              <n-button type="primary" size="small" @click="retryInit">重试</n-button>
+            </div>
             <!-- 新建任务页 v-show 常驻挂载：填一半切去别的页再回来，草稿不丢 -->
             <NewTask v-show="ui.page === 'newtask'" />
             <Home v-if="ui.page === 'home'" />
@@ -98,6 +106,23 @@ body {
   padding: 12px 14px;
   overflow: hidden;
   display: flex;
+}
+.init-error {
+  max-width: 560px;
+  margin: 60px auto;
+  padding: 24px;
+  border: 1px solid #5c3a3a;
+  border-radius: 8px;
+  background: #241a1a;
+  text-align: center;
+}
+.init-error-title { font-size: 16px; font-weight: 600; margin-bottom: 10px; }
+.init-error-detail {
+  font-size: 12px;
+  color: #b8bcc2;
+  margin-bottom: 16px;
+  word-break: break-all;
+  white-space: pre-wrap;
 }
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-thumb { background: #33363b; border-radius: 5px; }
