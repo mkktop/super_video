@@ -130,7 +130,8 @@ app.middleware("http")(_token_auth)
 
 
 class TaskCreate(BaseModel):
-    input: str
+    input: str = ""  # 单输入；图片批量时可为空、改用 inputs 列表
+    inputs: list[str] | None = None  # 图片批量：一次建一个任务循环处理
     output: str | None = None
     model_id: str
     params: dict = Field(default_factory=dict)  # scale/codec/crf/preset/tile/interp/denoise 每任务独立
@@ -444,9 +445,161 @@ _PRESETS_XCODE = (
     "medium", "slow", "slower", "veryslow",
 )
 
+# 图片超分接受的输入扩展名（识别失败/损坏文件由 PIL 打开时报 400）
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+
+
+def _sr_output_name(out_root: Path, stem: str, fmt: str, res_label: str,
+                    used: set[str]) -> str:
+    """超分输出命名（视频/图片同规则）：
+
+    目标目录没有同名文件时沿用原文件名（干净）；同名已存在——可能是源文件
+    本身（同目录同扩展名）、用户已有文件或上次产物——退回「_倍率」后缀，
+    不覆盖任何现有文件。后缀名也已被本批同伴占用时再加序号。
+    """
+    plain = out_root / f"{stem}.{fmt}"
+    pk = os.path.normcase(str(plain))
+    if not plain.exists() and pk not in used:
+        used.add(pk)
+        return str(plain)
+    suffixed = out_root / f"{stem}_{res_label}.{fmt}"
+    sk = os.path.normcase(str(suffixed))
+    if sk not in used:  # 磁盘上已存在的后缀名=上次产物，可覆盖（重跑不增殖）
+        used.add(sk)
+        return str(suffixed)
+    n = 2
+    while True:  # 仅批量同伴撞名时升序号
+        cand = out_root / f"{stem}_{res_label}_{n}.{fmt}"
+        ck = os.path.normcase(str(cand))
+        if ck not in used:
+            used.add(ck)
+            return str(cand)
+        n += 1
+
+
+def _create_image_task(body: TaskCreate, spec) -> dict:
+    """图片超分任务的创建校验与入库（单张或批量合一，批量=一个任务循环跑）。
+
+    与视频任务共用模型/倍率纪律；批量时只允许倍数放大（自定义分辨率需逐图
+    尺寸校验，暂不开放）。params.images 携带 [{in,out},...] 清单，worker 端
+    一次模型加载循环处理。输出默认 PNG（无损），可选 JPG + 质量。
+    """
+    params_in = dict(body.params)
+    inputs_raw = list(body.inputs) if body.inputs else [body.input]
+    if not inputs_raw or any(not i for i in inputs_raw):
+        raise HTTPException(400, "未提供输入图片")
+    paths: list[Path] = []
+    for i in inputs_raw:
+        p = Path(i)
+        if not p.exists():
+            raise HTTPException(400, f"输入文件不存在: {i}")
+        if p.suffix.lower() not in _IMAGE_EXTS:
+            raise HTTPException(400, f"{p.name} 不是受支持的图片格式")
+        paths.append(p)
+    # 去重（同一路径重复选择）
+    seen: set[str] = set()
+    paths = [p for p in paths
+             if not (key := os.path.normcase(str(p))) in seen and not seen.add(key)]
+    batch = len(paths) > 1
+
+    scale = int(params_in.get("scale") or max(spec.scale))
+    if scale not in spec.scale:
+        raise HTTPException(400, f"模型 {spec.id} 不支持 x{scale}，可选 {spec.scale}")
+    target = int(params_in.get("target_scale") or scale)
+    if not (1 <= target <= scale):
+        raise HTTPException(400, f"目标倍率需在 x1 ~ x{scale} 之间")
+    # 自定义目标分辨率：仅单张开放（批量需逐图校验边界，暂不支持）
+    tw, th = params_in.get("target_w"), params_in.get("target_h")
+    if tw is not None or th is not None:
+        if batch:
+            raise HTTPException(400, "批量图片暂不支持自定义分辨率，请按倍数放大")
+        if not (isinstance(tw, int) and isinstance(th, int) and tw > 0 and th > 0):
+            raise HTTPException(400, "自定义分辨率需同时提供正整数 target_w/target_h")
+        tw, th = tw - tw % 2, th - th % 2
+    tile = int(params_in.get("tile", 0))
+    if tile != 0 and not (64 <= tile <= 4096 and tile % 2 == 0):
+        raise HTTPException(400, "tile 需为 0（自动）或 64~4096 的偶数像素")
+    fmt = str(params_in.get("format") or "png").lower()
+    if fmt not in ("png", "jpg"):
+        raise HTTPException(400, "图片输出格式仅支持 png / jpg")
+    denoise = params_in.get("denoise")
+    if denoise is not None and int(denoise) not in (0, 1, 2, 3):
+        raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
+
+    # 逐图可用性校验 + 尺寸读取（EXIF 方向转正后的真实宽高）
+    from PIL import Image, ImageOps
+
+    sizes: list[tuple[int, int]] = []
+    for p in paths:
+        try:
+            with Image.open(str(p)) as im:
+                im = ImageOps.exif_transpose(im)
+                sizes.append(im.size)
+        except OSError as e:
+            raise HTTPException(400, f"无法读取图片 {p.name}: {e}") from e
+    src_w, src_h = sizes[0]
+    if tw is not None or th is not None:
+        eff_w, eff_h = tw, th
+        if eff_w < src_w or eff_h < src_h:
+            raise HTTPException(
+                400, f"目标分辨率不能低于源 {src_w}x{src_h}（当前 {eff_w}x{eff_h}）")
+        if eff_w > src_w * scale or eff_h > src_h * scale:
+            raise HTTPException(400, (
+                f"目标 {eff_w}x{eff_h} 超出模型 x{scale} 原生上限 "
+                f"{src_w * scale}x{src_h * scale}，请提高放大倍数或换更高倍率模型"))
+
+    res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
+    odir = str(load_settings().get("output_dir") or "").strip()
+    out_root = Path(odir) if odir else paths[0].parent
+    if batch and body.output:
+        raise HTTPException(400, "批量图片由系统逐图命名输出，不能指定单一输出文件")
+    # 逐图输出命名：目录无同名则沿用原名，冲突退 _倍率 后缀（不覆盖现有文件）
+    images_meta: list[dict] = []
+    used: set[str] = set()
+    for p in paths:
+        if batch or not body.output:
+            out = _sr_output_name(out_root, p.stem, fmt, res_label, used)
+        else:
+            out = str(body.output)
+            used.add(os.path.normcase(out))
+        images_meta.append({"in": str(p), "out": out})
+    try:  # 与视频同规则：目录不存在自动建，指向不可写处给可读错误
+        out_root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(400, f"无法创建输出目录 {out_root}: {e}") from e
+
+    params = {
+        "kind": "image", "format": fmt,
+        "scale": scale, "target_scale": target,
+        "tile": tile, "images": images_meta,
+    }
+    if fmt == "jpg":
+        q = int(params_in.get("jpg_quality", 92))
+        params["jpg_quality"] = min(100, max(60, q))
+    if tw is not None and th is not None:
+        params["target_w"], params["target_h"] = tw, th
+        params["target_scale"] = scale  # 整数倍率字段退位为模型原生档
+    if denoise is not None:
+        params["denoise"] = int(denoise)
+    task = db.new_task(
+        str(paths[0]), images_meta[0]["out"], body.model_id, params,
+        src={"w": src_w, "h": src_h, "fps": 0.0, "total_frames": len(paths)},
+    )
+    bus.publish({"type": "task_status", "task_id": task["id"], "status": "queued"})
+    return task
+
 
 @app.post("/api/tasks", status_code=201)
 def create_task(body: TaskCreate) -> dict:
+    # 图片批量：inputs 列表 → 单任务循环处理（一次模型加载跑完全部）
+    if body.inputs:
+        try:
+            specs = load_registry()
+            if body.model_id not in specs:
+                raise HTTPException(404, f"未知模型 {body.model_id}")
+            return _create_image_task(body, specs[body.model_id])
+        except UnsupportedMedia as e:
+            raise HTTPException(422, str(e))
     input_path = Path(body.input)
     if not input_path.exists():
         raise HTTPException(400, f"输入文件不存在: {body.input}")
@@ -455,6 +608,8 @@ def create_task(body: TaskCreate) -> dict:
         if body.model_id not in specs:
             raise HTTPException(404, f"未知模型 {body.model_id}")
         spec = specs[body.model_id]
+        if input_path.suffix.lower() in _IMAGE_EXTS:
+            return _create_image_task(body, spec)
         info = probe(input_path)
         validate_m0(info)
     except UnsupportedMedia as e:
@@ -538,15 +693,26 @@ def create_task(body: TaskCreate) -> dict:
             params[k] = v
 
     res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
+    # 未显式指定输出时：全局设置里的输出目录优先（目录懒创建），否则沿用源视频同目录
+    odir = str(load_settings().get("output_dir") or "").strip()
+    out_root = Path(odir) if odir else input_path.parent
     if out_kind == "video":
-        out = body.output or str(
-            input_path.with_name(f"{input_path.stem}_{res_label}.{container}")
-        )
+        # 目录无同名则沿用原文件名（如 mkv→mp4 换封装），同名冲突（含源文件
+        # 本身）退 _倍率 后缀——同规则见 _sr_output_name
+        out = body.output or _sr_output_name(
+            out_root, input_path.stem, container, res_label, set())
     else:
         # 图片序列：输出是文件夹，帧图按 000001.png 起逐帧编号
-        out = body.output or str(input_path.with_name(f"{input_path.stem}_{res_label}_frames"))
+        out = body.output or str(out_root / f"{input_path.stem}_{res_label}_frames")
         if Path(out).exists() and not Path(out).is_dir():
             raise HTTPException(400, "图片序列的输出路径需为文件夹")
+    try:  # 目录不存在时自动创建（设置里指向新盘/新目录的场景）；失败给出可读错误
+        if out_kind == "video":
+            Path(out).parent.mkdir(parents=True, exist_ok=True)
+        else:
+            Path(out).mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(400, f"无法创建输出目录 {Path(out).parent}: {e}") from e
     task = db.new_task(
         str(input_path), out, body.model_id, params,
         src={"w": info.width, "h": info.height, "fps": info.fps,
@@ -738,9 +904,16 @@ def create_trim(body: TrimCreate) -> dict:
         raise HTTPException(400, "出点必须晚于入点")
     if body.start_s >= info.duration_s:
         raise HTTPException(400, "入点超出视频时长")
-    output = body.output or str(input_path.with_name(
-        f"{input_path.stem}_cut_{_ts_label(body.start_s)}-{_ts_label(body.end_s)}.mp4"
-    ))
+    output = body.output
+    if not output:
+        # 与超分任务同一规则：全局输出目录优先，否则源视频同目录
+        _odir = str(load_settings().get("output_dir") or "").strip()
+        _root = Path(_odir) if _odir else input_path.parent
+        output = str(_root / f"{input_path.stem}_cut_{_ts_label(body.start_s)}-{_ts_label(body.end_s)}.mp4")
+        try:
+            _root.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(400, f"无法创建输出目录 {_root}: {e}") from e
     # 简单 GC：完成态任务超过 50 个时丢最旧的
     done_ids = [k for k, v in _trim_jobs.items() if v["state"] in ("done", "failed")]
     for k in done_ids[: max(0, len(done_ids) - 50)]:

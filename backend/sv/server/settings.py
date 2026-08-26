@@ -13,6 +13,7 @@ DEFAULTS = {
     "perf_sampling": True,  # 性能监控后台采样（CPU/GPU/内存，2s 一拍）
     "auto_update_check": True,  # 启动时自动检查 GitHub Releases 更新
     "parallel_streams": False,  # 双路并行：两进程分段同时推理（实测 +17~21%，显存翻倍）
+    "output_dir": "",  # 默认输出目录：空 = 与源视频同目录；超分任务/剪切未显式指定输出时写到这里（不存在则自动建）
 }
 
 SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
@@ -51,6 +52,10 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 auto_update_check 值: {v}")
             if k == "parallel_streams" and not isinstance(v, bool):
                 raise ValueError(f"非法 parallel_streams 值: {v}")
+            if k == "output_dir":
+                if not isinstance(v, str):
+                    raise ValueError(f"非法 output_dir 值: {v}")
+                v = v.strip()  # 目录不存在是合法状态：任务创建时才 mkdir 并报可读错误
             data[k] = v
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     # tmp + 原子换名：写一半崩溃/断电不留损坏的 JSON——load() 会静默吞

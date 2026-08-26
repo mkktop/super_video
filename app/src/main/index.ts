@@ -568,8 +568,28 @@ ipcMain.handle('dialog:pickDir', async () => {
   return r.canceled ? null : r.filePaths[0]
 })
 
+ipcMain.handle('dialog:pickImages', async () => {
+  // 图片超分：多选图片
+  const r = await dialog.showOpenDialog({
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tif', 'tiff'] },
+    ],
+  })
+  return r.canceled ? [] : r.filePaths
+})
+
+ipcMain.handle('fs:exists', async (_e, p: string) => {
+  const fs = await import('node:fs')
+  return !!p && fs.existsSync(p)
+})
+
 ipcMain.handle('shell:showInFolder', (_e, p: string) => {
   shell.showItemInFolder(p)
+})
+
+ipcMain.handle('shell:openPath', (_e, p: string) => {
+  if (p) void shell.openPath(p)
 })
 
 ipcMain.handle('dialog:pickModel', async () => {

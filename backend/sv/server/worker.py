@@ -93,6 +93,262 @@ def _read_child_events(proc, state: dict, started_cb=None) -> None:
         # started 等其余事件忽略（本进程已上报过）
 
 
+def _load_onnx_engine(
+    weight: Path,
+    spec,
+    scale: int,
+    variant: str | None,
+    precision: str,
+    tile: int,
+    warmup_hw: tuple[int, int],
+    *,
+    batch: int = 1,
+    log=None,
+) -> tuple["OnnxSrEngine", str]:
+    """构建并预热 onnx 推理引擎（视频/图片任务共用）。
+
+    含 fp16 惰性补转、TRT 组件激活与编译提示、显存不足自动减半 tile 重试。
+    warmup 必须用源帧真实尺寸：DML 会话跑过小形状后拖慢真实尺寸且不可逆。
+    返回 (engine, 实际使用精度)。失败向上抛，由调用方转 failed 事件。
+    """
+    # 惰性补转 fp16（一次），失败回退 fp32；spec.fp16=False 的模型（如 real-cugan，
+    # 转换后 ShapeInference 崩）直接用 fp32 原件
+    if precision == "fp16" and spec.fp16 and not weight.stem.endswith("_fp16"):
+        if log:
+            log({"type": "log", "line": f"生成 fp16 变体: {weight.name}"})
+        weight = ensure_fp16_file(weight)
+    used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
+
+    def _oom(e: Exception) -> bool:
+        t = str(e).lower()
+        return "memory" in t or "alloc" in t or "oom" in t
+
+    # 推理后端：设置 engine=trt 时走 TensorRT 链（TRT 不可用引擎层自动回退）
+    ort_device = "trt" if settings.load().get("engine") == "trt" else "auto"
+    if ort_device == "trt":
+        if getattr(sys, "frozen", False):
+            # 安装版：激活 TRT 组件（GPU 版 onnxruntime 重定向）。必须在
+            # 进程内首次 import onnxruntime 之前（OnnxSrEngine.load 惰性导入）；
+            # 组件缺失/不兼容返回 False → 引擎层自然回退 DML
+            from sv.engines.trt_runtime import activate_component
+
+            if activate_component():
+                if log:
+                    log({"type": "log", "line": "TensorRT 加速组件已加载"})
+        if log:
+            log({"type": "log", "line":
+                 "TensorRT 引擎加载中：新模型或新分辨率首次使用需编译引擎（约 1~2 分钟），完成后可直接加载"})
+    engine = None
+    for attempt in range(3):  # 显存不足自动降档：tile 逐步减半
+        try:
+            engine = OnnxSrEngine(
+                weight, scale, io=spec.io, tile=tile, batch=batch,
+                device=ort_device, validate_hw=warmup_hw)
+            engine.load()
+            import numpy as np
+            # 预热兼显存探测。必须用源帧真实尺寸：DML 会话一旦跑过 64x64 这类
+            # 小形状，后续真实尺寸的执行路径被拖慢且不可逆（实测 960x720：
+            # 25.7ms -> 38.5ms/帧，+50%；先小后大也无法自愈）
+            engine.process(np.zeros((warmup_hw[0], warmup_hw[1], 3), dtype=np.uint8))
+            break
+        except Exception as e:  # noqa: BLE001
+            # 最后一次尝试仍失败必须 raise：带着没加载成功的 engine 继续走，
+            # 后面会以更难懂的方式崩（如 provider_used AttributeError）
+            if not _oom(e) or tile in (1,) or attempt == 2:
+                raise
+            new_tile = 256 if tile == 0 else max(64, tile // 2)
+            if log:
+                log({"type": "log", "line":
+                     f"显存不足，分块大小调整为 {new_tile} 后重试"})
+            tile = new_tile
+    return engine, used_precision
+
+
+def _run_image_job(task: dict, params: dict, spec) -> int:
+    """图片超分作业（单张或批量一个任务）：一次模型加载，逐图 解码（含 EXIF
+    方向）→ 推理 → 原子落盘（.part + replace，取消/中断不留半个文件）。
+
+    单图失败跳过并记日志（个别坏图不拖垮整批），全部失败才算任务失败。
+    不走分段/checkpoint（单帧无意义）；取消靠 runner 杀进程兜底，已完成
+    的输出文件保留（runner._cleanup_partial 对图片任务豁免）。
+    """
+    import numpy as np
+    from PIL import Image, ImageOps
+
+    fmt = str(params.get("format") or "png").lower()
+    if fmt not in ("png", "jpg"):
+        emit({"type": "failed", "error": f"图片格式仅支持 png / jpg，当前 {fmt}"})
+        return 1
+    jpg_quality = int(params.get("jpg_quality", 92))
+    jpg_quality = min(100, max(60, jpg_quality))
+
+    images = params.get("images") or [
+        {"in": task["input_path"], "out": task["output_path"]}]
+    n = len(images)
+    if n == 0:
+        emit({"type": "failed", "error": "任务不含任何图片"})
+        return 1
+
+    # 首图尺寸：started 事件、自定义分辨率边界、引擎预热共用
+    try:
+        with Image.open(images[0]["in"]) as im:
+            width, height = ImageOps.exif_transpose(im).size
+    except Exception as e:  # noqa: BLE001
+        emit({"type": "failed", "error": f"无法读取图片 {Path(images[0]['in']).name}: {e}"})
+        return 1
+
+    scale = int(params.get("scale") or max(spec.scale))
+    if scale not in spec.scale:
+        emit({"type": "failed", "error": f"模型不支持 x{scale}"})
+        return 1
+    target = int(params.get("target_scale") or scale)
+    if not (1 <= target <= scale):
+        emit({"type": "failed", "error": f"目标倍率 x{target} 无效（1 ~ x{scale}）"})
+        return 1
+    # 自定义目标分辨率：仍只允许"原生超分后缩小"；批量已由创建端拒绝
+    tw = params.get("target_w")
+    th = params.get("target_h")
+    target_size = None
+    if tw is not None or th is not None:
+        if not (isinstance(tw, int) and isinstance(th, int)):
+            emit({"type": "failed", "error": "target_w/target_h 需同时提供整数宽高"})
+            return 1
+        if n > 1:
+            emit({"type": "failed", "error": "批量图片不支持自定义分辨率"})
+            return 1
+        if not (width <= tw <= width * scale and height <= th <= height * scale):
+            emit({"type": "failed", "error": (
+                f"目标分辨率 {tw}x{th} 超出范围（源 {width}x{height} ~ "
+                f"原生上限 {width * scale}x{height * scale}）"
+            )})
+            return 1
+        target_size = (tw, th)
+    tile = int(params.get("tile") or spec.tile_hint)
+
+    denoise = params.get("denoise")
+    variant = f"denoise{int(denoise)}" if denoise is not None else None
+    try:
+        from sv.models.registry import file_for_scale
+        need = file_for_scale(spec, scale, variant)
+        manager.ensure_files(spec, [need])
+    except Exception as e:  # 下载/校验失败
+        emit({"type": "failed", "error": f"模型文件不可用: {e}"})
+        return 1
+
+    emit({
+        "type": "started", "total_frames": n,
+        "src_w": width, "src_h": height,
+        "out_w": target_size[0] if target_size else width * target,
+        "out_h": target_size[1] if target_size else height * target,
+        "output": images[0]["out"],
+    })
+    t0 = time.perf_counter()
+
+    # ---- 引擎一次性加载（首图真实尺寸预热，后续图各自形状自然重配）----
+    try:
+        if spec.engine == "torch":
+            from sv.engines.torch_engine import TorchSrEngine
+
+            engine = TorchSrEngine(
+                model_file(spec, scale), scale, io=spec.io,
+                tile=tile or 512)
+            engine.load()
+        else:
+            precision = settings.load().get("precision", "fp32")
+            weight = model_file(spec, scale, precision, variant)
+            engine, _used = _load_onnx_engine(
+                weight, spec, scale, variant, precision, tile,
+                (height, width), batch=1, log=emit)
+    except Exception as e:  # noqa: BLE001 — worker 兜底，任何异常都要上报
+        emit({"type": "failed", "error": f"引擎加载失败 {type(e).__name__}: {e}"})
+        return 1
+
+    ok = 0
+    out_bytes_total = 0
+    failed_names: list[str] = []
+    first_pair: tuple[np.ndarray, np.ndarray] | None = None
+
+    for k, meta in enumerate(images):
+        src_p = Path(meta["in"])
+        name = src_p.name
+        try:
+            with Image.open(str(src_p)) as im:
+                img = ImageOps.exif_transpose(im)  # 手机竖拍按 EXIF 转正
+                frame = np.asarray(img.convert("RGB"), dtype=np.uint8)
+        except Exception as e:  # noqa: BLE001
+            emit({"type": "log", "line": f"跳过 {name}（无法读取: {e}）"})
+            failed_names.append(name)
+        else:
+            try:
+                out = engine.process(frame)  # 引擎统一 RGB 进 RGB 出
+                if target_size is not None and (out.shape[1], out.shape[0]) != target_size:
+                    out = np.asarray(
+                        Image.fromarray(out).resize(target_size, Image.LANCZOS).convert("RGB"))
+            except Exception as e:  # noqa: BLE001
+                emit({"type": "log", "line": f"跳过 {name}（推理失败: {type(e).__name__}: {e}）"})
+                failed_names.append(name)
+            else:
+                dst = Path(meta["out"])
+                tmp = dst.with_name(dst.name + f".{os.getpid()}.part")
+                try:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    result = Image.fromarray(out)
+                    if fmt == "jpg":
+                        result.save(str(tmp), "JPEG", quality=jpg_quality)
+                    else:
+                        result.save(str(tmp), "PNG")
+                    os.replace(tmp, dst)  # 原子：取消/中断不留半个文件
+                except Exception as e:  # noqa: BLE001
+                    tmp.unlink(missing_ok=True)
+                    emit({"type": "log", "line": f"跳过 {name}（写入失败: {e}）"})
+                    failed_names.append(name)
+                else:
+                    ok += 1
+                    out_bytes_total += dst.stat().st_size
+                    if first_pair is None:
+                        first_pair = (frame, out)
+        done_now = k + 1  # 进度按处理位数计（含失败），保证走满 total
+        el = time.perf_counter() - t0
+        emit({"type": "progress", "frames": done_now, "total": n,
+              "fps": round(done_now / el, 2) if el > 0 else 0,
+              "eta_sec": int((n - done_now) * el / done_now) if done_now else 0})
+
+    if ok == 0:
+        err = f"全部 {n} 张图片处理失败" + (f"（如 {failed_names[0]}）" if failed_names else "")
+        emit({"type": "failed", "error": err})
+        return 1
+
+    if failed_names:
+        emit({"type": "log", "line":
+              f"{len(failed_names)} 张失败/跳过: {', '.join(failed_names[:10])}"
+              + ("…" if len(failed_names) > 10 else "")})
+
+    # 预览缩略图（对照页/任务卡，取第一张成功的），失败不影响主流程
+    preview_dir = TEMP_DIR / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    def _thumb(arr: np.ndarray, path: Path) -> None:
+        try:
+            t = Image.fromarray(arr).convert("RGB")
+            t.thumbnail((960, 960))
+            t.save(str(path), quality=88)
+        except Exception:  # noqa: BLE001
+            pass
+
+    assert first_pair is not None
+    _thumb(first_pair[1], preview_dir / f"{task['id']}.jpg")
+    _thumb(first_pair[0], preview_dir / f"{task['id']}_src.jpg")
+
+    emit({
+        "type": "done", "frames": ok,
+        "elapsed": round(time.perf_counter() - t0, 1),
+        "out_bytes": out_bytes_total,
+        "preview": str(preview_dir / f"{task['id']}.jpg"),
+        "src_preview": str(preview_dir / f"{task['id']}_src.jpg"),
+    })
+    return 0
+
+
 def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     task = db.get_task(task_id)
     if task is None:
@@ -109,6 +365,10 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     except KeyError:
         emit({"type": "failed", "error": f"未知模型 {model_id}"})
         return 1
+
+    # 图片任务：单帧专用路径（无分段/checkpoint/补帧/音频），在视频探测前分岔
+    if params.get("kind") == "image":
+        return _run_image_job(task, params, spec)
 
     try:
         info = probe(input_path)
@@ -251,53 +511,10 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         return 0
 
     weight = model_file(spec, scale, precision, variant)
-    # 惰性补转 fp16（一次），失败回退 fp32；spec.fp16=False 的模型（如 real-cugan，
-    # 转换后 ShapeInference 崩）直接用 fp32 原件
-    if precision == "fp16" and spec.fp16 and not weight.stem.endswith("_fp16"):
-        emit({"type": "log", "line": f"生成 fp16 变体: {weight.name}"})
-        weight = ensure_fp16_file(weight)
-    used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
-
-    def _oom(e: Exception) -> bool:
-        t = str(e).lower()
-        return "memory" in t or "alloc" in t or "oom" in t
-
     tile = int(params.get("tile") or spec.tile_hint)
-    # 推理后端：设置 engine=trt 时走 TensorRT 链（TRT 不可用引擎层自动回退）
-    ort_device = "trt" if settings.load().get("engine") == "trt" else "auto"
-    if ort_device == "trt":
-        if getattr(sys, "frozen", False):
-            # 安装版：激活 TRT 组件（GPU 版 onnxruntime 重定向）。必须在
-            # 进程内首次 import onnxruntime 之前（OnnxSrEngine.load 惰性导入）；
-            # 组件缺失/不兼容返回 False → 引擎层自然回退 DML
-            from sv.engines.trt_runtime import activate_component
-
-            if activate_component():
-                emit({"type": "log", "line": "TensorRT 加速组件已加载"})
-        emit({"type": "log", "line":
-              "TensorRT 引擎加载中：新模型或新分辨率首次使用需编译引擎（约 1~2 分钟），完成后可直接加载"})
-    engine = None
-    for attempt in range(3):  # 显存不足自动降档：tile 逐步减半
-        try:
-            engine = OnnxSrEngine(
-                weight, scale, io=spec.io, tile=tile, batch=batch,
-                device=ort_device, validate_hw=(info.height, info.width))
-            engine.load()
-            import numpy as np
-            # 预热兼显存探测。必须用源帧真实尺寸：DML 会话一旦跑过 64x64 这类
-            # 小形状，后续真实尺寸的执行路径被拖慢且不可逆（实测 960x720：
-            # 25.7ms -> 38.5ms/帧，+50%；先小后大也无法自愈）
-            engine.process(np.zeros((info.height, info.width, 3), dtype=np.uint8))
-            break
-        except Exception as e:  # noqa: BLE001
-            # 最后一次尝试仍失败必须 raise：带着没加载成功的 engine 继续走，
-            # 后面会以更难懂的方式崩（如 provider_used AttributeError）
-            if not _oom(e) or tile in (1,) or attempt == 2:
-                raise
-            new_tile = 256 if tile == 0 else max(64, tile // 2)
-            emit({"type": "log", "line":
-                  f"显存不足，分块大小调整为 {new_tile} 后重试"})
-            tile = new_tile
+    engine, used_precision = _load_onnx_engine(
+        weight, spec, scale, variant, precision, tile,
+        (info.height, info.width), batch=batch, log=emit)
     emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
 
     preview_dir = TEMP_DIR / "previews"

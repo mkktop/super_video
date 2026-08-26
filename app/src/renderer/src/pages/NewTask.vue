@@ -42,8 +42,51 @@ const keepSubtitles = ref(false)
 const interp = ref<'off' | 'rife2x'>('off')
 const denoise = ref<number | null>(null)
 const output = ref('')
+const outputTouched = ref(false) // 用户手动改过路径后，自动填充不再覆盖（换文件时重置）
 const submitting = ref(false)
 const modelSec = ref<HTMLElement | null>(null)
+
+/** 设置里的全局输出目录；空 = 保存到源视频同目录 */
+const globalOutDir = computed(() => String(store.settings.output_dir ?? '').trim())
+const outPlaceholder = computed(() =>
+  globalOutDir.value ? globalOutDir.value : '默认与输入同目录',
+)
+// 批量任务不逐个填路径，由后端落到同一目录——界面上如实说明去向
+const batchDest = computed(() => globalOutDir.value || '源视频所在目录')
+
+function joinDefault(dir: string, name: string): string {
+  return `${dir.replace(/[\\/]+$/, '')}\\${name}`
+}
+
+/** 后端 _sr_output_name 的镜像：目录无同名 → 沿用原名；同名（含源文件本身）
+ *  → _倍率 后缀。异步查存在性，表单预填与实际创建保持一致。 */
+async function defaultOutputName(stem: string, fmt: string, srcPath: string): Promise<string> {
+  const suffix =
+    resMode.value === 'custom' ? `${effW.value}x${effH.value}` : `${targetScale.value}x`
+  const suffixed = `${stem}_${suffix}.${fmt}`
+  const outDir = globalOutDir.value || srcPath.replace(/[\\/][^\\/]*$/, '')
+  const plain = joinDefault(outDir, `${stem}.${fmt}`)
+  // 与源同路径（同目录同扩展名）时"同名文件"就是源本身，必须保后缀
+  if (plain.toLowerCase() !== srcPath.toLowerCase() && !(await window.sv.fsExists(plain))) {
+    return plain
+  }
+  return joinDefault(outDir, suffixed)
+}
+
+async function autoFillOutput() {
+  if (inputs.value.length !== 1 || outputTouched.value) return
+  const p = inputs.value[0]
+  const m = p.match(/^(.*?)(\.[^.]+)?$/)
+  const stem = (m?.[1] ?? p).split(/[\\/]/).pop() ?? p
+  if (isImage.value) {
+    output.value = joinDefault(
+      globalOutDir.value || p.replace(/[\\/][^\\/]*$/, ''),
+      `${stem}_${resMode.value === 'custom' ? `${effW.value}x${effH.value}` : targetScale.value}_frames`,
+    )
+    return
+  }
+  output.value = await defaultOutputName(stem, container.value, p)
+}
 
 // ---- 模型 ----
 const srModels = computed(() => store.models.filter((m) => m.kind !== 'interp'))
@@ -176,6 +219,7 @@ async function setInput(files: string[]) {
   const seq = ++probeSeq
   inputs.value = files
   probeInfo.value = null
+  outputTouched.value = false // 新一轮选文件：恢复自动填充
   if (files.length === 1) {
     probing.value = true
     const r = await api.probe(files[0])
@@ -191,7 +235,7 @@ async function setInput(files: string[]) {
         codec: '', pix_fmt: '', has_audio: false, subtitles: [],
       }
     }
-    autoFillOutput()
+    void autoFillOutput()
   }
 }
 
@@ -213,28 +257,22 @@ watch(
   },
 )
 
-function autoFillOutput() {
-  if (inputs.value.length === 1) {
-    const p = inputs.value[0]
-    const m = p.match(/^(.*?)(\.[^.]+)?$/)
-    const suffix =
-      resMode.value === 'custom' ? `${effW.value}x${effH.value}` : `${targetScale.value}x`
-    output.value = isImage.value
-      ? `${m?.[1]}_${suffix}_frames`
-      : `${m?.[1]}_${suffix}.${container.value}`
-  }
-}
-
-watch([targetScale, resMode, effW, effH, outKind, container], autoFillOutput)
+watch([targetScale, resMode, effW, effH, outKind, container], () => void autoFillOutput())
 
 async function pickOutputFile() {
   if (isImage.value) {
     const p = await window.sv.pickDir()
-    if (p) output.value = p
+    if (p) {
+      output.value = p
+      outputTouched.value = true // 用户显式选择的位置不再被自动填充覆盖
+    }
     return
   }
   const p = await window.sv.pickOutput(output.value || 'output.mp4')
-  if (p) output.value = p
+  if (p) {
+    output.value = p
+    outputTouched.value = true
+  }
 }
 
 // ---- 预设 ----
@@ -318,6 +356,7 @@ function reset() {
   probeInfo.value = null
   modelId.value = ''
   output.value = ''
+  outputTouched.value = false
 }
 
 const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
@@ -488,14 +527,21 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
               </NCollapseItem>
             </NCollapse>
             <NFormItem v-if="inputs.length === 1" label="输出到">
-              <NInput v-model:value="output" placeholder="默认与输入同目录">
+              <NInput
+                v-model:value="output"
+                :placeholder="outPlaceholder"
+                @update:value="() => (outputTouched = true)"
+              >
                 <template #suffix>
                   <NButton size="tiny" @click="pickOutputFile">浏览…</NButton>
                 </template>
               </NInput>
             </NFormItem>
             <NFormItem v-else-if="inputs.length > 1" label="批量说明">
-              <span class="batch-note">{{ inputs.length }} 个文件将使用以上相同参数依次入队（串行处理）</span>
+              <span class="batch-note">
+                {{ inputs.length }} 个文件将使用以上相同参数依次入队（串行处理），
+                输出到「{{ batchDest }}」；可在 设置 → 输出位置 修改默认目录
+              </span>
             </NFormItem>
           </div>
         </div>

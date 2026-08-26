@@ -24,11 +24,14 @@ contextBridge.exposeInMainWorld('sv', {
     return () => ipcRenderer.removeListener('app:update-ready', fn)
   },
   pickVideo: () => ipcRenderer.invoke('dialog:pickVideo') as Promise<string[]>,
+  pickImages: () => ipcRenderer.invoke('dialog:pickImages') as Promise<string[]>,
   pickOutput: (suggest: string) => ipcRenderer.invoke('dialog:pickOutput', suggest) as Promise<string | null>,
   pickDir: () => ipcRenderer.invoke('dialog:pickDir') as Promise<string | null>,
   pickModel: () => ipcRenderer.invoke('dialog:pickModel') as Promise<string | null>,
   saveLog: (content: string) => ipcRenderer.invoke('dialog:saveLog', content) as Promise<string | null>,
   showInFolder: (p: string) => ipcRenderer.invoke('shell:showInFolder', p),
+  fsExists: (p: string) => ipcRenderer.invoke('fs:exists', p) as Promise<boolean>,
+  openPath: (p: string) => ipcRenderer.invoke('shell:openPath', p) as Promise<void>,
   win: {
     minimize: () => ipcRenderer.send('win:minimize'),
     toggleMaximize: () => ipcRenderer.send('win:toggle-maximize'),

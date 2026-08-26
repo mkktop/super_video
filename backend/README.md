@@ -84,7 +84,7 @@ sv/
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
 scripts/               calibrate_color.py（IO 校准）、build_trt_component.py、bench_*.py（基准）
-tests/                 26+ 个测试文件（管线/引擎/服务层/并行/组件/回归）
+tests/                 30 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/回归）
 ```
 
 ## 模型 IO 约定（校准结论，2026-08-23 实测）
@@ -107,6 +107,6 @@ tests/                 26+ 个测试文件（管线/引擎/服务层/并行/组�
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 156 项（管线/引擎/服务层/并行/组件/下载器/回归；从 backend 目录跑）
+$py -m pytest tests/ -q          # 176 项（管线/引擎/服务层/并行/组件/下载器/图片超分/回归；从 backend 目录跑）
 $py scripts/bench.py             # 速度与内存基准表
 ```

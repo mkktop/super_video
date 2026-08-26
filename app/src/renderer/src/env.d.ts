@@ -3,7 +3,7 @@
 declare global {
   interface Window {
     sv: {
-      backendInfo: () => Promise<{ baseUrl: string }>
+      backendInfo: () => Promise<{ baseUrl: string; token?: string }>
       appVersion: () => Promise<string>
       checkUpdate: () => Promise<{
         status: string
@@ -18,10 +18,14 @@ declare global {
       onUpdateProgress: (cb: (percent: number) => void) => () => void
       onUpdateReady: (cb: (version: string) => void) => () => void
       pickVideo: () => Promise<string[]>
+      pickImages: () => Promise<string[]>
       pickOutput: (suggest: string) => Promise<string | null>
       pickModel: () => Promise<string | null>
       saveLog: (content: string) => Promise<string | null>
       showInFolder: (p: string) => void
+      fsExists: (p: string) => Promise<boolean>
+      pickDir: () => Promise<string | null>
+      openPath: (p: string) => Promise<void>
       win: {
         minimize: () => void
         toggleMaximize: () => void

@@ -65,7 +65,7 @@ super_video 是一款面向 Windows 的 AI 视频超分辨率桌面软件：通�
 
 ### 安装
 
-从 [Releases](https://github.com/mkktop/super_video/releases) 下载 `super_video_0.2.4_setup.exe`（基础包约 240MB），双击安装，无需管理员权限。
+从 [Releases](https://github.com/mkktop/super_video/releases) 下载 `super_video_0.2.5_setup.exe`（基础包约 240MB），双击安装，无需管理员权限。
 
 模型、TensorRT 组件、设置与任务历史统一存放在安装目录同级的 `super_video_data/` 目录——**升级或重装不会丢失任何数据**。应用内置自动更新：设置页检查更新 → 下载（带进度条）→ 重启静默安装，全程 sha512 校验。
 
@@ -125,7 +125,7 @@ cd app && pnpm install && pnpm build && npx electron .
 
 ```bash
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
-# 156 通过 + 1 跳过（无 GPU/部分模型缺失时按机器跳过）
+# 176 通过 + 1 跳过（无 GPU/部分模型缺失时按机器跳过）
 ```
 
 ### 打包发布

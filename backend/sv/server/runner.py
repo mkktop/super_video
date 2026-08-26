@@ -240,9 +240,22 @@ class Runner:
                               "status": "failed", "error": err})
 
     def _cleanup_partial(self, task: dict) -> None:
-        """取消/失败时删除半成品输出文件，不留给用户。"""
+        """取消/失败时删除半成品输出文件，不留给用户。
+
+        图片批量任务例外：逐图原子落盘（.part+replace），取消时已完成的
+        文件是完整成果，全部保留——只清可能残留的 .part 临时文件。
+        """
+        out = Path(task["output_path"])
+        if (task.get("params") or {}).get("kind") == "image":
+            import glob
+
+            for part in glob.glob(str(out.parent / "*.part")):
+                try:
+                    Path(part).unlink()
+                except OSError:
+                    pass
+            return
         try:
-            out = Path(task["output_path"])
             if out.exists():
                 out.unlink()
         except OSError:

@@ -249,7 +249,8 @@ export const api = {
     return _fetch(`${baseUrl}/api/trt-component`, { method: 'DELETE' })
   },
   async createTask(body: {
-    input: string
+    input?: string
+    inputs?: string[]
     output?: string
     model_id: string
     params: Record<string, unknown>

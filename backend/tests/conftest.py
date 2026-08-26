@@ -30,6 +30,22 @@ def _isolated_sv_db(tmp_path_factory):
         os.environ["SV_DB"] = old
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _no_local_sidecar_token():
+    """API 测试一律视为无本地令牌（会话级早于任何模块级 client 夹具生效）。
+
+    开发机常有正在运行的 sidecar 在 DATA_ROOT/.tmp/sidecar.token 落了令牌，
+    鉴权中间件按请求时读到它就会把无令牌的 TestClient 请求全判 401——
+    测试是否通过取决于"机器上是否恰好在跑应用"，这种环境耦合必须掐断。
+    """
+    from sv.server import app as _app
+
+    orig = _app._expected_tokens
+    _app._expected_tokens = lambda: []
+    yield
+    _app._expected_tokens = orig
+
+
 def dml_available() -> bool:
     """当前机器能否创建 DML 会话（无显卡机器/CI runner 为 False）。"""
     global _DML_CACHE

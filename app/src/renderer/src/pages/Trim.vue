@@ -31,13 +31,12 @@ const duration = computed(() => probeInfo.value?.duration_s ?? 0)
 const selDur = computed(() => Math.max(0, endSec.value - startSec.value))
 const busy = computed(() => job.value?.state === 'queued' || job.value?.state === 'running')
 
-const range = computed<[number, number]>({
-  get: () => [startSec.value, endSec.value],
-  set: (v) => {
-    startSec.value = v[0]
-    endSec.value = v[1]
-  },
-})
+// NSlider range 的入出都是 number[]：读侧给快照，写侧显式落回两个 ref
+const sliderRange = computed(() => [startSec.value, endSec.value])
+function onRangeChange(v: (string | number)[]) {
+  startSec.value = Number(v[0] ?? 0)
+  endSec.value = Number(v[1] ?? 0)
+}
 
 const fmt = (s: number) => {
   const m = Math.floor(s / 60)
@@ -219,12 +218,13 @@ function toSr() {
         <div class="row">
           <span class="lbl">选择区间</span>
           <NSlider
-            v-model:value="range"
+            :value="sliderRange"
             range
             :min="0"
             :max="Math.max(duration, 0.1)"
             :step="0.1"
             :format-tooltip="(v: number) => fmt(v)"
+            @update:value="onRangeChange"
             class="slider"
           />
         </div>

@@ -204,11 +204,21 @@ def test_eventbus_publish_threadsafe():
 
 # ---- 本地 token 鉴权：无令牌 401，健康检查豁免，WS 自查 ----
 
+def _token_file_tokens(tdir: Path) -> set[str]:
+    """镜像 _expected_tokens 的文件源：TEMP_DIR/sidecar.token 内容。"""
+    f = Path(tdir) / "sidecar.token"
+    return {f.read_text(encoding="utf-8").strip()} if f.exists() else set()
+
+
 def test_token_auth(monkeypatch, tmp_path):
     import sv.server.app as app_mod
 
     monkeypatch.setenv("SV_TOKEN", "sekrit")
     monkeypatch.setattr(app_mod, "TEMP_DIR", tmp_path)  # token 文件源也隔离
+    # 覆盖会话级免疫补丁（conftest._no_local_sidecar_token）：本测试专测鉴权行为
+    monkeypatch.setattr(
+        app_mod, "_expected_tokens",
+        lambda: {os.environ.get("SV_TOKEN", "")} | _token_file_tokens(tmp_path))
     with TestClient(app_mod.app) as c:
         assert c.get("/api/health").status_code == 200  # 复用探测豁免
         assert c.get("/api/tasks").status_code == 401  # 无令牌拒绝

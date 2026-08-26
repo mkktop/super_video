@@ -20,7 +20,11 @@ const canCompare = computed(
   () => !!props.task.preview_src && !!props.task.preview_path,
 )
 
-const fileName = computed(() => props.task.input_path.split(/[\\/]/).pop() ?? '')
+const fileName = computed(() => {
+  const base = props.task.input_path.split(/[\\/]/).pop() ?? ''
+  const imgs = props.task.params?.images as { in: string }[] | undefined
+  return imgs && imgs.length > 1 ? `${base} 等 ${imgs.length} 张图片` : base
+})
 const outName = computed(() => props.task.output_path.split(/[\\/]/).pop() ?? '')
 const modelName = computed(
   () => store.models.find((m) => m.id === props.task.model_id)?.name ?? props.task.model_id,

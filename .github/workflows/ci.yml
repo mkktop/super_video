@@ -63,7 +63,10 @@ jobs:
 
       - name: 类型检查
         working-directory: app
-        run: npx vue-tsc --noEmit -p tsconfig.json
+        # 两个子项目都要显式检查：根 tsconfig.json 只有 files:[]，指向它会静默跳过
+        run: |
+          npx vue-tsc --noEmit -p tsconfig.node.json
+          npx vue-tsc --noEmit -p tsconfig.web.json
 
       - name: 构建
         working-directory: app

@@ -63,7 +63,8 @@ export const ui = reactive({
     | 'perf'
     | 'logs'
     | 'settings'
-    | 'compare',
+    | 'compare'
+    | 'imagesr',
   compareTaskId: null as string | null,
   pendingInput: null as string | null, // 跳转新建任务页时预填的输入（剪切→超分衔接）
 })
@@ -243,7 +244,7 @@ function connectWs() {
 export async function checkAppUpdate() {
   try {
     const r = await window.sv.checkUpdate()
-    store.update.status = r.status
+    store.update.status = r.status as typeof store.update.status
     store.update.version = r.version ?? ''
     store.update.current = r.current ?? ''
     store.update.notes = r.notes ?? ''
