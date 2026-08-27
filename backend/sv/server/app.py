@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from .. import __version__
@@ -28,7 +28,7 @@ from ..models.registry import (
     load_registry,
     model_dir,
 )
-from ..paths import ROOT, TEMP_DIR, migrate_legacy_data
+from ..paths import ROOT, SR_LOG_DIR, TEMP_DIR, migrate_legacy_data
 from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
 from ..pipeline.trim import run_trim
 from . import compare
@@ -112,6 +112,7 @@ async def lifespan(app: FastAPI):
     await loop.run_in_executor(None, migrate_legacy_data)
     db.init_db()
     await loop.run_in_executor(None, sweep_orphan_workdirs)
+    await loop.run_in_executor(None, gc_sr_logs)
     _start_trim_worker()
     compare.start(bus)
     runner.start()
@@ -737,9 +738,30 @@ def _with_queue_pos(tasks: list[dict]) -> list[dict]:
     return tasks
 
 
+def sr_log_ids() -> set[str]:
+    """已有性能日志的任务 id 集合（一次 listdir，标注列表用）。"""
+    try:
+        return {p[:-4] for p in os.listdir(SR_LOG_DIR) if p.endswith(".log")}
+    except OSError:
+        return set()
+
+
 @app.get("/api/tasks")
 def get_tasks() -> list[dict]:
-    return _with_queue_pos(db.list_tasks())
+    logs = sr_log_ids()
+    out = _with_queue_pos(db.list_tasks())
+    for t in out:
+        t["has_sr_log"] = t["id"] in logs
+    return out
+
+
+@app.get("/api/tasks/{task_id}/sr-log")
+def task_sr_log(task_id: str):
+    """超分性能日志文本（sr_profiling 开启时任务结束落盘；无则 404）。"""
+    p = SR_LOG_DIR / f"{task_id}.log"
+    if not p.is_file():
+        raise HTTPException(404, "该任务没有性能日志")
+    return PlainTextResponse(p.read_text(encoding="utf-8", errors="replace"))
 
 
 @app.get("/api/stats")
@@ -752,6 +774,7 @@ def get_task(task_id: str) -> dict:
     t = db.get_task(task_id)
     if t is None:
         raise HTTPException(404)
+    t["has_sr_log"] = task_id in sr_log_ids()
     return t
 
 
@@ -781,7 +804,7 @@ async def remove_task(task_id: str) -> dict:
 
 
 def purge_task_files(task_id: str) -> None:
-    """删除任务专属临时产物：分段/分块工作目录 + 预览图。"""
+    """删除任务专属临时产物：分段/分块工作目录 + 预览图 + 性能日志。"""
     for d in (TEMP_DIR / "segmented" / task_id, TEMP_DIR / "chunked" / task_id):
         shutil.rmtree(d, ignore_errors=True)
     pv = TEMP_DIR / "previews"
@@ -791,6 +814,10 @@ def purge_task_files(task_id: str) -> None:
                 p.unlink()
             except OSError:
                 pass
+    try:
+        (SR_LOG_DIR / f"{task_id}.log").unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def sweep_orphan_workdirs(max_age_s: float = 3600.0) -> None:
@@ -811,6 +838,24 @@ def sweep_orphan_workdirs(max_age_s: float = 3600.0) -> None:
                     shutil.rmtree(d, ignore_errors=True)
             except OSError:
                 continue
+
+
+def gc_sr_logs(keep: int = 200) -> int:
+    """性能日志留最近 keep 份（按修改时间），防止长年累月无界增长。"""
+    try:
+        files = sorted(
+            (p for p in SR_LOG_DIR.iterdir() if p.suffix == ".log"),
+            key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return 0
+    removed = 0
+    for p in files[keep:]:
+        try:
+            p.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 class TaskReorder(BaseModel):
@@ -1038,6 +1083,22 @@ def _compare_view(job: dict) -> dict:
             for e in job["entries"]
         ],
     }
+
+
+@app.get("/api/compare/cache")
+def compare_cache_stats() -> dict:
+    """对比产物占用统计（设置页展示）。注意必须注册在 /{job_id} 之前，
+    否则 "cache" 会被当作 job_id 吞掉。"""
+    return compare.cache_stats()
+
+
+@app.delete("/api/compare/cache")
+def clear_compare_cache() -> dict:
+    """清理全部对比产物并清空记录；有排队/运行中的作业时拒绝。"""
+    try:
+        return compare.clear_cache()
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
 
 
 @app.get("/api/compare/{job_id}")

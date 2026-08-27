@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   fps REAL DEFAULT 0, total_frames INTEGER DEFAULT 0,
   progress_frames INTEGER DEFAULT 0,
   fps_run REAL DEFAULT 0, eta_sec REAL DEFAULT 0,
+  fps_avg REAL DEFAULT 0,                -- 完成时落定的平均速度（总帧数÷本轮用时）
   error TEXT, preview_path TEXT,
   out_bytes INTEGER DEFAULT 0, elapsed_s REAL DEFAULT 0,
   queue_order REAL DEFAULT 0             -- 排队顺序（拖拽排序）；running 取任务时保留原值
@@ -67,6 +68,7 @@ def init_db() -> None:
             "ALTER TABLE tasks ADD COLUMN preview_src TEXT",
             "ALTER TABLE tasks ADD COLUMN elapsed_s REAL DEFAULT 0",
             "ALTER TABLE tasks ADD COLUMN queue_order REAL DEFAULT 0",
+            "ALTER TABLE tasks ADD COLUMN fps_avg REAL DEFAULT 0",
         ):
             try:
                 c.execute(ddl)

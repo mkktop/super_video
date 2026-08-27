@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -26,6 +26,60 @@ const polling = ref<ReturnType<typeof setInterval> | null>(null)
 const videoEl = ref<HTMLVideoElement | null>(null)
 const previewBroken = ref(false) // 浏览器解不了的格式（AVI/WMV 等）：无预览但剪切不受影响
 let probeSeq = 0 // 快速重选文件时丢弃迟到的旧 probe 响应（旧数据覆盖新文件的竞态）
+
+// ---- 最近输入（与新建任务页共用 sv_recent_videos；点芯片直接切换，不必重开系统对话框） ----
+const RECENT_KEY = 'sv_recent_videos'
+const VIDEO_EXT = /\.(mp4|mkv|mov|avi|webm|flv|ts|m4v|wmv)$/i
+const recents = ref<string[]>([])
+
+const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p
+
+onMounted(async () => {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
+    recents.value = Array.isArray(list) ? list.filter((x) => typeof x === 'string') : []
+  } catch {
+    recents.value = []
+  }
+  const ok: string[] = []
+  for (const p of recents.value) {
+    if (await window.sv.fsExists(p)) ok.push(p)
+  }
+  recents.value = ok.slice(0, 6)
+})
+
+function pushRecent(paths: string[]) {
+  const list = [...paths, ...recents.value.filter((x) => !paths.includes(x))].slice(0, 6)
+  recents.value = list
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list))
+  } catch {
+    /* 存储不可用只是少了快捷入口 */
+  }
+}
+
+function pickRecent(p: string) {
+  if (busy.value || p === input.value) return
+  void load(p)
+}
+
+// ---- 拖拽换片：整个页面都是放置区（File.path 已移除，路径经 webUtils 取） ----
+const dragDepth = ref(0)
+function onDragEnter(e: DragEvent) {
+  if (!e.dataTransfer?.types.includes('Files')) return
+  dragDepth.value++
+}
+function onDragLeave() {
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+}
+function onDropFiles(e: DragEvent) {
+  dragDepth.value = 0
+  if (busy.value) return
+  const vids = [...(e.dataTransfer?.files ?? [])]
+    .filter((f) => VIDEO_EXT.test(f.name))
+    .map((f) => window.sv.pathForFile(f))
+  if (vids.length) void load(vids[0])
+}
 
 const videoUrl = computed(() => (input.value ? mediaSrc(input.value) : ''))
 const duration = computed(() => probeInfo.value?.duration_s ?? 0)
@@ -59,6 +113,7 @@ async function load(path: string) {
   previewBroken.value = false
   outputTouched.value = false // 换文件：恢复自动填充
   probing.value = true
+  pushRecent([path])
   const r = await api.probe(path)
   if (seq !== probeSeq) return // 已重选其他文件：丢弃过期响应
   probing.value = false
@@ -68,9 +123,27 @@ async function load(path: string) {
     endSec.value = Math.min(probeInfo.value.duration_s, 30)
     autoFillOutput()
   } else {
+    // 换到读不了的视频：清掉上一部的区间/输出残留，动作按钮因 selDur=0 自然禁用
+    startSec.value = 0
+    endSec.value = 0
+    output.value = ''
     const e = await r.json()
     message.error(`无法读取视频: ${e.detail ?? r.status}`)
   }
+}
+
+/** 移除当前视频回到初始空状态（剪切进行中不允许，避免丢任务卡） */
+function removeVideo() {
+  stopPolling()
+  jobId.value = ''
+  input.value = ''
+  probeInfo.value = null
+  job.value = null
+  previewBroken.value = false
+  outputTouched.value = false
+  output.value = ''
+  startSec.value = 0
+  endSec.value = 0
 }
 
 function autoFillOutput() {
@@ -107,11 +180,13 @@ function seekTo(t: number) {
   if (videoEl.value) videoEl.value.currentTime = t
 }
 
-async function startCut(andSr: boolean) {
+/** 剪切目的地：仅保存 / 剪完带产物去超分 / 剪完带产物去模型对比 */
+async function startCut(dest: 'save' | 'sr' | 'cmp') {
   if (!input.value || selDur.value <= 0.05) {
     message.error('请先选择视频并设置有效的入点/出点')
     return
   }
+  stopPolling() // 上一次任务若仍在轮询（异常残留），先掐掉再起新的
   job.value = null
   try {
     const r = await api.createTrim({
@@ -134,7 +209,12 @@ async function startCut(andSr: boolean) {
           stopPolling()
           if (j.state === 'done') {
             message.success(`剪切完成: ${j.duration_s?.toFixed(1) ?? '?'}s`)
-            if (andSr) openWizardWith(j.output)
+            // 自动跳转只在用户还停在剪切页时执行；已切去别的页就不拽人，
+            // 结果卡上的「去超分 / 去对比模型」按钮随时可手动续接
+            if (ui.page === 'trim') {
+              if (dest === 'sr') openWizardWith(j.output)
+              else if (dest === 'cmp') toCompareWith(j.output)
+            }
           } else if (j.state === 'failed') {
             message.error(`剪切失败: ${j.error}`)
           }
@@ -159,6 +239,10 @@ function stopPolling() {
 
 // 组件随页面切换即卸载：不停轮询会泄漏持有闭包的 interval（反复进出累积）
 onBeforeUnmount(stopPolling)
+// KeepAlive 常驻后切页只是"隐藏"：不主动暂停的话预览的声音会一直响
+onDeactivated(() => {
+  if (videoEl.value && !videoEl.value.paused) videoEl.value.pause()
+})
 
 const jobId = ref('')
 
@@ -176,13 +260,12 @@ function toSr() {
   if (job.value?.output) openWizardWith(job.value.output)
 }
 
-/** 当前入出点区间直达模型对比页（不实际剪切落盘，对比时自行取段） */
-function toCompare() {
-  if (!input.value || selDur.value <= 0.05) return
+/** 剪切产物直达模型对比页：区间已落成文件，对比页内还能自由调整取段（≤20s） */
+function toCompareWith(file: string) {
   ui.pendingCompare = {
-    input: input.value,
-    start_s: startSec.value,
-    end_s: endSec.value,
+    input: file,
+    start_s: 0,
+    end_s: Math.max(1, Math.min(selDur.value, 20)),
   }
   ui.page = 'mcompare'
 }
@@ -194,17 +277,43 @@ export default { name: 'Trim' }
 </script>
 
 <template>
-  <div class="trim-page">
+  <div
+    class="trim-page"
+    @dragenter="onDragEnter"
+    @dragover.prevent
+    @dragleave="onDragLeave"
+    @drop.prevent="onDropFiles"
+  >
+    <div v-if="dragDepth" class="drop-mask">
+      <div class="drop-tip">松开即可载入视频</div>
+    </div>
     <h2 class="title">视频剪切</h2>
     <p class="subtitle">精确转码 · 帧精确 · 剪切完成后可直接加入超分队列</p>
 
-    <NButton v-if="!input" dashed block size="large" @click="pick">
-      点击选择视频文件
+    <div v-if="recents.length" class="recents">
+      <span class="recents-label">最近：</span>
+      <button
+        v-for="p in recents"
+        :key="p"
+        class="recent-chip"
+        :class="{ current: p === input }"
+        :title="p"
+        @click="pickRecent(p)"
+      >
+        {{ baseName(p) }}
+      </button>
+    </div>
+
+    <NButton v-if="!input" dashed block size="large" style="margin-top: 12px" @click="pick">
+      点击选择视频文件（也可直接拖进窗口）
     </NButton>
 
     <template v-else>
       <div class="head">
-        <NButton size="small" quaternary @click="pick">重选视频</NButton>
+        <NButton size="small" quaternary :disabled="busy" @click="pick">重选视频</NButton>
+        <NButton size="small" quaternary type="error" :disabled="busy" @click="removeVideo">
+          移除
+        </NButton>
         <NTag v-if="probeInfo" size="small" :bordered="false">
           {{ probeInfo.width }}x{{ probeInfo.height }} · {{ probeInfo.fps }}fps · {{ fmt(duration) }}
         </NTag>
@@ -266,15 +375,15 @@ export default { name: 'Trim' }
       </NCard>
 
       <div class="actions">
-        <NButton :disabled="busy || selDur <= 0.05" :loading="busy" @click="startCut(false)">
+        <NButton :disabled="busy || selDur <= 0.05" :loading="busy" @click="startCut('save')">
           剪切保存
         </NButton>
-        <NButton type="primary" :disabled="busy || selDur <= 0.05" @click="startCut(true)">
+        <NButton type="primary" :disabled="busy || selDur <= 0.05" @click="startCut('sr')">
           剪切并去超分 →
         </NButton>
-        <!-- 不落盘：只把当前入出点区间带去模型对比页（用精确选好的这段试模型） -->
-        <NButton :disabled="busy || selDur <= 0.05" @click="toCompare">
-          拿这段对比模型 →
+        <!-- 先落盘剪切，完成后自动带着剪切文件进模型对比页（选模型并排跑） -->
+        <NButton type="primary" ghost :disabled="busy || selDur <= 0.05" @click="startCut('cmp')">
+          剪切并去对比模型 →
         </NButton>
         <NButton v-if="busy" quaternary type="warning" @click="cancelCut">取消</NButton>
       </div>
@@ -293,6 +402,9 @@ export default { name: 'Trim' }
           <div class="res-btns">
             <NButton size="small" @click="openFolder">打开所在文件夹</NButton>
             <NButton size="small" type="primary" @click="toSr">去超分</NButton>
+            <NButton size="small" type="primary" ghost @click="toCompareWith(job.output)">
+              去对比模型 →
+            </NButton>
           </div>
         </template>
         <template v-else-if="job.state === 'canceled'">
@@ -311,6 +423,39 @@ export default { name: 'Trim' }
 .title { font-size: 20px; font-weight: 600; margin-bottom: 2px; }
 .subtitle { font-size: 13px; color: #9aa0a6; margin-bottom: 16px; }
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.recents { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.recents-label { font-size: 12px; color: #9aa0a6; }
+.recent-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 240px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  border: 1px solid #33373d;
+  background: #1c1e21;
+  color: #c6cad0;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s, color 0.15s;
+}
+.recent-chip:hover { border-color: #4f8cff; color: #fff; }
+.recent-chip.current { border-color: #4f8cff; color: #fff; cursor: default; }
+/* 拖拽遮罩：拖文件进窗口时整页高亮 */
+.drop-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(13, 14, 16, 0.72);
+  border: 2px dashed #4f8cff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.drop-tip { font-size: 18px; font-weight: 600; color: #e8eaed; letter-spacing: 1px; }
 .preview-wrap { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; position: relative; }
 .preview {
   width: 100%;

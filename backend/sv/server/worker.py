@@ -28,7 +28,7 @@ from sv.engines.rife import Rife2x
 from sv.models import manager
 from sv.models.fp16 import ensure_fp16_file
 from sv.models.registry import get_model, model_file
-from sv.paths import TEMP_DIR
+from sv.paths import SR_LOG_DIR, TEMP_DIR
 from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
 from sv.pipeline.segmented import SegmentedPipeline
 from sv.pipeline.stream import EncodeOpts, PipelineError, RunStats, TaskCanceled
@@ -50,6 +50,58 @@ def _encode_opts(params: dict, out_kind: str) -> EncodeOpts:
 
 def emit(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False), flush=True)
+
+
+# ---- 超分性能日志（设置 sr_profiling 开启时生效）----
+# 任务结束把"引擎配置 + 分段耗时明细 + 汇总"落到 SR_LOG_DIR/<task_id>.log，
+# 供分析速度瓶颈（推理慢/解码跟不上/编码拖后腿/引擎加载占比）。旁路功能：
+# 任何写入失败静默忽略，绝不影响任务本身。
+
+
+def _prof_enabled() -> bool:
+    return bool(settings.load().get("sr_profiling"))
+
+
+def _prof_write(task_id: str, text: str) -> None:
+    try:
+        SR_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with (SR_LOG_DIR / f"{task_id}.log").open("a", encoding="utf-8") as f:
+            f.write(text)
+    except OSError:
+        pass
+
+
+def _prof_write_video_header(task_id: str, ctx: dict) -> None:
+    seg_txt = (f"分段 ≈{ctx['seg']}帧 x {ctx['n_segs']}段" if ctx["n_segs"]
+               else f"分块 {ctx['seg']}帧")
+    lines = [
+        f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} 运行开始 ====",
+        f"模型 {ctx['model']} · 推理后端 {ctx['provider']} · 精度 {ctx['precision']}"
+        f" · GPU前后处理包装 {'开' if ctx['u8'] else '关'}",
+        f"设置 engine={ctx['engine_setting']} · tile={ctx['tile']} · batch={ctx['batch']}"
+        f" · 补帧={ctx['interp']}",
+        f"源 {ctx['src_w']}x{ctx['src_h']} @{ctx['fps']:.3f}fps {ctx['frames']}帧"
+        f" → 目标 {ctx['target']}",
+        f"引擎加载+预热 {ctx['load_s']:.1f}s · {seg_txt}"
+        f" · 双路并行 {'是(2进程)' if ctx['parallel'] else '否'}"
+        f" · 断点续跑 {'是(跳过已完成段)' if ctx['resumed'] else '否'}",
+    ]
+    _prof_write(task_id, "\n".join(lines) + "\n")
+
+
+def _prof_collect(task_id: str, work: Path) -> None:
+    """任务成功收尾：把工作目录里的分段耗时明细（SegmentedPipeline 逐段落盘）
+    并入持久日志。工作目录本身的清理仍由调用方原逻辑负责。"""
+    perf_file = work / "perf_stages.jsonl"
+    try:
+        if perf_file.exists():
+            body = perf_file.read_text(encoding="utf-8")
+            _prof_write(task_id,
+                        "---- 分段耗时明细（jsonl，每行一段；summary 行 ms_per_frame"
+                        " 为各阶段毫秒/帧拆解，infer=推理 read=解码 write=编码）----\n"
+                        + body)
+    except OSError:
+        pass
 
 
 def _spawn_shard_child(task_id: str):
@@ -253,6 +305,8 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         "output": images[0]["out"],
     })
     t0 = time.perf_counter()
+    t_load = time.perf_counter()
+    used_prec = "fp16-autocast"
 
     # ---- 引擎一次性加载（首图真实尺寸预热，后续图各自形状自然重配）----
     try:
@@ -266,21 +320,24 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         else:
             precision = settings.load().get("precision", "fp32")
             weight = model_file(spec, scale, precision, variant)
-            engine, _used = _load_onnx_engine(
+            engine, used_prec = _load_onnx_engine(
                 weight, spec, scale, variant, precision, tile,
                 (height, width), batch=1, log=emit)
     except Exception as e:  # noqa: BLE001 — worker 兜底，任何异常都要上报
         emit({"type": "failed", "error": f"引擎加载失败 {type(e).__name__}: {e}"})
         return 1
+    load_s = time.perf_counter() - t_load
 
     ok = 0
     out_bytes_total = 0
     failed_names: list[str] = []
+    t_dec = t_inf = t_sav = 0.0  # 剖析口径：解码 / 推理 / 编码落盘 合计
     first_pair: tuple[np.ndarray, np.ndarray] | None = None
 
     for k, meta in enumerate(images):
         src_p = Path(meta["in"])
         name = src_p.name
+        _t = time.perf_counter()
         try:
             with Image.open(str(src_p)) as im:
                 img = ImageOps.exif_transpose(im)  # 手机竖拍按 EXIF 转正
@@ -289,6 +346,8 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
             emit({"type": "log", "line": f"跳过 {name}（无法读取: {e}）"})
             failed_names.append(name)
         else:
+            t_dec += time.perf_counter() - _t
+            _t = time.perf_counter()
             try:
                 out = engine.process(frame)  # 引擎统一 RGB 进 RGB 出
                 if target_size is not None and (out.shape[1], out.shape[0]) != target_size:
@@ -298,6 +357,8 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                 emit({"type": "log", "line": f"跳过 {name}（推理失败: {type(e).__name__}: {e}）"})
                 failed_names.append(name)
             else:
+                t_inf += time.perf_counter() - _t
+                _t = time.perf_counter()
                 dst = Path(meta["out"])
                 tmp = dst.with_name(dst.name + f".{os.getpid()}.part")
                 try:
@@ -313,6 +374,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                     emit({"type": "log", "line": f"跳过 {name}（写入失败: {e}）"})
                     failed_names.append(name)
                 else:
+                    t_sav += time.perf_counter() - _t
                     ok += 1
                     out_bytes_total += dst.stat().st_size
                     if first_pair is None:
@@ -332,6 +394,17 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         emit({"type": "log", "line":
               f"{len(failed_names)} 张失败/跳过: {', '.join(failed_names[:10])}"
               + ("…" if len(failed_names) > 10 else "")})
+
+    if _prof_enabled():
+        el = time.perf_counter() - t0
+        _prof_write(task["id"], "\n".join([
+            f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} 图片超分任务 ====",
+            f"模型 {spec.id} · 推理后端 {'/'.join(engine.provider_used) if hasattr(engine, 'provider_used') else 'torch'}"
+            f" · 精度 {used_prec} · tile={tile} · {n}张 → {fmt.upper()}",
+            f"引擎加载 {load_s:.1f}s · 解码合计 {t_dec:.2f}s · 推理合计 {t_inf:.2f}s"
+            f" · 编码落盘合计 {t_sav:.2f}s",
+            f"成功 {ok}/{n} 张 · 总用时 {el:.1f}s · 平均 {ok / el if el > 0 else 0:.2f} 张/秒（端到端口径）",
+        ]) + "\n\n")
 
     # 预览缩略图（对照页/任务卡，取第一张成功的），失败不影响主流程
     preview_dir = TEMP_DIR / "previews"
@@ -469,17 +542,34 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         batch = 1
 
     t0 = time.perf_counter()
+    prof = _prof_enabled()
     precision = settings.load().get("precision", "fp32")
     if spec.engine == "torch":
         # ---- torch 路径：分块管线 + checkpoint 续跑（PyTorch CUDA 环境）----
         from sv.engines.torch_engine import TorchSrEngine
         from sv.pipeline.chunked import ChunkedPipeline
 
+        t_load = time.perf_counter()
         engine = TorchSrEngine(
             model_file(spec, scale), scale, io=spec.io,
             tile=int(params.get("tile") or 512),
         )
         engine.load()
+        if prof:
+            _prof_write_video_header(task_id, {
+                "model": spec.id, "provider": str(getattr(engine, "provider_used", "?")),
+                "precision": "fp16-autocast", "u8": False,
+                "engine_setting": "cuda(torch)", "tile": int(params.get("tile") or 512),
+                "batch": 1, "interp": interp_mode,
+                "src_w": info.width, "src_h": info.height, "fps": info.fps,
+                "frames": info.total_frames,
+                "target": (f"{target_size[0]}x{target_size[1]}" if target_size
+                           else f"x{target}（{info.width * target}x{info.height * target}）"),
+                "load_s": time.perf_counter() - t_load,
+                "seg": int(params.get("chunk") or 32), "n_segs": 0,
+                "parallel": False,
+                "resumed": (TEMP_DIR / "chunked" / task_id).exists(),
+            })
         emit({"type": "loaded", "provider": engine.provider_used, "precision": "fp16-autocast"})
 
         preview_dir = TEMP_DIR / "previews"
@@ -511,6 +601,10 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         except Exception as e:  # noqa: BLE001
             emit({"type": "failed", "error": f"{type(e).__name__}: {e}"})
             return 1
+        if prof:
+            _fps = stats.frames / stats.elapsed_s if stats.elapsed_s > 0 else 0
+            _prof_write(task_id, f"==== 运行结束 {stats.frames}帧 · {stats.elapsed_s:.1f}s"
+                        f" · 平均 {_fps:.2f} fps（端到端口径） ====\n\n")
         emit({
             "type": "done", "frames": stats.frames,
             "elapsed": round(stats.elapsed_s, 1),
@@ -522,9 +616,11 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
 
     weight = model_file(spec, scale, precision, variant)
     tile = int(params.get("tile") or spec.tile_hint)
+    t_load = time.perf_counter()
     engine, used_precision = _load_onnx_engine(
         weight, spec, scale, variant, precision, tile,
         (info.height, info.width), batch=batch, log=emit)
+    load_s = time.perf_counter() - t_load
     emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
 
     preview_dir = TEMP_DIR / "previews"
@@ -548,6 +644,23 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     )
     child = None
     child_state: dict = {"frames": 0, "done": False, "error": None}
+
+    if prof and shard is None:
+        _prof_write_video_header(task_id, {
+            "model": spec.id,
+            "provider": "/".join(engine.provider_used or []) or "?",
+            "precision": used_precision,
+            "u8": bool(getattr(engine, "u8_wrapped", False)),
+            "engine_setting": settings.load().get("engine", "auto"),
+            "tile": tile, "batch": batch, "interp": interp_mode,
+            "src_w": info.width, "src_h": info.height, "fps": info.fps,
+            "frames": info.total_frames,
+            "target": (f"{target_size[0]}x{target_size[1]}" if target_size
+                       else f"x{target}（{info.width * target}x{info.height * target}）"),
+            "load_s": load_s, "seg": seg_est, "n_segs": n_segs,
+            "parallel": parallel,
+            "resumed": (TEMP_DIR / "segmented" / task_id / "checkpoint.json").exists(),
+        })
 
     if parallel:
         child = _spawn_shard_child(task_id)
@@ -593,7 +706,8 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         target_size=target_size,
         interp=interp,
         shard=my_shard, nshards=my_nshards,
-        cleanup=not sharded,
+        # 剖析模式：成功后不删工作目录，等 _prof_collect 把分段耗时并入日志再清
+        cleanup=(not sharded) and not prof,
     )
     work_dir = TEMP_DIR / "segmented" / task_id
     try:
@@ -612,6 +726,8 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
 
             concat_segments(work_dir, info, _encode_opts(params, out_kind),
                             output_path)
+            if prof:
+                _prof_collect(task_id, work_dir)
             shutil.rmtree(work_dir, ignore_errors=True)
             stats = RunStats(
                 frames=out_total,
@@ -634,6 +750,16 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             from sv.utils.process import kill_tree
 
             kill_tree(child.pid)  # 本路失败/取消时带走分片子进程
+
+    if prof and shard is None:
+        if not parallel:
+            # 单路成功收尾：并入分段耗时明细后清掉工作目录（剖析模式 pipeline 未自清）
+            _prof_collect(task_id, work_dir)
+            shutil.rmtree(work_dir, ignore_errors=True)
+        fps_e2e = stats.frames / stats.elapsed_s if stats.elapsed_s > 0 else 0
+        _prof_write(task_id,
+                    f"==== 运行结束 {stats.frames}帧 · {stats.elapsed_s:.1f}s"
+                    f" · 平均 {fps_e2e:.2f} fps（端到端口径：含引擎加载与合成） ====\n\n")
 
     emit({
         "type": "done", "frames": stats.frames,

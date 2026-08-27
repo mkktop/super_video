@@ -238,3 +238,65 @@ def test_cancel_queued_job(client, tmp_path, fake_engines, monkeypatch):
     hold.set()
     job = _wait_job(client, jid1)
     assert job["status"] == "canceled"
+
+
+# ---- 对比缓存清理（设置页入口） ----
+
+import sv.server.compare as cmp_mod
+
+@pytest.fixture()
+def sandbox_cache(monkeypatch, tmp_path):
+    """COMPARE_ROOT 与 JOBS 打到沙箱：清理是全局破坏性操作，
+    绝不能碰开发者磁盘上的真实对比产物。"""
+    root = tmp_path / "compare"
+    root.mkdir()
+    monkeypatch.setattr(cmp_mod, "COMPARE_ROOT", root)
+    monkeypatch.setattr(cmp_mod, "JOBS", {})
+    return root
+
+
+def _seed_job(root: Path, jid: str, size: int = 128) -> None:
+    d = root / jid
+    d.mkdir()
+    (d / "seg.mp4").write_bytes(b"x" * size)
+    cmp_mod.JOBS[jid] = {"id": jid, "status": "done", "entries": []}
+
+
+def test_cache_stats_and_clear(client, sandbox_cache):
+    _seed_job(sandbox_cache, "job-a")
+    _seed_job(sandbox_cache, "job-b", size=50)
+    st = client.get("/api/compare/cache")
+    assert st.status_code == 200
+    body = st.json()
+    assert body["jobs"] == 2
+    assert body["bytes"] == 128 + 50
+
+    r = client.delete("/api/compare/cache")
+    assert r.status_code == 200
+    cleared = r.json()
+    assert cleared["removed_jobs"] == 2
+    assert cleared["freed_bytes"] == 128 + 50
+    assert not (sandbox_cache / "job-a").exists()
+    assert "job-a" not in cmp_mod.JOBS and "job-b" not in cmp_mod.JOBS
+
+    # 空目录再清一次：幂等，0 作业 0 字节
+    r2 = client.delete("/api/compare/cache")
+    assert r2.status_code == 200
+    assert r2.json() == {"removed_jobs": 0, "freed_bytes": 0}
+
+
+def test_cache_clear_refused_while_active(client, sandbox_cache):
+    _seed_job(sandbox_cache, "done-job")
+    cmp_mod.JOBS["live"] = {"id": "live", "status": "running", "entries": []}
+    r = client.delete("/api/compare/cache")
+    assert r.status_code == 409
+    assert "正在进行" in r.json()["detail"]
+    # 拒绝时不得破坏任何产物
+    assert (sandbox_cache / "done-job").exists()
+    assert "done-job" in cmp_mod.JOBS
+
+
+def test_cache_route_not_shadowed_by_job_id(client, sandbox_cache):
+    """GET /api/compare/cache 不能被 /{job_id} 路由吞成 404。"""
+    _seed_job(sandbox_cache, "job-c")
+    assert client.get("/api/compare/cache").status_code == 200

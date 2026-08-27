@@ -16,6 +16,7 @@ DEFAULTS = {
     "output_dir": "",  # 默认输出目录：空 = 与源视频同目录；超分任务/剪切未显式指定输出时写到这里（不存在则自动建）
     "notify_task_done": True,  # 任务完成/失败时系统通知+闪任务栏（renderer 读；窗口聚焦时不打扰）
     "close_to_tray": False,  # 关闭按钮=最小化到系统托盘继续处理任务（托盘菜单退出应用）
+    "sr_profiling": False,  # 超分性能日志：任务结束保留分段耗时明细到 DATA_ROOT/data/sr_logs，供分析速度瓶颈
 }
 
 SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
@@ -58,6 +59,8 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 notify_task_done 值: {v}")
             if k == "close_to_tray" and not isinstance(v, bool):
                 raise ValueError(f"非法 close_to_tray 值: {v}")
+            if k == "sr_profiling" and not isinstance(v, bool):
+                raise ValueError(f"非法 sr_profiling 值: {v}")
             if k == "output_dir":
                 if not isinstance(v, str):
                     raise ValueError(f"非法 output_dir 值: {v}")

@@ -5,7 +5,9 @@ import {
   NCard,
   NCollapse,
   NCollapseItem,
+  NModal,
   NProgress,
+  NSpin,
   NTag,
   useMessage,
 } from 'naive-ui'
@@ -56,6 +58,37 @@ const statusMeta: Record<Task['status'], { label: string; type: 'default' | 'inf
 function fmtElapsed(sec: number): string {
   if (!sec || sec < 0) return '--'
   return sec < 60 ? `${Math.round(sec)}秒` : fmtEta(Math.round(sec))
+}
+
+/** 完成态平均速度：图片任务按「张/秒」，视频按 fps；无数据不显示。
+ * 口径=总帧数÷本轮用时（端到端：含引擎加载与最终合成，续跑任务会偏高） */
+const avgSpeed = computed(() => {
+  const fps = props.task.fps_avg ?? 0
+  if (!fps || fps <= 0) return ''
+  return props.task.params?.kind === 'image'
+    ? `平均 ${fps.toFixed(2)} 张/秒`
+    : `平均 ${fps.toFixed(2)} fps`
+})
+const avgSpeedTip = '总帧数 ÷ 本轮用时（含引擎加载与最终合成；断点续跑后的任务会偏高）'
+
+// ---- 超分性能日志（设置 sr_profiling 开启时完成的任务可查看） ----
+const logOpen = ref(false)
+const logLoading = ref(false)
+const logFailed = ref(false)
+const logText = ref('')
+
+async function openLog() {
+  logOpen.value = true
+  if (logText.value) return // 同一张卡反复打开不重复拉取
+  logLoading.value = true
+  logFailed.value = false
+  try {
+    logText.value = await api.srLog(props.task.id)
+  } catch {
+    logFailed.value = true
+  } finally {
+    logLoading.value = false
+  }
 }
 
 const scaleLabel = computed(() => {
@@ -155,7 +188,10 @@ function onOpenInputFolder() {
           {{ task.progress_frames }}/{{ task.total_frames }} 帧 · {{ task.fps_run.toFixed(1) }} fps ·
           剩余 {{ fmtEta(task.eta_sec) }}
         </span>
-        <span v-else>{{ fmtBytes(task.out_bytes) }} · 用时 {{ fmtElapsed(task.elapsed_s) }}</span>
+        <span v-else :title="avgSpeed ? avgSpeedTip : undefined">
+          {{ fmtBytes(task.out_bytes) }} · 用时 {{ fmtElapsed(task.elapsed_s)
+          }}<template v-if="avgSpeed"> · {{ avgSpeed }}</template>
+        </span>
       </div>
     </div>
 
@@ -177,6 +213,14 @@ function onOpenInputFolder() {
       <div class="spacer" />
       <NButton v-if="canCompare" size="small" quaternary type="info" @click="openCompare(task.id)">
         全页对比
+      </NButton>
+      <NButton
+        v-if="task.status === 'done' && task.has_sr_log"
+        size="small"
+        quaternary
+        @click="openLog"
+      >
+        性能日志
       </NButton>
       <NButton v-if="isBusy" size="small" quaternary type="error" @click="onCancel">取消</NButton>
       <NButton
@@ -216,6 +260,14 @@ function onOpenInputFolder() {
         <button class="qbtn" title="下移" :disabled="!canDown" @click="emit('move', 1)">↓</button>
       </span>
     </div>
+
+    <NModal v-model:show="logOpen" preset="card" title="超分性能日志" style="max-width: 760px">
+      <NSpin :show="logLoading">
+        <pre v-if="logText" class="srlog-pre">{{ logText }}</pre>
+        <div v-else-if="logFailed" class="srlog-msg">日志读取失败（文件可能已被清理）</div>
+        <div v-else class="srlog-msg">加载中…</div>
+      </NSpin>
+    </NModal>
   </n-card>
 </template>
 
@@ -275,4 +327,17 @@ function onOpenInputFolder() {
 }
 .qbtn:hover:not(:disabled) { border-color: #4f8cff; color: #4f8cff; }
 .qbtn:disabled { opacity: 0.35; cursor: default; }
+.srlog-pre {
+  margin: 0;
+  min-height: 120px;
+  max-height: 62vh;
+  overflow-y: auto;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #c9cdd4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.srlog-msg { min-height: 120px; display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 12.5px; }
 </style>

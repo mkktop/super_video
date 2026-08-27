@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref } from 'vue'
 import {
   NButton,
   NInputNumber,
@@ -15,8 +15,9 @@ import { refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
 
-// 模型对比页"用此模型处理图片"入口：进页预选模型与倍率
-onMounted(() => {
+// 模型对比页"用此模型处理图片"入口：进页预选模型与倍率。
+// 本页 KeepAlive 常驻：二次进入只触发 onActivated 不再触发 onMounted，两处都得消费
+function consumePendingModel() {
   if (!ui.pendingModel) return
   const spec = store.models.find((m) => m.id === ui.pendingModel)
   if (spec?.vram_ok) {
@@ -26,7 +27,9 @@ onMounted(() => {
   }
   ui.pendingModel = null
   ui.pendingScale = null
-})
+}
+onMounted(consumePendingModel)
+onActivated(consumePendingModel)
 
 const files = ref<string[]>([])
 const modelId = ref('')

@@ -12,10 +12,15 @@ import {
 } from 'naive-ui'
 import { api, compareAssetUrl, mediaSrc, type CompareJob, type ProbeInfo } from '../api'
 import { openWizardWith, store, ui } from '../store'
+import { useFullscreen } from '../utils'
 import CompareSlider from '../components/CompareSlider.vue'
 import VideoCompare from '../components/VideoCompare.vue'
 
 const message = useMessage()
+
+/** 结果舞台整段进全屏（含切换条），对比画面铺满显示器 */
+const stageSec = ref<HTMLElement | null>(null)
+const { isFullscreen: stageFull, toggle: toggleStageFull } = useFullscreen(stageSec)
 
 const MAX_MODELS = 6
 const MAX_SEG_S = 20
@@ -69,14 +74,22 @@ async function pickImage() {
   if (files.length) imageInput.value = files[0]
 }
 
-// 剪切页「拿这段对比模型」跳转：带着精确选好的入出点区间进来
-onMounted(() => {
+// 剪切页「剪切并去对比模型」跳转：区间已落成独立小文件，默认从 0 起取整段
+// （超 20s 由上限截断，仍可在下方滑条自由调整取段）
+// 本页 KeepAlive 常驻：只有首次进入才触发 onMounted；之后从缓存激活只触发
+// onActivated——两处都得消费，否则新片段进不来（还会停在上次的结果视图里），
+// 「开始对比」自然点不了。首次进入两钩子连发，靠置空信号保证幂等。
+function consumePendingCompare() {
   const pc = ui.pendingCompare
   if (!pc) return
   ui.pendingCompare = null
+  reset()
+  view.value = 'frames'
   mode.value = 'video'
   void loadVideoFile(pc.input, pc.start_s, pc.end_s - pc.start_s)
-})
+}
+onMounted(consumePendingCompare)
+onActivated(consumePendingCompare)
 
 const srcReady = computed(() =>
   mode.value === 'video' ? !!probeInfo.value?.ok : !!imageInput.value)
@@ -398,7 +411,7 @@ function useModel(mid: string) {
       </section>
 
       <!-- 对比舞台：源 vs 当前模型，分割线交互；按钮/数字键切换模型 -->
-      <section v-if="curEntry" class="sec stage-sec">
+      <section v-if="curEntry" ref="stageSec" class="sec stage-sec">
         <div class="stage-bar">
           <div class="switcher">
             <NButton
@@ -421,6 +434,9 @@ function useModel(mid: string) {
             <NRadioButton value="frames">静帧</NRadioButton>
             <NRadioButton value="video">成片</NRadioButton>
           </NRadioGroup>
+          <NButton size="small" class="fs-toggle" @click="toggleStageFull">
+            {{ stageFull ? '退出全屏（ESC）' : '⛶ 全屏' }}
+          </NButton>
         </div>
 
         <div class="stage">
@@ -428,6 +444,7 @@ function useModel(mid: string) {
             v-if="job.kind === 'video' && view === 'video'"
             :src-url="srcVideoUrl"
             :out-url="outVideoUrl"
+            :streaming="running"
           />
           <CompareSlider v-else :src-url="srcStillUrl" :out-url="outStillUrl" />
         </div>
@@ -547,6 +564,20 @@ h1 { font-size: 20px; font-weight: 700; }
 }
 .switcher { display: flex; gap: 8px; flex-wrap: wrap; }
 .view-toggle { margin-left: auto; }
+.fs-toggle { margin-left: auto; }
+.stage-sec:fullscreen .view-toggle { margin-left: 0; }
+/* 全屏态：舞台段铺满整屏，画布吃掉剩余空间（数字键/分割线交互照常） */
+.stage-sec:fullscreen {
+  background: #0d0e10;
+  padding: 14px 20px;
+}
+.stage-sec:fullscreen .stage {
+  height: auto;
+  min-height: 0;
+  flex: 1;
+}
+/* 图片模式没有 view-toggle，全屏按钮顶到右侧 */
+.stage-sec:fullscreen .fs-toggle { margin-left: auto; }
 .stage {
   height: min(62vh, 640px);
   min-height: 320px;

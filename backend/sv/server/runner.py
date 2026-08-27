@@ -16,6 +16,17 @@ from .events import EventBus
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
+def fps_avg(frames: float, elapsed_s: float) -> float:
+    """完成态平均速度（tasks.fps_avg 字段口径）：总帧数÷本轮用时。
+
+    端到端口径（含引擎加载与最终合成）；断点续跑的任务只计最后一轮，
+    跳过的段不产生用时，数值会偏高。无有效数据返回 0。
+    """
+    if not frames or elapsed_s <= 0:
+        return 0.0
+    return round(frames / elapsed_s, 2)
+
+
 def error_hint(line: str) -> str | None:
     """worker 非标准输出行 → 任务 error 提示。
 
@@ -224,6 +235,7 @@ class Runner:
                 preview_path=final.get("preview"),
                 preview_src=final.get("src_preview"),
                 elapsed_s=final.get("elapsed", 0) or 0,
+                fps_avg=fps_avg(final.get("frames", 0), final.get("elapsed", 0) or 0),
                 progress_frames=t.get("total_frames", 0),
                 error=None,  # 成功任务不能残留运行期的日志尾部
             )

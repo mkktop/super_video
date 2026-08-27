@@ -33,6 +33,9 @@ DATA_ROOT = Path(_env_data).resolve() if _env_data else ROOT
 MODELS_DIR = DATA_ROOT / "models_store"
 TEMP_DIR = DATA_ROOT / ".tmp"
 SAMPLES_DIR = ROOT / "samples"
+# 超分性能日志（sr_profiling 开关开启时任务结束保留）：放 data/ 下不受
+# .tmp 孤儿清扫影响，应用重装/升级也不随安装目录被清
+SR_LOG_DIR = DATA_ROOT / "data" / "sr_logs"
 
 # 旧版（≤v0.1.20）放在安装目录内的数据目录：升级后一次性搬到 DATA_ROOT
 _LEGACY_DIR_NAMES = ("models_store", "trt-runtime", "data", ".tmp")

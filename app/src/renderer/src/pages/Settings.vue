@@ -4,6 +4,7 @@ import {
   NButton,
   NInput,
   NPopover,
+  NPopconfirm,
   NProgress,
   NRadioButton,
   NRadioGroup,
@@ -15,6 +16,7 @@ import {
 } from 'naive-ui'
 import { api } from '../api'
 import { checkAppUpdate, refreshTrt, store } from '../store'
+import { fmtBytes } from '../utils'
 
 const message = useMessage()
 const engine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
@@ -33,6 +35,34 @@ const outputDir = ref('') // 全局输出目录（空 = 源视频同目录）
 const savingOutDir = ref(false)
 const notifyTask = ref(true) // 任务完成/失败系统通知
 const closeToTray = ref(false) // 关闭按钮=最小化到托盘
+const srProfiling = ref(false) // 超分性能日志（完成的任务可查看瓶颈分析日志）
+
+// ---- 对比缓存：产物不自动清理（见 sv/server/compare.py），这里手动清 ----
+const cacheStats = ref<{ jobs: number; bytes: number } | null>(null)
+const clearingCache = ref(false)
+async function loadCacheStats() {
+  try {
+    cacheStats.value = await api.compareCacheStats()
+  } catch {
+    /* 统计失败不致命：按钮显示禁用态 */
+  }
+}
+async function doClearCache() {
+  clearingCache.value = true
+  try {
+    const r = await api.clearCompareCache()
+    message.success(
+      r.removed_jobs > 0
+        ? `已清理 ${r.removed_jobs} 个对比作业，释放 ${fmtBytes(r.freed_bytes)}`
+        : '没有可清理的对比产物',
+    )
+    void loadCacheStats()
+  } catch (e) {
+    message.error(`清理失败: ${(e as Error).message}`)
+  } finally {
+    clearingCache.value = false
+  }
+}
 // 已保存的引擎/精度（脏状态对比用；保存成功后同步）
 const savedEngine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
 const savedPrecision = ref<'fp16' | 'fp32'>('fp16')
@@ -102,6 +132,7 @@ const outDirShown = computed(() => {
 })
 
 onMounted(async () => {
+  void loadCacheStats()
   const s = (await api.settings()) as {
     engine?: 'auto' | 'cuda' | 'trt' | 'directml'
     precision?: 'fp16' | 'fp32'
@@ -112,6 +143,7 @@ onMounted(async () => {
     parallel_streams?: boolean
     notify_task_done?: boolean
     close_to_tray?: boolean
+    sr_profiling?: boolean
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
@@ -121,6 +153,7 @@ onMounted(async () => {
   outputDir.value = String(s.output_dir ?? '').trim()
   notifyTask.value = s.notify_task_done !== false
   closeToTray.value = s.close_to_tray === true
+  srProfiling.value = s.sr_profiling === true
   const p = s.download_proxy ?? ''
   if (p === 'direct') proxyMode.value = 'direct'
   else if (p.startsWith('http')) {
@@ -234,6 +267,16 @@ async function saveParallel(v: boolean) {
     parallelStreams.value = !v
   } else {
     message.success(v ? '已开启，从下一个任务起生效' : '已关闭')
+  }
+}
+
+async function saveSrProfiling(v: boolean) {
+  const r = await api.saveSettings({ sr_profiling: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    srProfiling.value = !v
+  } else {
+    message.success(v ? '已开启，从下一个任务起生效' : '已关闭，已有日志仍可在任务卡查看')
   }
 }
 
@@ -463,6 +506,40 @@ async function uninstallTrc() {
           </div>
         </section>
 
+        <!-- 对比缓存 -->
+        <section class="card">
+          <header class="card-head">
+            <div class="card-title">对比缓存</div>
+            <div class="card-sub">模型对比的切片与成片产物，保留在本地且不会自动清理</div>
+          </header>
+          <div class="card-body">
+            <div class="row switch-row">
+              <span class="row-text">
+                已用空间 <b>{{ cacheStats ? fmtBytes(cacheStats.bytes) : '…' }}</b>
+                <small>共 {{ cacheStats ? cacheStats.jobs : '…' }} 个作业 · 清理不影响任务输出与剪切文件</small>
+              </span>
+              <NPopconfirm @positive-click="doClearCache">
+                <template #trigger>
+                  <NButton
+                    size="small"
+                    type="warning"
+                    secondary
+                    :loading="clearingCache"
+                    :disabled="!cacheStats || cacheStats.jobs === 0"
+                  >
+                    清理对比缓存
+                  </NButton>
+                </template>
+                将删除全部对比切片与成片，删除后不可恢复。确定清理？
+              </NPopconfirm>
+            </div>
+            <p class="hint">
+              对比结果只存在内存里，重启后列表清空，但产物文件会一直留在磁盘。
+              有对比正在进行时清理会被拒绝，等它结束再试。
+            </p>
+          </div>
+        </section>
+
         <!-- 应用与更新 -->
         <section class="card">
           <header class="card-head">
@@ -545,7 +622,14 @@ async function uninstallTrc() {
               </span>
               <NSwitch v-model:value="perfSampling" size="small" @update:value="savePerfSampling" />
             </div>
-            <p class="hint">历史数据保留最近 1 小时，应用重启后清零。</p>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                超分性能日志
+                <small>记录每个任务各阶段的耗时明细（引擎加载 / 解码 / 推理 / 编码 / 等待）与所用配置；开启后完成的任务卡上出现「性能日志」按钮，可用来定位速度瓶颈。不影响任务本身速度</small>
+              </span>
+              <NSwitch v-model:value="srProfiling" size="small" @update:value="saveSrProfiling" />
+            </div>
+            <p class="hint">性能采样历史保留最近 1 小时，应用重启后清零；性能日志按任务保留最近 200 份。</p>
           </div>
         </section>
       </div>

@@ -130,6 +130,8 @@ export interface Task {
   total_frames: number
   progress_frames: number
   fps_run: number
+  /** 完成时落定的平均速度（总帧数÷本轮用时，端到端口径）；未完成为 0 */
+  fps_avg: number
   eta_sec: number
   error: string | null
   preview_path: string | null
@@ -138,6 +140,8 @@ export interface Task {
   elapsed_s: number
   queue_position: number | null
   updated_at: number
+  /** 超分性能日志是否已落盘（sr_profiling 开启时完成的任务为 true） */
+  has_sr_log?: boolean
 }
 
 /** 模型对比作业（详见后端 sv/server/compare.py） */
@@ -310,6 +314,12 @@ export const api = {
   async resume(id: string): Promise<Response> {
     return _fetch(`${baseUrl}/api/tasks/${id}/resume`, { method: 'POST' })
   },
+  /** 超分性能日志文本（sr_profiling 开启时完成的任务才有；无则 404） */
+  async srLog(id: string): Promise<string> {
+    const r = await _fetch(`${baseUrl}/api/tasks/${id}/sr-log`)
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
+    return r.text()
+  },
   previewUrl(id: string, updatedAt: number, src = false): string {
     return withToken(`${baseUrl}/api/tasks/${id}/preview?t=${updatedAt}${src ? '&src=1' : ''}`)
   },
@@ -340,6 +350,18 @@ export const api = {
   },
   async cancelCompare(id: string): Promise<Response> {
     return _fetch(`${baseUrl}/api/compare/${id}/cancel`, { method: 'POST' })
+  },
+  /** 对比产物占用统计（设置页展示） */
+  async compareCacheStats(): Promise<{ jobs: number; bytes: number }> {
+    const r = await _fetch(`${baseUrl}/api/compare/cache`)
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    return r.json()
+  },
+  /** 清理全部对比产物（有作业进行中时后端 409 拒绝） */
+  async clearCompareCache(): Promise<{ removed_jobs: number; freed_bytes: number }> {
+    const r = await _fetch(`${baseUrl}/api/compare/cache`, { method: 'DELETE' })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
+    return r.json()
   },
   async createTrim(body: {
     input: string

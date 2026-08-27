@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { NButton, NSlider } from 'naive-ui'
 import { mediaSrc } from '../api'
 
@@ -9,10 +9,12 @@ const props = defineProps<{
   /** 直接给资源地址（模型对比产物走 HTTP+token，非本地文件）——优先于路径 */
   srcUrl?: string
   outUrl?: string
+  /** 上游还在产物流（对比作业运行中）：加载失败按"未就绪"定时重试而非判死 */
+  streaming?: boolean
 }>()
 
-const srcUrl = props.srcUrl ?? mediaSrc(props.srcPath ?? '')
-const outUrl = props.outUrl ?? mediaSrc(props.outPath ?? '')
+const srcUrl = computed(() => props.srcUrl ?? mediaSrc(props.srcPath ?? ''))
+const outUrl = computed(() => props.outUrl ?? mediaSrc(props.outPath ?? ''))
 
 const srcV = ref<HTMLVideoElement | null>(null)
 const outV = ref<HTMLVideoElement | null>(null)
@@ -22,8 +24,47 @@ const pos = ref(50) // 分割线位置 %
 const playing = ref(false)
 const cur = ref(0)
 const dur = ref(0)
-const srcBroken = ref(false)
-const outBroken = ref(false)
+
+// ---- 加载失败重试：对比产物是边跑边落的（seg 先切好、各模型 mp4 跑完一个出一个），
+// 刚点开成片的一瞬某路可能还是 404——那不是格式问题。失败计数同时充当加载代号
+// 追加进 URL 触发强制重载；换地址时清零重新计。streaming 时限放宽到 10 次×1.5s ----
+const MAX_FAST = 1 // 非流式也允许多试一次：挡偶发网络抖动误标"格式不支持"
+const MAX_STREAMING = 10
+const RETRY_MS = 1500
+const srcFails = ref(0)
+const outFails = ref(0)
+const retryTimers: Record<'src' | 'out', ReturnType<typeof setTimeout> | null> = { src: null, out: null }
+const maxFails = computed(() => (props.streaming ? MAX_STREAMING : MAX_FAST))
+
+function busted(url: string, n: number) {
+  return n === 0 ? url : `${url}${url.includes('?') ? '&' : '?'}_r=${n}`
+}
+function onErr(side: 'src' | 'out') {
+  if (retryTimers[side] !== null) return
+  if ((side === 'src' ? srcFails.value : outFails.value) >= maxFails.value) return
+  retryTimers[side] = setTimeout(() => {
+    retryTimers[side] = null
+    if (side === 'src') srcFails.value++
+    else outFails.value++
+  }, RETRY_MS)
+}
+const srcBroken = computed(() => srcFails.value > maxFails.value)
+const outBroken = computed(() => outFails.value > maxFails.value)
+/** 流式中出现过失败且尚未放弃：提示"生成中/正在重试"而非"不支持" */
+const waitingAssets = computed(
+  () => !!props.streaming && !srcBroken.value && !outBroken.value &&
+    (srcFails.value > 0 || outFails.value > 0))
+
+watch([srcUrl, outUrl], () => {
+  srcFails.value = 0
+  outFails.value = 0
+  if (retryTimers.src) { clearTimeout(retryTimers.src); retryTimers.src = null }
+  if (retryTimers.out) { clearTimeout(retryTimers.out); retryTimers.out = null }
+})
+onBeforeUnmount(() => {
+  if (retryTimers.src) clearTimeout(retryTimers.src)
+  if (retryTimers.out) clearTimeout(retryTimers.out)
+})
 
 const fmt = (t: number) => {
   const m = Math.floor(t / 60)
@@ -130,24 +171,24 @@ onBeforeUnmount(() => {
       <video
         ref="outV"
         class="video"
-        :src="outUrl"
+        :src="busted(outUrl, outFails)"
         muted
         loop
         playsinline
         preload="auto"
         @loadedmetadata="dur = outV?.duration ?? 0"
-        @error="outBroken = true"
+        @error="onErr('out')"
       />
       <video
         ref="srcV"
         class="video top"
-        :src="srcUrl"
+        :src="busted(srcUrl, srcFails)"
         muted
         loop
         playsinline
         preload="auto"
         :style="{ clipPath: `inset(0 ${100 - pos}% 0 0)` }"
-        @error="srcBroken = true"
+        @error="onErr('src')"
       />
       <div class="handle" :style="{ left: pos + '%' }">
         <div class="line" />
@@ -155,8 +196,12 @@ onBeforeUnmount(() => {
       </div>
       <span class="label label-l">源</span>
       <span class="label label-r">超分</span>
-      <div v-if="srcBroken || outBroken" class="broken">
-        {{ srcBroken ? '源' : '超分' }}视频的容器/编码浏览器不支持直接播放（如 MKV/AVI/HEVC），请用「静帧」模式对比
+      <div v-if="waitingAssets" class="broken pending">
+        成片还在生成中，正在自动加载…
+      </div>
+      <div v-else-if="srcBroken || outBroken" class="broken">
+        {{ srcBroken ? '源' : '超分' }}视频无法直接播放：可能是该模型的输出编码浏览器解不了，
+        或资源地址已失效——可切回「静帧」模式对比
       </div>
     </div>
     <div class="bar">
@@ -262,6 +307,10 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.broken.pending {
+  background: rgba(17, 52, 96, 0.75);
+  color: #7db4ff;
 }
 .bar {
   display: flex;

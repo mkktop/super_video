@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import queue
+import shutil
 import subprocess
 import threading
 import time
@@ -141,6 +142,57 @@ def asset_path(jid: str, key: str) -> Path | None:
 
 
 # ---- 作业执行 ----
+
+def active_jobs() -> list[dict]:
+    """排队/运行中的作业（清理缓存时必须拒绝，产物正在写入）。"""
+    return [j for j in JOBS.values() if j["status"] in ("queued", "running")]
+
+
+def _dir_size(d: Path) -> int:
+    total = 0
+    try:
+        for f in d.rglob("*"):
+            if f.is_file():
+                try:
+                    total += f.stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return total
+
+
+def cache_stats() -> dict:
+    """设置页展示：磁盘上的作业目录数与总占用字节。"""
+    jobs, total = 0, 0
+    if COMPARE_ROOT.is_dir():
+        try:
+            entries = list(COMPARE_ROOT.iterdir())
+        except OSError:
+            entries = []
+        for d in entries:
+            if d.is_dir():
+                jobs += 1
+                total += _dir_size(d)
+    return {"jobs": jobs, "bytes": total}
+
+
+def clear_cache() -> dict:
+    """删除全部对比产物目录并清空内存记录（对比结果页引用的资产随之失效）。
+    有排队/运行中的作业时抛 ValueError，由路由转 409——正在写入的目录不能动。"""
+    if active_jobs():
+        raise ValueError("有对比作业正在进行，请等它结束后再清理")
+    freed, jobs = 0, 0
+    if COMPARE_ROOT.is_dir():
+        for d in list(COMPARE_ROOT.iterdir()):
+            if not d.is_dir():
+                continue
+            freed += _dir_size(d)
+            jobs += 1
+            shutil.rmtree(d, ignore_errors=True)
+    JOBS.clear()
+    return {"removed_jobs": jobs, "freed_bytes": freed}
+
 
 def _ffmpeg(args: list[str]) -> None:
     proc = subprocess.run(

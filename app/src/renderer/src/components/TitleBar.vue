@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { store, ui } from '../store'
+// 与桌面图标(build/icon.png, B 方案定稿)同源,标题栏保持品牌一致
+import logoUrl from '../assets/logo.png'
 
 const maximized = ref(false)
 const version = ref('')
@@ -23,7 +25,7 @@ onUnmounted(() => off?.())
 <template>
   <div class="titlebar" @dblclick="toggleMax">
     <div class="brand">
-      <span class="mark">⬆</span>
+      <span class="mark"><img class="logo" :src="logoUrl" alt="" draggable="false" /></span>
       <span class="name">super_video</span>
       <span class="ver">v{{ version }}</span>
       <button
@@ -80,18 +82,22 @@ onUnmounted(() => off?.())
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  font-size: 12px;
-  background: linear-gradient(135deg, #4f8cff, #8b5cf6);
-  color: #fff;
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+.logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
 }
 .name {
   font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  background: linear-gradient(90deg, #e8eaed, #9aa0a6);
+  font-weight: 650;
+  letter-spacing: 0.3px;
+  background: linear-gradient(90deg, #f2f4f7, #a8adb5);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -99,13 +105,15 @@ onUnmounted(() => off?.())
 .ver {
   font-size: 11px;
   font-weight: 500;
-  color: #7a8087;
-  background: #1e2126;
-  border: 1px solid #2a2e34;
-  border-radius: 8px;
-  padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
+  color: #8f959d;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  padding: 1px 9px;
   margin-left: 2px;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
+  line-height: 1.5;
 }
 .upd {
   display: inline-flex;
@@ -115,8 +123,8 @@ onUnmounted(() => off?.())
   color: #4f8cff;
   background: rgba(79, 140, 255, 0.12);
   border: 1px solid rgba(79, 140, 255, 0.45);
-  border-radius: 8px;
-  padding: 1px 9px;
+  border-radius: 999px;
+  padding: 1px 10px;
   margin-left: 6px;
   cursor: pointer;
   -webkit-app-region: no-drag;

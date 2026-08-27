@@ -3,10 +3,15 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NButton, NEmpty, NRadioButton, NRadioGroup, NTag } from 'naive-ui'
 import { api } from '../api'
 import { store, ui } from '../store'
+import { useFullscreen } from '../utils'
 import CompareSlider from '../components/CompareSlider.vue'
 import VideoCompare from '../components/VideoCompare.vue'
 
 const task = computed(() => store.tasks.find((t) => t.id === ui.compareTaskId))
+
+/** 整页进真全屏：对比画面铺满显示器（该页本就隐藏侧栏，再上一层到屏幕级） */
+const pageEl = ref<HTMLElement | null>(null)
+const { isFullscreen: pageFull, toggle: togglePageFull } = useFullscreen(pageEl)
 const canCompare = computed(() => !!task.value?.preview_src && !!task.value?.preview_path)
 // 视频对比直接播输入/输出文件，只有已完成的任务有输出；
 // 图片序列任务的输出是目录（不是可播放的视频文件），按扩展名排除
@@ -37,14 +42,18 @@ function back() {
   ui.page = 'tasks'
 }
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') back()
+  if (e.key === 'Escape') {
+    // 全屏态下 ESC 交给浏览器原生退出全屏，别同时退回任务页
+    if (pageFull.value) return
+    back()
+  }
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
-  <div class="compare-page">
+  <div ref="pageEl" class="compare-page">
     <div class="head">
       <NButton size="small" quaternary @click="back">← 返回任务</NButton>
       <div class="names">
@@ -60,6 +69,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <NRadioButton value="frames">静帧</NRadioButton>
         <NRadioButton value="video" :disabled="!canVideo">视频</NRadioButton>
       </NRadioGroup>
+      <NButton size="small" @click="togglePageFull">
+        {{ pageFull ? '退出全屏（ESC）' : '⛶ 全屏' }}
+      </NButton>
     </div>
 
     <div class="stage">
@@ -93,6 +105,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   width: 100%; /* page-full 是横向 flex 容器，舞台内容全为绝对定位不撑宽，不显式给宽会塌缩成头部行宽 */
   height: 100%;
   gap: 10px;
+}
+/* 全屏态：整页铺满显示器，舞台吃掉头部以外全部空间 */
+.compare-page:fullscreen {
+  background: #0d0e10;
+  padding: 12px 16px;
+}
+:fullscreen .stage {
+  border-radius: 6px;
 }
 .head {
   display: flex;
