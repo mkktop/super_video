@@ -14,6 +14,9 @@
 9. TRT 可选组件安装版（08-25）—— meta_path 重定向等打包链路
 10. TRT 后并行再研究 + 双路产品化（08-25）—— 双路 77.5fps（+84%，仅 NVENC）
 11. 小分辨率回归修复：u8 包装保活 + 预热真实尺寸（08-25/26，v0.2.3）
+12. 全模型基准：11 权重 × {DML-fp16/fp32, TRT-fp16}（08-27）
+13. 端到端全模型吞吐 + TRT 包装生效修复 + CUGAN 问题立案（08-27）
+14. 天花板链路：双路并行+NVENC 全模型实测（08-27）＋「x4 上 1080p 源即 8K」口径勘误
 
 ---
 
@@ -384,3 +387,174 @@ dev 链路 (.venv python) 从未触发，属典型 frozen-only bug。
 
 配套新增分段耗时剖析埋点 `perf_stages.jsonl`（decode/infer/encode 各段 wall），此后性能
 数字统一以 elapsed/wall 口径核对，不信聚合 fps——双路进度聚合虚高两次都是靠它拆穿的。
+
+# 全模型基准（2026-08-27，RTX 5080 / 9800X3D）
+
+覆盖当时注册表全部 11 个已装 ONNX 权重 × 三条后端链路，外加 RIFE 补帧与 torch 引擎。
+脚本 `backend/scripts/bench_all_models.py`（可复跑），原始数据 `.tmp/bench_20260827/*.jsonl`。
+
+口径：合成自然图 960x540 单帧、预热 3 帧 + 计时 20 帧、process() 全程 wall 均值
+（含 CPU 侧进出转换，与产品单帧路径同构）；tile 取产品同款 manifest 兜底
+（仅 x4plus 动态版为 512 分块）。⧉ = u8 图手术包装生效。表中每格为
+`ms / fps`：fps=1000/ms 是纯推理口径的上限帧率，**不是端到端吞吐**
+（整链路还受解码/编码限制，如 V3 HD L2 全链 TRT 热缓存实测 ~50fps、双路+NVENC 77.5fps）。
+
+| 模型 | 本体精度 | DML fp16（默认链路） | DML fp32 | TRT fp16 |
+|---|---|---|---|---|
+| AnimeVideo xs x2 | fp16 | **14.9ms / 67fps** ⧉ | 21.3ms / 47fps ⧉ | 25.0ms / 40fps |
+| AnimeVideo v3 x4 | fp16 | **19.4ms / 52fps** ⧉ | 26.2ms / 38fps ⧉ | 100.9ms / 10fps |
+| AnimeJaNai V2 L1 | fp32 | **3.2ms / 315fps** ⧉ | 3.3ms / 305fps ⧉ | 28.7ms / 35fps |
+| AnimeJaNai V2 L2 | fp32 | **8.4ms / 119fps** ⧉ | **8.4ms / 120fps** ⧉ | 30.7ms / 33fps |
+| AnimeJaNai V2 L3 | fp32 | **14.8ms / 67fps** ⧉ | **14.8ms / 68fps** ⧉ | 33.6ms / 30fps |
+| AnimeJaNai V3 HD L1 | fp16 | 3.3ms / 308fps ⧉ | 4.5ms / 221fps ⧉ | **1.5ms / 665fps** ⧉ |
+| AnimeJaNai V3 HD L2 | fp16 | 8.3ms / 121fps ⧉ | 11.7ms / 85fps ⧉ | **4.0ms / 249fps** ⧉ |
+| AnimeJaNai V3 HD L3 | fp16 | **14.9ms / 67fps** ⧉ | 21.4ms / 47fps ⧉ | 31.1ms / 32fps |
+| Real-CUGAN x2 无降噪 | fp32 | 48.0ms / 21fps ⧉ | 48.1ms / 21fps ⧉ | **31.5ms / 32fps** |
+| Real-CUGAN x4 降噪3 | fp32 | **62.9ms / 16fps** ⧉ | **62.8ms / 16fps** ⧉ | 86.5ms / 12fps |
+| Real-ESRGAN x4plus 动态(tile512) | fp16 | 1064ms / 0.9fps | 1460ms / 0.7fps | **648ms / 1.5fps** |
+| RIFE v4.26 补帧x2（每中间帧） | fp32 | **23.6ms / 42fps**（DML） | — | 25.8ms / 39fps（CUDA） |
+| x4plus 官方 pth(torch tile256) | fp32 | — | — | **676ms / 1.5fps**（torch-CUDA） |
+
+## 关键发现
+
+1. **默认 DML + fp16 + u8 包装是绝大多数模型的最快链路**。11 个 SR 权重里 9 个
+   DML-fp16 直接登顶；1080p 输出档普遍落在 3~15ms/帧（33~300fps 推理冗余），
+   端到端瓶颈早已在解码/编码侧而非推理。
+2. **TRT 的实际收益高度依赖「u8 包装是否被接受」**：ORT-TRT 导入器拒绝 UINT8 中间
+   张量，包装 session 回退 CUDA 后与 TRT 主链 A/B 差异 maxdiff 2~3 >1 → 自动弃用
+   包装（产品同款行为）。于是凡落回标准路径的模型，CPU 前后处理重新成为瓶颈，
+   大输出档反比 DML 慢数倍（AnimeVideo v3 x4：100.9 vs 19.4ms）；唯 AnimeJaNai
+   V3 HD L1/L2 包装成功，吃到真加速（1.5/4.0ms，约 2x）。**若要 TRT 全面超越 DML，
+   方向是把包装尾链改成 ORT-TRT 可导入的形式（消除 UINT8 Cast 边界）**。
+3. **TRT 编译成本集中在首次**：Real-CUGAN x2 53s / x4 29s / x4plus 39s/帧级会话；
+   缓存（.tmp/trt_cache）生效后二次加载秒级。对短视频用户首任务体感差是 TRT 的
+   主要代价。
+4. **manifest 的 fp16=False 判据经 bench 复核成立**：V2 系与 CUGAN 保持 fp32 本体
+   （DML 下转 fp16 即崩的前科），它们靠小算量 + 包装仍进入最快梯队——CUGAN x2
+   在 TRT 标准路径下反而第一次赢过 DML（31.5 vs 48.0ms），因 fp32 无 fp16 尾链
+   问题且该模型 CPU 后处理占比相对小。
+5. **重模型格局未变**：x4plus 动态版即便 tile512 分块仍是秒级/帧（TRT 648ms 最快，
+   DML fp32 最慢 1.46s）；官方 pth 的 torch-CUDA 与 ONNX-TRT 打平（~660-680ms），
+   验证 ONNX 迁移无性能损失。RIFE 在 DML/CUDA 两 EP 下速度持平（~24-26ms），
+   EP 选择对它不重要。
+6. 复现注意：上一轮 DML 全帧直推 x4plus 动态版会导致驱动级段错误（进程死亡），
+   产品里它的 tile_hint=512 分块不只是省显存，也是稳定性前提——bench 脚本已按
+   产品语义取 tile，勿用 tile=0 测该权重。
+
+# 端到端全模型吞吐 + TRT 生效修复（2026-08-27）
+
+纯推理矩阵（上一节）之外的用户视角口径：真片源（samples/动漫测试1.mp4 无损剪
+6s=91 帧 1080p30）走产品同款 StreamPipeline——ffmpeg 解码管道→逐帧推理→libx264
+crf18 medium MP4 编码，fps=成品帧数/整链 wall（任务卡同款数字）。脚本
+`backend/scripts/bench_e2e_models.py`（每模型独立子进程隔离，防驱动态污染）。
+
+| 模型 | DML fp16 默认链 | TRT fp16 | 备注 |
+|---|---|---|---|
+| AnimeVideo xs x2 | 13.2 fps | **29.4 fps** | 读解码 ~1.1s/91f 为公共地板 |
+| AnimeVideo v3 x4 | 7.4 fps | **9.2 fps** | 注意：1080p 源 x4=**8K** 输出（见 §14） |
+| AnimeJaNai V2 L1 | 35.5 fps | **36.6 fps** | 已达管线吞吐天花板 |
+| AnimeJaNai V2 L2 | 20.7 fps | **35.5 fps** | |
+| AnimeJaNai V2 L3 | 13.3 fps | **30.2 fps** | |
+| AnimeJaNai V3 HD L1 | 34.9 fps | **36.3 fps** | |
+| AnimeJaNai V3 HD L2 | 20.5 fps | **36.2 fps** | 历史 77.5fps 见双路+NVENC 条目 |
+| AnimeJaNai V3 HD L3 | 13.2 fps | **30.0 fps** | |
+| Real-CUGAN x2 无降噪 | n/a（崩溃，见下） | 14.9 fps | |
+| Real-CUGAN x4 降噪3 | n/a（同上） | n/a（builder 显存不足） | |
+| Real-ESRGAN x4plus 动态(tile512) | 0.3 fps | **0.5 fps** | 重模型秒级/帧照旧 |
+| x4plus 官方 pth(torch tile256) | — | 0.4 fps(torch-CUDA) | |
+
+## TRT 未生效的根因与本日修复
+
+此前 TRT 下多数模型的 u8 图手术包装被拒绝，落回标准路径后 CPU 前后处理重新
+成为瓶颈——这就是「为什么有的 TRT 没生效」：
+
+1. **图导入层**：ORT-TRT 导入器禁止 UINT8 中间张量，旧包装尾链
+   `Cast(uint8)→Gather(通道反转)` 触发 ModelImporter 断言 → 包装 session 回退
+   CUDA EP → 与 TRT 主会话 A/B 对比差异超限弃用。**修复**：通道反转挪到浮点域
+   （`u8_wrap.py`），uint8 只出现在图边界；数学上逐位等价，test_u8_wrap 10 绿。
+2. **校验容差层**：门限 ≤1 按 DML 双路径同源校准；TRT 下包装跳过模型尾部
+   f32→f16 输出量化 + EP 融合舍入不同，常态差 1~3/255 且方向无害（包装更贴近
+   fp32 真值）。**修复**：`onnx_engine._validate_u8` 容差按 provider 分档，
+   Tensorrt=≤3 其余维持 ≤1。
+   修后验证（960x540 纯推理）：AnimeVideo xsx2 25.0→**5.4ms**、v3 x4 98.6→
+   **6.8ms**、V2 L1/L2/L3 28.7/30.7/33.6→**1.5/3.1/5.4ms**、HD L3 31.1→
+   **5.4ms**、CUGAN x2 33.4→**13.4ms**——TRT 全线点亮并大幅反超。
+
+端到端解读：轻模型（L1 类）推理已被三协程重叠埋进管线缝隙，两种后端同触
+~36fps 的读写/编码天花板；中型模型受益最直观（V2 L2 20.7→35.5fps，几乎翻倍）；
+4K 输出档受 x264 medium 编码限制，差距收窄（NVENC/双路并行可再解锁，见前文
+77.5fps 条目）。
+
+## CUGAN×DML 显存泄漏：已定论 + 产品围栏（2026-08-27 晚收尾）
+
+真凶（GBK 解码后抓出）：DML 驱动层 `0x887A0006`（DXGI_ERROR_DEVICE_REMOVED，
+"GPU 不响应更多的命令"）——设备被整体摘除，进程内所有 GPU 会话连坐挂死/段错误。
+
+**根因机制（层层排除后的唯一闭环）**：Real-CUGAN 这份权重在 DirectML 下
+**逐帧显存泄漏**，泄漏量与输出像素成正比：
+- 1080p→4K（输出 24.9MB/帧）：无论内容（平帧/噪声/真片）、线程（主/子/内联）、
+  包装（开/关）、预热、COM MTA、会话选项，**第 8 帧必崩**（BASIC）或 ~30 帧
+  （ENABLE_ALL——优化级别只延缓不根治）；
+- 540p→1080p：60 帧仍未爆（阈值更高，长视频终会爆）；
+- 其他全部模型同机制完好（AnimeJaNai 跨线程 0.76s 正常）——CUGAN 图结构特有；
+- 附带发现：该权重 CPU 与 DML 输出**语义级分歧**（原始浮点 maxdiff 0.76，
+  CPU 输出含负值），任何跨 EP 校验对它不成立；CUDA EP 实测同样挂起。
+
+**产品围栏（已落地，182 pytest 全绿）**：
+1. `real-cugan.json`：`u8_wrap=false`（DML 下禁包装，保持单会话）；
+2. `onnx_engine`：CUGAN×DML 自判禁包装 + `main_thread_only` 主线程内联执行；
+3. `worker`：DML/CUDA 后端创建 CUGAN 任务直接拒绝，报清晰指引
+   （"安装 TensorRT 组件走 TRT，或显式切 CPU 后端"）；TRT/CPU 放行
+   （TRT 端到端 14.9fps 验证正常）；bench 脚本同款 skip。
+
+**用户可见效果**：DML 默认引擎下 CUGAN 不可选（明确提示），不再出现
+"任务跑到一半进程崩溃/挂死"；TRT 组件用户不受影响。后续如 DML 驱动/ORT
+大版本升级，可移除围栏并复测（判定条件：1080p 连续 40+ 帧稳定）。
+
+## 天花板链路：双路并行 + NVENC（2026-08-27 晚）
+
+口径：40×无损循环拼成 3640 帧 1080p30 片源，两个独立子进程各跑一半分片
+（h264_nvenc 分片编码）→ ffmpeg concat 拷贝流拼接 → 混回源音轨；**墙钟覆盖
+引擎加载/双进程/编码/拼接全部**。编排脚本 `.tmp/bench_20260827/dual_run.sh`
+（每模型一对子进程、可错峰启动），部分产物 jsonl `dual_trt/dual_dml.jsonl`。
+
+| 模型 | TRT+双路+NVENC | DML+双路+NVENC |
+|---|---|---|
+| AnimeJaNai V2 L1 | **83.4 fps** | 69.1 |
+| AnimeJaNai V2 L2 | **79.2** | 29.5 |
+| AnimeJaNai V2 L3 | **45.8** | 16.3 |
+| AnimeJaNai V3 HD L1 | **83.3** | 67.2 |
+| AnimeJaNai V3 HD L2 | **78.9** | 28.6 |
+| AnimeJaNai V3 HD L3 | **45.6** | 16.2 |
+| AnimeVideo xs x2(→4K) | **46.3** | 16.2 |
+| AnimeVideo v3 x4(→8K) | n/a²（x264 参考 12.1） | n/a²（x264 参考 11.8） |
+| Real-CUGAN x2/x4 | 跳过（§13 立案） | 同左 |
+
+² 非 NVENC 故障：1080p 源过 v3-x4 输出为 7680×4320（8K），超出 H.264 尺寸规格——
+h264_nvenc 对超限分辨率报误导性的 `No capable devices found`（裸命令可复现且与
+并发/显存/后端无关；同尺寸 hevc_nvenc 正常、真 4K h264_nvenc 本日数十次全程无恙，
+77.5fps 历史值即 h264_nvenc@4K）。软编 libx264 无此限制故有参考值；8K 硬编需求
+应选 HEVC。产品侧可考虑对「x4×≥1080p 源 + H.264」组合做提交前预检提示，避免
+用户撞上这条报错（后续小改进候选）。
+
+要点：
+
+1. **产品天花板刷新到 ~83 fps**（L1 级轻模型），超过此前头条 77.5（那次的
+   5459 帧素材含更多启动摊销，且当时尾链未修复部分包装缺失）。轻模型的
+   瓶颈已完全是 NVENC 会话+读写管线，而非推理。
+2. 中型模型（L2/HD L2 类）TRT 双路稳定 ~79fps≈实时 2.6 倍（1080p30 口径）；
+   重一档（L3/xsx2）则掉回 45~46——它们的 1080p 输入单帧 ~60ms(修复后 TRT)，
+   两路并发的 GPU 时分复用恰好在 ~45fps 触顶，说明这批模型继续吃并行红利
+   需要换更快的 EP 或第三路。
+3. DML 列同样跑双路：除 L1 外全面大幅落后——DML 的同款权重在并发下接近
+   线性于其单帧耗时，「选 TRT」对双路收益的放大比单路更显著。
+4. **v3 x4 行缺席的真实原因（勘误后定论）**：1080p 源过 v3-x4 输出是
+   7680×4320——8K 已超 H.264 规格，h264_nvenc 对超限尺寸报误导性的
+   `No capable devices found`。三段裸命令验证闭环：h264_nvenc@真4K ✓、
+   h264_nvenc@8K ✗（同款报错）、hevc_nvenc@8K ✓。**与 NVENC 实现/驱动/
+   并发全部无关**——H.264 硬件编码在 ≤真4K 下全程正常（本日数十次任务、
+   历史 77.5fps 即 h264_nvenc@4K）。初判曾误立「NVENC@4K 故障」案，此处
+   撤销并更正记忆档案；教训：报错文案与推理矩阵的 hw_out 列都对得上时先对
+   尺寸再怀疑设备（engine 层 frame_w=源宽×倍率，x4 遇 1080p 源即越界）。
+   该行以双路+libx264 作参考值（12.1/11.8 fps，双双吃满 CPU，再次印证
+   「双路必须配硬编」）。

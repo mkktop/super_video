@@ -32,6 +32,7 @@ class ModelSpec:
     license: str = ""
     kind: str = "sr"  # sr（超分）| interp（补帧）
     fp16: bool = True  # False = 该模型 fp16 转换不可用（如 DML 加载崩溃）
+    u8_wrap: bool = True  # False = 禁用 uint8 包装双会话结构（CUGAN×DML 0x887A0006 前科）
     files: list[dict] = field(default_factory=list)
 
     @classmethod
@@ -43,6 +44,7 @@ class ModelSpec:
             tile_hint=d.get("tile_hint", 0), description=d.get("description", ""),
             vendor=d.get("vendor", ""), license=d.get("license", ""),
             kind=d.get("kind", "sr"), fp16=d.get("fp16", True),
+            u8_wrap=d.get("u8_wrap", True),
             files=d.get("files", []),
         )
 

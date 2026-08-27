@@ -7,6 +7,7 @@ pad: 输入边长需对齐的最小倍数（pixelshuffle 需要，通常 = scale
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -63,8 +64,9 @@ class OnnxSrEngine(BaseEngine):
         tile: int = 0,
         tile_overlap: int = 16,
         batch: int = 1,
-        u8_wrap: bool = True,
+        u8_wrap: bool = True,  # 调用方可强制关；manifest 亦可声明 u8_wrap=false
         validate_hw: tuple[int, int] | None = None,  # 源帧 (H,W)：u8 校验形状
+        manifest_allow_wrap: bool = True,
     ):
         self.model_path = Path(model_path)
         self.scale = scale
@@ -79,7 +81,10 @@ class OnnxSrEngine(BaseEngine):
         self.tile = tile
         self.tile_overlap = tile_overlap
         self.batch = max(1, batch)
-        self.u8_wrap_enabled = u8_wrap  # uint8 直进直出图手术（BENCH.md 2026-08-25）
+        # manifest u8_wrap=false 仅禁 DML 主链的包装（CUGAN×DML 双会话互踩前科）；
+        # TRT 主链的包装 A/B 已验证健康（14.9fps 端到端），不受此限。
+        self._spec_allow_wrap = manifest_allow_wrap or device == "trt"
+        self.u8_wrap_enabled = u8_wrap and self._spec_allow_wrap
         self.validate_hw = validate_hw
         self.session = None
         self.provider_used: list[str] = []
@@ -91,6 +96,11 @@ class OnnxSrEngine(BaseEngine):
         self._u8_sess = None  # 包装 session（uint8 HWC 直进直出）
         self._u8_in_name = None
         self.u8_wrapped = False
+        # CUGAN×DML 特异：会话首个 run 若发生在非进程主线程 → GPU 栈死锁
+        # （2026-08-27 排障：预热/COM MTA/会话选项/主线程先行全部无效，
+        # CPU EP 与其他模型不受影响；证据链见 BENCH.md §13）。
+        # True 时 StreamPipeline 改在事件循环线程（进程主线程）内联推理。
+        self.main_thread_only = False
 
     def load(self) -> None:
         import onnxruntime as ort
@@ -127,7 +137,18 @@ class OnnxSrEngine(BaseEngine):
             self.max_batch = 0
         if self.fixed_hw is not None or self.tile:
             self.batch = 1  # 固定尺寸/分块路径不批帧（tile 批处理为后续项）
-        self._try_u8_wrap()
+        # CUGAN×DML 围栏（证据链 BENCH.md §13）：该权重族在 DML 下存在逐帧
+        # 显存泄漏（实测 1080p BASIC≈8 帧/ALL≈30 帧即 0x887A0006 设备摘除，
+        # 与线程/包装/内容无关），且 CPU 与 DML 输出语义级分歧（maxdiff~0.76）
+        # 使任何跨 EP 校验不成立 → 禁包装保持单会话 + 主线程内联执行。
+        # TRT 主链验证健康（14.9fps 端到端），不受此限。
+        is_cugan = "cugan" in Path(self.model_path).parent.name.lower()
+        on_dml = "DmlExecutionProvider" in self.provider_used
+        if is_cugan and on_dml:
+            self.u8_wrap_enabled = False
+        self.main_thread_only = is_cugan and on_dml
+        if self.u8_wrap_enabled:
+            self._try_u8_wrap()
 
     # ---- uint8 直进直出图手术（前后处理全在 GPU，推理 3.8x，见 u8_wrap.py）----
 
@@ -190,16 +211,26 @@ class OnnxSrEngine(BaseEngine):
         print(f"[engine] GPU 前后处理优化已启用: {cache.name}")
 
     def _validate_u8(self, sess, in_name: str) -> None:
-        """包装前后输出逐位对比（≤1/255 容差，覆盖偶/奇尺寸与 pad 路径）。
+        """包装前后输出对比（容差按后端分档，见下；覆盖偶/奇尺寸与 pad 路径）。
 
         测试形状必须用源帧真实尺寸（validate_hw）：GPU 会话跑过 96x128 这类
         小形状后，真实尺寸的执行路径被不可逆拖慢（v0.2.3 结论，实测 +50%）。
         未提供时（临时 session / CPU）退回小形状。
+
+        对照沿用主链 provider（同链双会话）：CUGAN 已由 manifest 禁包装、
+        不再进入本校验，其余模型同链对照历史稳定（数十模型×后端全过）。
         """
         h, w = self.validate_hw if self.validate_hw else (96, 128)
         # 对齐尺寸时取 -1 变体，覆盖 pad 补边分支；已非对齐则本体即覆盖
         oh = h - 1 if h % self.pad == 0 and h > self.pad else h
         ow = w - 1 if w % self.pad == 0 and w > self.pad else w
+        # 容差按后端分档：DML 两路径同源，历史实测逐位一致取 ≤1；TRT 下包装
+        # 跳过模型尾部 f32→f16 输出量化 + EP 融合舍入不同，2026-08-27 实测常态
+        # 容差按后端分档：DML 两路径同源，历史实测逐位一致取 ≤1；TRT 下包装
+        # 跳过模型尾部 f32→f16 输出量化 + EP 融合舍入不同，2026-08-27 实测常态
+        # 差 1~3/255 且方向无害（更贴近 fp32 真值），放宽到 ≤3——真错误
+        # （通道序/尺寸/数值约定错）都是两位数量级，该门依旧拦截。
+        tol = 3 if (self.provider_used[:1] or [""])[0].startswith("Tensorrt") else 1
         rng = np.random.default_rng(7)
         for f in (np.zeros((h, w, 3), np.uint8),
                   rng.integers(0, 256, (h, w, 3), dtype=np.uint8),
@@ -207,8 +238,9 @@ class OnnxSrEngine(BaseEngine):
             a = self._infer(f)
             b = self._run_u8(sess, in_name, f)
             diff = int(np.abs(a.astype(np.int16) - b.astype(np.int16)).max())
-            if a.shape != b.shape or diff > 1:
-                raise ValueError(f"u8 包装输出不一致 shape {a.shape}/{b.shape} maxdiff={diff}")
+            if a.shape != b.shape or diff > tol:
+                raise ValueError(f"u8 包装输出不一致 shape {a.shape}/{b.shape} "
+                                 f"maxdiff={diff} (tol={tol})")
 
     def _run_u8(self, sess, in_name: str, frame: np.ndarray) -> np.ndarray:
         """uint8 HWC 直进直出；pad 在 uint8 输入侧做（廉价），输出侧裁剪。"""

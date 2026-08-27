@@ -387,6 +387,14 @@ class StreamPipeline:
                 if batch > 1:
                     outs = tx.process_batch(np.stack(frames))  # [N,H',W',3]
                     outs_list = [outs[i] for i in range(outs.shape[0])]
+                elif getattr(tx, "main_thread_only", False):
+                    # CUGAN×DML 围栏：该组合下 session.run 离开进程主线程即
+                    # GPU 栈死锁（onnx_engine.main_thread_only 注释/BENCH §13）。
+                    # 放弃读-写重叠、在事件循环线程（主线程）内联推理，正确性优先。
+                    f0 = frames[0]
+                    _t = time.perf_counter()
+                    outs_list = [tx.process(f0)]
+                    t_infer += time.perf_counter() - _t
                 else:
                     f0 = frames[0]
                     _t = time.perf_counter()

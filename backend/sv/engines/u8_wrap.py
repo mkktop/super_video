@@ -74,11 +74,17 @@ def wrap_u8(src: Path, dst: Path, *, color: str = "rgb", range_01: bool = True) 
                                   [f"clipped_{sfx}"]))
     nodes.append(helper.make_node("Transpose", [f"clipped_{sfx}"], [f"hwc_{sfx}"],
                                   perm=[0, 2, 3, 1]))
-    nodes.append(helper.make_node("Cast", [f"hwc_{sfx}"], [f"ou8_{sfx}"],
-                                  to=TensorProto.UINT8))
+    # bgr 的通道反转必须在浮点域、Cast(u8) 之前完成：TRT EP 拒绝图中 UINT8
+    # 中间张量，u8 只能出现在图边界（2026-08-27 实测——BGR 系包装全部被
+    # ORT-TRT 导入器拒绝的根因）。与逐元素算子交换顺序不改变输出逐位值。
     if color == "bgr":
-        nodes.append(helper.make_node("Gather", [f"ou8_{sfx}", f"flip_{sfx}"],
-                                      ["out_u8"], axis=3))
+        nodes.append(helper.make_node("Gather", [f"hwc_{sfx}", f"flip_{sfx}"],
+                                      [f"hwcflip_{sfx}"], axis=3))
+        cast_src = f"hwcflip_{sfx}"
+    else:
+        cast_src = f"hwc_{sfx}"
+    nodes.append(helper.make_node("Cast", [cast_src], ["out_u8"],
+                                  to=TensorProto.UINT8))
 
     # ---- 输入侧：原输入改为由前置链生产（uint8 NHWC 直进） ----
     old_in_name = old_in.name
@@ -110,7 +116,7 @@ def wrap_u8(src: Path, dst: Path, *, color: str = "rgb", range_01: bool = True) 
         g.node.insert(i, n)  # 前置链必须插表头（拓扑序）
     g.node.extend(nodes)
 
-    out_name = "out_u8" if color == "bgr" else f"ou8_{sfx}"
+    out_name = "out_u8"
     g.output.append(helper.make_tensor_value_info(out_name, TensorProto.UINT8,
                                                   ["n", "h", "w", 3]))
     f32 = TensorProto.FLOAT
@@ -118,8 +124,9 @@ def wrap_u8(src: Path, dst: Path, *, color: str = "rgb", range_01: bool = True) 
         helper.make_tensor(f"c255f_{sfx}", f32, [], [255.0]),
         helper.make_tensor(f"c0_{sfx}", f32, [], [0.0]),
         helper.make_tensor(f"c255u_{sfx}", f32, [], [255.0]),
-        helper.make_tensor(f"flip_{sfx}", TensorProto.INT64, [3], [2, 1, 0]),
     ]
+    if color == "bgr":
+        inits.append(helper.make_tensor(f"flip_{sfx}", TensorProto.INT64, [3], [2, 1, 0]))
     existing = {i.name for i in g.initializer}
     for t in inits:
         if t.name in existing:

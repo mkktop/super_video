@@ -125,6 +125,16 @@ def _load_onnx_engine(
 
     # 推理后端：设置 engine=trt 时走 TensorRT 链（TRT 不可用引擎层自动回退）
     ort_device = "trt" if settings.load().get("engine") == "trt" else "auto"
+    # CUGAN×DML 逐帧显存泄漏（实测 1080p BASIC≈8 帧、ALL≈30 帧即 0x887A0006
+    # 设备摘除，全 GPU 会话连坐；540p 阈值更高但终会爆；与线程/包装/内容无关），
+    # CUDA EP 实测同样挂起。仅 TRT 与显式 CPU 可用（TRT 端到端 14.9fps 验证）。
+    # 证据链 BENCH.md §13。此处直接拒绝，避免用户任务跑到一半设备崩溃。
+    eng_setting = settings.load().get("engine")
+    if "cugan" in spec.id.lower() and eng_setting not in ("trt", "cpu"):
+        raise RuntimeError(
+            f"模型 {spec.id} 在 DirectML/CUDA 后端存在 GPU 显存泄漏崩溃（实测高分辨率"
+            f"约 8~30 帧即设备摘除），当前设置 engine={eng_setting or 'auto'} 不可用。"
+            f"请安装 TensorRT 组件并将引擎设为 TensorRT，或显式切换到 CPU 后端（较慢）。")
     if ort_device == "trt":
         if getattr(sys, "frozen", False):
             # 安装版：激活 TRT 组件（GPU 版 onnxruntime 重定向）。必须在
