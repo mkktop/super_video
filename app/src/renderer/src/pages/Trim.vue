@@ -20,6 +20,7 @@ const probing = ref(false)
 const startSec = ref(0)
 const endSec = ref(0)
 const output = ref('')
+const outputTouched = ref(false) // 手改/手选过输出路径后，区间联动不再覆盖（与新建任务页同款规则）
 const job = ref<TrimJob | null>(null)
 const polling = ref<ReturnType<typeof setInterval> | null>(null)
 const videoEl = ref<HTMLVideoElement | null>(null)
@@ -56,6 +57,7 @@ async function load(path: string) {
   probeInfo.value = null
   job.value = null
   previewBroken.value = false
+  outputTouched.value = false // 换文件：恢复自动填充
   probing.value = true
   const r = await api.probe(path)
   if (seq !== probeSeq) return // 已重选其他文件：丢弃过期响应
@@ -72,7 +74,7 @@ async function load(path: string) {
 }
 
 function autoFillOutput() {
-  if (!input.value) return
+  if (!input.value || outputTouched.value) return
   const m = input.value.match(/^(.*?)(\.[^.]+)?$/)
   output.value = `${m?.[1]}_cut_${ts(startSec.value)}-${ts(endSec.value)}.mp4`
 }
@@ -87,7 +89,10 @@ watch([startSec, endSec], autoFillOutput)
 
 async function pickOutputFile() {
   const p = await window.sv.pickOutput(output.value || 'cut.mp4')
-  if (p) output.value = p
+  if (p) {
+    output.value = p
+    outputTouched.value = true
+  }
 }
 
 function markStart() {
@@ -183,6 +188,11 @@ function toCompare() {
 }
 </script>
 
+<script lang="ts">
+// KeepAlive include 按名匹配：剪切进行中切页回来，区间与结果卡不丢
+export default { name: 'Trim' }
+</script>
+
 <template>
   <div class="trim-page">
     <h2 class="title">视频剪切</h2>
@@ -250,7 +260,7 @@ function toCompare() {
         </div>
         <div class="row">
           <span class="lbl">输出到</span>
-          <input v-model="output" class="out-input" spellcheck="false" />
+          <input v-model="output" class="out-input" spellcheck="false" @input="outputTouched = true" />
           <NButton size="tiny" @click="pickOutputFile">浏览…</NButton>
         </div>
       </NCard>

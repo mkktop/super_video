@@ -212,10 +212,10 @@ h2 { font-size: 15px; font-weight: 600; color: #c6cad0; }
 .tc-proc { display: flex; gap: 22px; margin-left: auto; }
 .tc-proc > div { text-align: center; }
 .tc-proc b { font-size: 16px; font-weight: 700; display: block; font-variant-numeric: tabular-nums; }
-.tc-proc span { font-size: 11px; color: #6b7280; }
-.tc-proc-wait { font-size: 12px; color: #6b7280; }
+.tc-proc span { font-size: 11px; color: #8a919c; }
+.tc-proc-wait { font-size: 12px; color: #8a919c; }
 
 .chart-card { padding: 16px 18px 12px; }
 .chart-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
-.chart-note { font-size: 11.5px; color: #6b7280; }
+.chart-note { font-size: 11.5px; color: #8a919c; }
 </style>

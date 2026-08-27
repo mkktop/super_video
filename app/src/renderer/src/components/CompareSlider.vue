@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onActivated, onBeforeUnmount, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 
 defineProps<{ srcUrl: string; outUrl: string }>()
 const pos = ref(50)
@@ -31,6 +31,11 @@ function onKey(e: KeyboardEvent) {
 
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
+// 父页面（模型对比）KeepAlive 常驻：切页时摘掉全局键盘监听
+// （对比页 Compare 走正常卸载路径，两套钩子都挂，addEventListener 同函数幂等）
+onActivated(() => window.addEventListener('keydown', onKey))
+onDeactivated(() => window.removeEventListener('keydown', onKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>

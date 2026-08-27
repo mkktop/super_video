@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { NButton, NSlider } from 'naive-ui'
 import { mediaSrc } from '../api'
 
@@ -94,13 +94,33 @@ function onKey(e: KeyboardEvent) {
   else if (e.key === 'ArrowRight') pos.value = Math.min(100, pos.value + step)
 }
 
+function startRaf() {
+  if (!raf) raf = requestAnimationFrame(tick)
+}
+function stopRaf() {
+  if (raf) {
+    cancelAnimationFrame(raf)
+    raf = 0
+  }
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onKey)
-  raf = requestAnimationFrame(tick)
+  startRaf()
+})
+// 父页面（模型对比）KeepAlive 常驻：切页时停掉全局键盘监听与 rAF，
+// 否则在别的页按 ←/→ 会挪看不见的分割线；对比页(Compare)走正常卸载路径
+onActivated(() => {
+  window.addEventListener('keydown', onKey)
+  startRaf()
+})
+onDeactivated(() => {
+  window.removeEventListener('keydown', onKey)
+  stopRaf()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
-  cancelAnimationFrame(raf)
+  stopRaf()
 })
 </script>
 

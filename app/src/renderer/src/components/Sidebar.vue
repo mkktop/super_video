@@ -8,7 +8,9 @@ const items = computed(() => [
     key: 'tasks',
     label: '任务',
     icon: 'tasks',
+    // 蓝徽标=在跑/排队数；红徽标=失败数（无人盯也会错过失败，给个常驻角标）
     badge: store.tasks.filter((t) => t.status === 'running' || t.status === 'queued').length,
+    failed: store.tasks.filter((t) => t.status === 'failed').length,
   },
   { key: 'newtask', label: '新建任务', icon: 'plus' },
   { key: 'models', label: '模型市场', icon: 'cube' },
@@ -84,6 +86,9 @@ const miniPerf = computed(() => {
         </span>
         <span class="label">{{ it.label }}</span>
         <span v-if="it.badge" class="badge">{{ it.badge }}</span>
+        <span v-if="it.failed" class="badge badge-err" :title="`${it.failed} 个任务失败`">
+          {{ it.failed }}
+        </span>
       </button>
     </nav>
     <div class="foot-col">
@@ -163,9 +168,18 @@ const miniPerf = computed(() => {
   justify-content: center;
   padding: 0 5px;
 }
+.badge-err {
+  background: transparent;
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.55);
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  margin-left: -2px;
+}
 .soon {
   font-size: 10px;
-  color: #6b7280;
+  color: #8a919c;
   border: 1px solid #3a3f45;
   border-radius: 4px;
   padding: 1px 4px;
@@ -177,7 +191,7 @@ const miniPerf = computed(() => {
 }
 .foot-perf {
   font-size: 11px;
-  color: #6b7280;
+  color: #8a919c;
   padding: 0 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -188,7 +202,7 @@ const miniPerf = computed(() => {
   gap: 7px;
   padding: 8px 12px;
   font-size: 12px;
-  color: #6b7280;
+  color: #8a919c;
 }
 .dot {
   width: 7px;

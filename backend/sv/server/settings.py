@@ -14,6 +14,8 @@ DEFAULTS = {
     "auto_update_check": True,  # 启动时自动检查 GitHub Releases 更新
     "parallel_streams": False,  # 双路并行：两进程分段同时推理（实测 +17~21%，显存翻倍）
     "output_dir": "",  # 默认输出目录：空 = 与源视频同目录；超分任务/剪切未显式指定输出时写到这里（不存在则自动建）
+    "notify_task_done": True,  # 任务完成/失败时系统通知+闪任务栏（renderer 读；窗口聚焦时不打扰）
+    "close_to_tray": False,  # 关闭按钮=最小化到系统托盘继续处理任务（托盘菜单退出应用）
 }
 
 SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
@@ -52,6 +54,10 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 auto_update_check 值: {v}")
             if k == "parallel_streams" and not isinstance(v, bool):
                 raise ValueError(f"非法 parallel_streams 值: {v}")
+            if k == "notify_task_done" and not isinstance(v, bool):
+                raise ValueError(f"非法 notify_task_done 值: {v}")
+            if k == "close_to_tray" and not isinstance(v, bool):
+                raise ValueError(f"非法 close_to_tray 值: {v}")
             if k == "output_dir":
                 if not isinstance(v, str):
                     raise ValueError(f"非法 output_dir 值: {v}")

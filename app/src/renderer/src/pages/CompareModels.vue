@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NProgress,
@@ -230,7 +230,11 @@ function onKey(e: KeyboardEvent) {
     curModel.value = doneEntries.value[n - 1].model_id
   }
 }
+// 本页 KeepAlive 常驻：卸载不再发生，切页时须手动摘掉全局键盘监听
+// （否则在别的页敲数字会切到看不见的对比模型）
 onMounted(() => window.addEventListener('keydown', onKey))
+onActivated(() => window.addEventListener('keydown', onKey)) // addEventListener 同函数幂等
+onDeactivated(() => window.removeEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 /** 用此模型发起正式任务：视频→新建任务（预填源视频），图片→图片超分页 */

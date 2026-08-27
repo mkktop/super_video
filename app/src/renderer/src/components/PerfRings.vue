@@ -72,7 +72,7 @@ const rings = computed<Ring[]>(() => {
             :stroke-dasharray="`${(RING_C * Math.min(r.pct, 100)) / 100} ${RING_C}`"
           />
         </svg>
-        <span class="ring-pct" :style="{ color: r.na ? '#5c626b' : r.color }">
+        <span class="ring-pct" :style="{ color: r.na ? '#767d88' : r.color }">
           {{ r.na ? '—' : `${Math.round(r.pct)}%` }}
         </span>
       </div>
@@ -127,7 +127,7 @@ const rings = computed<Ring[]>(() => {
 }
 .g-sub {
   font-size: 11.5px;
-  color: #6b7280;
+  color: #8a919c;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

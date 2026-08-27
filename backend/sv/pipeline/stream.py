@@ -151,9 +151,13 @@ def fps_double(fps_str: str) -> str:
     return str(Fraction(fps_str) * 2)
 
 
-def audio_args(enc: EncodeOpts, mp4_family: bool, audio_codec: str | None) -> list[str]:
-    """音轨参数：auto=mp4 家族且编码可拷则 copy 否则 aac；显式 copy/aac/flac/none 直取。"""
-    if enc.audio_mode == "none":
+def audio_args(enc: EncodeOpts, mp4_family: bool, audio_codecs: list[str]) -> list[str]:
+    """音轨参数（源全部音轨一并映射，audio_codecs=各轨编码）：
+    - 显式 copy/aac/flac：全轨统一
+    - auto：mkv 全轨 copy；mp4 全轨可混则 copy、全不可混则统一 aac，
+      混合源逐轨定（不因单轨不兼容整体重编码）
+    """
+    if enc.audio_mode == "none" or not audio_codecs:
         return []
     if enc.audio_mode == "copy":
         return ["-c:a", "copy"]
@@ -163,14 +167,26 @@ def audio_args(enc: EncodeOpts, mp4_family: bool, audio_codec: str | None) -> li
         return ["-c:a", "aac", "-b:a", "192k"]
     if not mp4_family:
         # mkv 混流能力宽（flac/mp3/dts/truehd…皆可），auto 尽量无损 copy 少一代有损
-        return ["-c:a", "copy"] if audio_codec else []
-    copyable = audio_codec in _MP4_AUDIO_COPY_OK
-    return ["-c:a", "copy"] if copyable else ["-c:a", "aac", "-b:a", "192k"]
+        return ["-c:a", "copy"]
+    copyable = [c in _MP4_AUDIO_COPY_OK for c in audio_codecs]
+    if all(copyable):
+        return ["-c:a", "copy"]
+    if not any(copyable):
+        return ["-c:a", "aac", "-b:a", "192k"]
+    # 混合源：逐轨定（可混 copy / 不可混 aac），不因单轨不兼容整体重编码
+    args: list[str] = []
+    for i, ok in enumerate(copyable):
+        if ok:
+            args += [f"-c:a:{i}", "copy"]
+        else:
+            args += [f"-c:a:{i}", "aac", f"-b:a:{i}", "192k"]
+    return args
 
 
 def subtitle_args(enc: EncodeOpts, sub_codecs: list[str]) -> list[str]:
     """字幕轨映射（源文件=第二输入，下标 1）：
-    - mkv：全部字幕流原样保留（含图形字幕 PGS/DVB）
+    - mkv：全部字幕流原样保留（含图形字幕 PGS/DVB），并带上内嵌字体附件
+      （ASS 特效字依赖；mp4 家族挂附件会直接混流失败，故仅 mkv）
     - mp4/mov：仅当全部为文本字幕时转 mov_text，否则整体丢弃（避免 PGS 混流失败）
     """
     if enc.subtitle_mode != "auto" or not sub_codecs:
@@ -179,7 +195,7 @@ def subtitle_args(enc: EncodeOpts, sub_codecs: list[str]) -> list[str]:
         if all(c in _TEXT_SUBS for c in sub_codecs):
             return ["-map", "1:s?", "-c:s", "mov_text"]
         return []
-    return ["-map", "1:s?", "-c:s", "copy"]
+    return ["-map", "1:s?", "-c:s", "copy", "-map", "1:t?"]
 
 
 def encoder_cmd(
@@ -192,7 +208,7 @@ def encoder_cmd(
     fps_str: str,
     enc: EncodeOpts,
     with_audio: bool,  # 挂第二输入（源文件，取音轨/字幕）
-    audio_codec: str | None,
+    audio_codecs: list[str] | None,  # 源各音轨编码（全部映射；None/空=不挂音轨）
     sub_codecs: list[str] | None = None,
     start_number: int = 1,  # 图片序列：本段首帧的全局帧号（分段续跑全局编号）
 ) -> list[str]:
@@ -210,7 +226,8 @@ def encoder_cmd(
         cmd += ["-start_number", str(start_number), "-f", "image2", str(output_path)]
         return cmd
     subs = sub_codecs or []
-    mux_source = with_audio and (bool(audio_codec) or bool(subs))
+    tracks = list(audio_codecs or [])
+    mux_source = with_audio and (bool(tracks) or bool(subs))
     cmd = [
         ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
         "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -220,17 +237,18 @@ def encoder_cmd(
         cmd += ["-i", str(input_path)]
     cmd += ["-map", "0:v:0"]
     if mux_source:
-        if audio_codec:
-            cmd += ["-map", "1:a:0?"]
+        if tracks:
+            cmd += ["-map", "1:a?"]  # 全部音轨（此前仅 1:a:0，多轨源会静默丢轨）
         cmd += subtitle_args(enc, subs)
+        cmd += ["-map_chapters", "1"]  # 章节从源继承（显式声明；默认取"首个含章节的输入"）
 
     cmd += video_codec_args(enc)
     if (target_w, target_h) != (frame_w, frame_h):
         cmd += ["-vf", f"scale={target_w}:{target_h}:flags=lanczos"]
 
     if mux_source:
-        if audio_codec:
-            cmd += audio_args(enc, enc.mp4_family, audio_codec)
+        if tracks:
+            cmd += audio_args(enc, enc.mp4_family, tracks)
         else:
             cmd += ["-an"]
     if enc.mp4_family:
@@ -299,7 +317,8 @@ class StreamPipeline:
             target_w, target_h = info.width * target, info.height * target
         output_path = self.output_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        audio_codec = info.audio[0].codec if info.has_audio else None
+        audio_codecs = ([a.codec for a in info.audio]
+                        if info.has_audio and enc.audio_mode != "none" else [])
         sub_codecs = list(getattr(info, "subtitles", []) or [])
         out_fps_str = fps_double(info.fps_str) if self.interp is not None else info.fps_str
 
@@ -313,7 +332,7 @@ class StreamPipeline:
         enc_proc = asyncio.create_subprocess_exec(
             *encoder_cmd(info.path, output_path, frame_w, frame_h, target_w, target_h,
                          out_fps_str, enc, self.with_audio,
-                         audio_codec, sub_codecs, start_number=self.frame_start),
+                         audio_codecs, sub_codecs, start_number=self.frame_start),
             stdin=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,

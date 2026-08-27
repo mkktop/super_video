@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('sv', {
   backendInfo: () => ipcRenderer.invoke('backend:info') as Promise<{ baseUrl: string; token?: string }>,
@@ -32,14 +32,28 @@ contextBridge.exposeInMainWorld('sv', {
   showInFolder: (p: string) => ipcRenderer.invoke('shell:showInFolder', p),
   fsExists: (p: string) => ipcRenderer.invoke('fs:exists', p) as Promise<boolean>,
   openPath: (p: string) => ipcRenderer.invoke('shell:openPath', p) as Promise<void>,
+  // 拖拽取本地路径：Electron 43 的 File.path 已移除，必须走 webUtils
+  pathForFile: (f: File) => webUtils.getPathForFile(f),
+  // 任务终态通知（未聚焦时系统通知+闪任务栏）与任务栏进度
+  taskEvent: (kind: 'done' | 'failed', name: string) =>
+    ipcRenderer.send('task:event', { kind, name }),
+  taskProgress: (pct: number) => ipcRenderer.send('task:progress', pct),
   win: {
     minimize: () => ipcRenderer.send('win:minimize'),
     toggleMaximize: () => ipcRenderer.send('win:toggle-maximize'),
     close: () => ipcRenderer.send('win:close'),
+    // 「关闭时最小化到托盘」模式开关（主进程建/撤托盘并改变关闭手势行为）
+    setCloseToTray: (v: boolean) => ipcRenderer.send('win:set-close-to-tray', v),
     onMaximized: (cb: (max: boolean) => void) => {
       const fn = (_e: IpcRendererEvent, max: boolean) => cb(max)
       ipcRenderer.on('win:maximized', fn)
       return () => ipcRenderer.removeListener('win:maximized', fn)
     },
+  },
+  // 通知点击后主进程聚焦窗口并让 renderer 跳任务页
+  onNavigate: (cb: (page: string) => void) => {
+    const fn = (_e: IpcRendererEvent, page: string) => cb(page)
+    ipcRenderer.on('win:navigate', fn)
+    return () => ipcRenderer.removeListener('win:navigate', fn)
   },
 })

@@ -177,8 +177,9 @@ class ChunkedPipeline:
         # ---- 编码：PNG 序列 + 源音轨/字幕 ----
         output_path = self.output_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        audio_codec = info.audio[0].codec if info.has_audio else None
-        has_audio = info.has_audio and enc.audio_mode != "none"
+        audio_codecs = ([a.codec for a in info.audio]
+                        if info.has_audio and enc.audio_mode != "none" else [])
+        has_audio = bool(audio_codecs)
         subs = list(getattr(info, "subtitles", []) or [])
         cmd = [
             ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
@@ -189,15 +190,16 @@ class ChunkedPipeline:
         cmd += ["-map", "0:v:0"]
         if has_audio or subs:
             if has_audio:
-                cmd += ["-map", "1:a:0?"]
+                cmd += ["-map", "1:a?"]  # 全部音轨（此前仅 1:a:0，多轨源会静默丢轨）
             cmd += subtitle_args(enc, subs)
+            cmd += ["-map_chapters", "1"]
         cmd += video_codec_args(enc)
         if self.target_size is not None:
             tw, th = self.target_size
             if (tw, th) != (info.width * tx.scale, info.height * tx.scale):
                 cmd += ["-vf", f"scale={tw}:{th}:flags=lanczos"]
         if has_audio:
-            cmd += audio_args(enc, enc.mp4_family, audio_codec)
+            cmd += audio_args(enc, enc.mp4_family, audio_codecs)
         if enc.mp4_family:
             cmd += ["-movflags", "+faststart"]
         cmd += [str(output_path)]

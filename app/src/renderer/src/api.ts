@@ -113,6 +113,7 @@ export interface ProbeInfo {
   codec: string
   pix_fmt: string
   has_audio: boolean
+  audio_tracks?: string[]
   subtitles?: string[]
 }
 

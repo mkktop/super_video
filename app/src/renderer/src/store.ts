@@ -71,6 +71,7 @@ export const ui = reactive({
   pendingModel: null as string | null, // 跳转时预选的模型（模型对比→新建任务/图片超分衔接）
   pendingScale: null as number | null,
   pendingCompare: null as { input: string; start_s: number; end_s: number } | null, // 剪切页→模型对比：带区间直达
+  pendingTaskParams: null as Task | null, // 失败/取消任务「改参数重试」：带原参数进新建任务页
 })
 
 /** 跳转新建任务页并预填输入文件 */
@@ -87,6 +88,9 @@ export function openCompare(taskId: string) {
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 let wsOk = false
+// 视为"正在运行"的任务 id 集合：跨过 renderer 重载也不漏掉完成通知
+// （启动时从当前任务列表回填，终态事件靠它识别迁移）
+const runningIds = new Set<string>()
 
 /** 任务逐字段相等（params 深比较）。相等时保留旧对象引用，TaskCard 的 props
  *  不变即可整体跳过重渲染——高频轮询下只有真正变化的卡片会重新渲染。 */
@@ -117,6 +121,9 @@ export async function refreshTasks() {
   } catch {
     store.connected = false
   }
+  // 任务栏进度条：有运行中任务按帧数百分比，否则清除（<0）
+  const r = store.tasks.find((t) => t.status === 'running')
+  window.sv.taskProgress(r && r.total_frames ? Math.min(1, r.progress_frames / r.total_frames) : -1)
 }
 
 function scheduleRefresh() {
@@ -215,7 +222,20 @@ function handleWsEvent(raw: MessageEvent) {
       return
     }
     // 统计只在状态切换时刷新（低频）；progress 高频事件只驱动列表刷新
-    if (ev.type === 'task_status') refreshStats()
+    if (ev.type === 'task_status') {
+      refreshStats()
+      // running→终态迁移 → 系统通知+任务栏闪烁（主进程判定窗口焦点）。
+      // 事件先于列表刷新到达，此时 store 里还是旧态：任务名从列表取得到。
+      if (typeof ev.task_id === 'string') {
+        if (ev.status === 'running') runningIds.add(ev.task_id)
+        else if ((ev.status === 'done' || ev.status === 'failed') && runningIds.delete(ev.task_id)) {
+          const name =
+            store.tasks.find((t) => t.id === ev.task_id)?.input_path.split(/[\\/]/).pop() ?? ''
+          // 设置「任务完成通知」关闭时只静默更新列表（任务栏进度条不受影响）
+          if (store.settings.notify_task_done !== false) window.sv.taskEvent(ev.status, name)
+        }
+      }
+    }
   } catch {
     /* 非 JSON 事件按任务刷新处理 */
   }
@@ -294,7 +314,11 @@ export async function initStore() {
     } catch {
       /* 设置读取失败按默认(自动检查开) */
     }
+    // 「关闭到托盘」行为由主进程执行：读到设置后同步过去（托盘随之建立）
+    window.sv.win.setCloseToTray(store.settings.close_to_tray === true)
     await Promise.all([refreshTasks(), refreshStats(), refreshPerf(), refreshTrt()])
+    // renderer 中途重启：把已 running 的任务补进通知追踪集合
+    for (const t of store.tasks) if (t.status === 'running') runningIds.add(t.id)
     store.initError = ''
     store.ready = true
     connectWs()

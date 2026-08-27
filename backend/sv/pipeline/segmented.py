@@ -52,9 +52,11 @@ def concat_segments(work: Path, info: MediaInfo, enc: EncodeOpts,
     """concat 视频段 + 源音轨/字幕 → 最终输出（-c:v copy，秒级）。
 
     双路并行时由协调 worker 在两路都完成后调用（各分片 worker 不做合成）。
+    音轨全部映射（auto 逐轨定 copy/aac），章节与 mkv 字体附件一并从源继承。
     """
-    audio_codec = info.audio[0].codec if info.has_audio else None
-    has_audio = info.has_audio and enc.audio_mode != "none"
+    audio_codecs = ([a.codec for a in info.audio]
+                    if info.has_audio and enc.audio_mode != "none" else [])
+    has_audio = bool(audio_codecs)
     subs = list(getattr(info, "subtitles", []) or [])
     seglist = work / "segments.txt"
     seglist.write_text(
@@ -70,11 +72,12 @@ def concat_segments(work: Path, info: MediaInfo, enc: EncodeOpts,
     cmd += ["-map", "0:v:0"]
     if has_audio or subs:
         if has_audio:
-            cmd += ["-map", "1:a:0?"]
+            cmd += ["-map", "1:a?"]  # 全部音轨（此前仅 1:a:0，多轨源会静默丢轨）
         cmd += subtitle_args(enc, subs)
+        cmd += ["-map_chapters", "1"]
     cmd += ["-c:v", "copy"]
     if has_audio:
-        cmd += audio_args(enc, enc.mp4_family, audio_codec)
+        cmd += audio_args(enc, enc.mp4_family, audio_codecs)
     if enc.mp4_family:
         cmd += ["-movflags", "+faststart"]
     cmd += [str(output_path)]

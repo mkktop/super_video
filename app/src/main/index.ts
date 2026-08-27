@@ -4,7 +4,18 @@
  * 有任务运行时退出 UI 不杀 sidecar，重启后自动复用（启动时先探测复用，
  * 只有复用失败才清理残留进程——见 whenReady 的顺序）。
  */
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Notification,
+  shell,
+  Tray,
+  type NativeImage,
+} from 'electron'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import crypto from 'node:crypto'
 import net from 'node:net'
@@ -19,6 +30,105 @@ let mainWindow: BrowserWindow | null = null
 let sidecar: ChildProcess | null = null
 let baseUrl = ''
 let apiToken = '' // 本地 API 令牌：写 dataRoot/.tmp/sidecar.token + spawn env，renderer 经 backend:info 取
+let closeConfirmed = false // 本次关窗已确认过（确认后放行真正的 close）
+let quittingForInstall = false // 更新安装拉起的退出：不能被关窗确认拦住
+let closeToTray = false // 设置「关闭时最小化到托盘」：关闭手势=隐藏窗口而非退出
+let explicitQuit = false // 托盘菜单「退出」：绕过托盘隐藏，走退出确认
+let tray: Tray | null = null
+
+/** 关窗确认：后端可达且有 running/queued 任务时问一次。
+ *  后端不可达 = 没有可中断的任务，直接退出（否则坏后端时窗口关不掉）。 */
+async function confirmClose(): Promise<void> {
+  const win = mainWindow
+  if (!win) return
+  let active = false
+  try {
+    const r = await fetch(`${baseUrl}/api/tasks`)
+    const tasks = (await r.json()) as Array<{ status: string }>
+    active = tasks.some((t) => t.status === 'running' || t.status === 'queued')
+  } catch {
+    active = false
+  }
+  if (!active || win.isDestroyed()) {
+    closeConfirmed = true
+    win.close()
+    return
+  }
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'question',
+    title: '任务正在运行',
+    message: '有超分任务正在处理，退出将中断当前任务。',
+    detail: '已完成的分段会保留，下次启动后可在任务列表点「继续」续跑。',
+    buttons: ['退出', '取消'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  })
+  if (win.isDestroyed()) return
+  if (response === 0) {
+    closeConfirmed = true
+    win.close()
+  } else {
+    explicitQuit = false // 取消退出：后续关闭手势恢复托盘隐藏行为
+  }
+}
+
+// ---- 系统托盘（「关闭时最小化到托盘」模式） ----
+
+/** 显示/还原主窗口（从托盘点击、通知点击、二次启动聚焦共用） */
+function showMainWindow(): void {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win || win.isDestroyed()) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
+/** 托盘图标：dev 用 build/icon.ico；打包后 build/ 不进 asar，取 exe 文件图标 */
+async function trayIconImage(): Promise<NativeImage> {
+  const p = path.join(__dirname, '../../build/icon.ico')
+  if (fs.existsSync(p)) {
+    return nativeImage.createFromPath(p).resize({ width: 16, height: 16 })
+  }
+  try {
+    return await app.getFileIcon(process.execPath, { size: 'small' })
+  } catch {
+    return nativeImage.createEmpty()
+  }
+}
+
+async function ensureTray(): Promise<void> {
+  if (tray) return
+  const img = await trayIconImage()
+  if (img.isEmpty()) {
+    // 拿不到图标就别启用该模式：窗口隐藏后没有托盘入口会"消失"
+    closeToTray = false
+    console.warn('[tray] 图标获取失败，「关闭到托盘」本次不可用（照常退出）')
+    return
+  }
+  tray = new Tray(img)
+  tray.setToolTip('super_video')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '显示主窗口', click: () => showMainWindow() },
+      { type: 'separator' },
+      { label: '退出', click: () => quitFromTray() },
+    ]),
+  )
+  tray.on('click', () => showMainWindow())
+}
+
+function destroyTray(): void {
+  tray?.destroy()
+  tray = null
+}
+
+function quitFromTray(): void {
+  explicitQuit = true
+  // 窗口可能处于托盘隐藏态，确认框挂在窗口上——先显示再走关窗确认
+  showMainWindow()
+  mainWindow?.close()
+}
 
 function findRoot(): string {
   if (app.isPackaged) return process.resourcesPath  // 安装包布局：resources/{bin,sidecar}
@@ -300,6 +410,20 @@ function createWindow() {
     mainWindow?.webContents.send('win:maximized', !!mainWindow?.isMaximized())
   mainWindow.on('maximize', sendMaxState)
   mainWindow.on('unmaximize', sendMaxState)
+  // 任务栏闪烁在窗口重新获得焦点时清除（通知点击/用户点回窗口）
+  mainWindow.on('focus', () => mainWindow?.flashFrame(false))
+  // 有任务在跑时关窗需确认：退出会中断处理（分段保留、可续跑，但用户未必知道）
+  mainWindow.on('close', (e) => {
+    if (closeConfirmed || quittingForInstall || !baseUrl) return
+    if (closeToTray && !explicitQuit) {
+      // 「关闭到托盘」模式：关闭手势=隐藏窗口，任务继续跑、完成通知照常弹
+      e.preventDefault()
+      mainWindow?.hide()
+      return
+    }
+    e.preventDefault()
+    void confirmClose()
+  })
   // electron-vite dev 模式注入 ELECTRON_RENDERER_URL
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -317,8 +441,7 @@ if (!gotLock) {
   app.on('second-instance', () => {
     const win = BrowserWindow.getAllWindows()[0]
     if (win) {
-      if (win.isMinimized()) win.restore()
-      win.focus()
+      showMainWindow() // 托盘隐藏态也要能拉回来
     }
   })
 }
@@ -482,6 +605,7 @@ async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
 
 function installUpdate(): void {
   // 静默安装 + 装完自动拉起：辅助安装器(可选目录版)带 UI 运行会卡住更新流程
+  quittingForInstall = true // 安装路径的退出不做关窗确认
   getAutoUpdater().quitAndInstall(true, true)
 }
 
@@ -515,6 +639,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   // 第二实例的 quit 不能杀 sidecar——它属于正在运行的第一实例（含其任务）
   if (isSecondInstance) return
+  destroyTray()
   // 任何情况下退出都连带关掉 sidecar（用户明确要求）；
   // 若真有任务在跑，由 worker 的停止信号自行收尾
   killSidecar()
@@ -541,6 +666,45 @@ ipcMain.on('win:toggle-maximize', (e) => {
 })
 ipcMain.on('win:close', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
 
+// 「关闭到托盘」开关：renderer 读到设置后同步过来；开启即建托盘，关闭即撤
+ipcMain.on('win:set-close-to-tray', (_e, v: boolean) => {
+  closeToTray = !!v
+  if (closeToTray) void ensureTray()
+  else destroyTray()
+})
+
+// ---- 任务状态通知与任务栏进度 ----
+// renderer 在 WS 事件里检测 running→终态迁移后上报；窗口未聚焦时才弹系统通知
+// （聚焦时界面自身变化已足够），无论聚焦与否都闪一次任务栏图标。
+ipcMain.on('task:event', (_e, payload: { kind: 'done' | 'failed'; name: string }) => {
+  const win = BrowserWindow.getAllWindows()[0]
+  if (!win) return
+  win.flashFrame(true)
+  if (win.isFocused()) return
+  try {
+    const n = new Notification({
+      title: payload.kind === 'done' ? '超分任务完成' : '超分任务失败',
+      body: payload.name,
+    })
+    n.on('click', () => {
+      win.flashFrame(false)
+      // 窗口可能被最小化或托盘隐藏：完整还原
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+      win.webContents.send('win:navigate', 'tasks')
+    })
+    n.show()
+  } catch (e) {
+    console.warn('[notify] 系统通知不可用（仅闪烁任务栏）:', e)
+  }
+})
+
+// 任务栏进度：pct ∈ [0,1]，<0 清除；无 running 任务时 renderer 传 -1
+ipcMain.on('task:progress', (_e, pct: number) => {
+  BrowserWindow.getAllWindows()[0]?.setProgressBar(pct)
+})
+
 ipcMain.handle('dialog:pickVideo', async () => {
   const r = await dialog.showOpenDialog({
     properties: ['openFile', 'multiSelections'],
@@ -555,10 +719,15 @@ ipcMain.handle('dialog:pickVideo', async () => {
 })
 
 ipcMain.handle('dialog:pickOutput', async (_e, suggest: string) => {
-  const r = await dialog.showSaveDialog({
-    defaultPath: suggest,
-    filters: [{ name: 'MP4', extensions: ['mp4'] }, { name: 'MKV', extensions: ['mkv'] }],
-  })
+  // 过滤器跟随建议文件名的扩展名（MP4/MKV/MOV），另附所有文件兜底
+  const ext = (suggest.split('.').pop() ?? '').toLowerCase()
+  const filters = ['mp4', 'mkv', 'mov'].includes(ext)
+    ? [
+        { name: ext.toUpperCase(), extensions: [ext] },
+        { name: '所有文件', extensions: ['*'] },
+      ]
+    : [{ name: 'MP4', extensions: ['mp4'] }, { name: 'MKV', extensions: ['mkv'] }]
+  const r = await dialog.showSaveDialog({ defaultPath: suggest, filters })
   return r.canceled ? null : r.filePath
 })
 

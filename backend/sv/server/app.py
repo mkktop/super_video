@@ -236,6 +236,7 @@ def probe_media(body: ProbeBody) -> dict:
         "total_frames": info.total_frames,
         "codec": info.video_codec, "pix_fmt": info.pix_fmt,
         "has_audio": info.has_audio,
+        "audio_tracks": [a.codec for a in info.audio],
         "subtitles": info.subtitles,
     }
 

@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { NButton, NSwitch, useMessage } from 'naive-ui'
+import { nextTick, onMounted, onUnmounted, computed, ref } from 'vue'
+import { NButton, NInput, NSwitch, useMessage } from 'naive-ui'
 import { api } from '../api'
 
 const message = useMessage()
 
 const lines = ref<string[]>([])
+const query = ref('')
 const autoScroll = ref(true)
 const box = ref<HTMLElement | null>(null)
 let pinned = true // 用户是否停在底部;向上翻阅时不抢滚动位置
 let timer: ReturnType<typeof setInterval> | null = null
+
+// 子串过滤（不区分大小写）：排障时从 300 行里快速捞出相关行
+const shown = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return lines.value
+  return lines.value.filter((l) => l.toLowerCase().includes(q))
+})
 
 async function load() {
   try {
@@ -56,6 +64,13 @@ onUnmounted(() => {
         <p class="sub">sidecar 运行日志 · 最近 300 行 · 3 秒自动刷新</p>
       </div>
       <div class="head-actions">
+        <NInput
+          v-model:value="query"
+          size="small"
+          clearable
+          placeholder="过滤关键字…"
+          style="width: 200px"
+        />
         <span class="as-label">自动滚动</span>
         <NSwitch v-model:value="autoScroll" size="small" />
         <NButton size="small" @click="load">刷新</NButton>
@@ -65,8 +80,9 @@ onUnmounted(() => {
 
     <div ref="box" class="log-box" @scroll="onScroll">
       <div v-if="!lines.length" class="log-empty">暂无日志</div>
+      <div v-else-if="!shown.length" class="log-empty">没有匹配「{{ query.trim() }}」的行</div>
       <div
-        v-for="(l, i) in lines"
+        v-for="(l, i) in shown"
         :key="i"
         class="log-line"
         :class="{ err: isErr(l) }"
@@ -98,5 +114,5 @@ h1 { font-size: 20px; font-weight: 700; }
 }
 .log-line { white-space: pre-wrap; word-break: break-all; }
 .log-line.err { color: #f87171; }
-.log-empty { color: #5c626b; }
+.log-empty { color: #767d88; }
 </style>

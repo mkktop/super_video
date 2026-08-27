@@ -31,6 +31,8 @@ const trcBusy = ref(false)
 const parallelStreams = ref(false)
 const outputDir = ref('') // 全局输出目录（空 = 源视频同目录）
 const savingOutDir = ref(false)
+const notifyTask = ref(true) // 任务完成/失败系统通知
+const closeToTray = ref(false) // 关闭按钮=最小化到托盘
 // 已保存的引擎/精度（脏状态对比用；保存成功后同步）
 const savedEngine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
 const savedPrecision = ref<'fp16' | 'fp32'>('fp16')
@@ -108,6 +110,8 @@ onMounted(async () => {
     auto_update_check?: boolean
     output_dir?: string
     parallel_streams?: boolean
+    notify_task_done?: boolean
+    close_to_tray?: boolean
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
@@ -115,6 +119,8 @@ onMounted(async () => {
   perfSampling.value = s.perf_sampling !== false
   autoCheck.value = s.auto_update_check !== false
   outputDir.value = String(s.output_dir ?? '').trim()
+  notifyTask.value = s.notify_task_done !== false
+  closeToTray.value = s.close_to_tray === true
   const p = s.download_proxy ?? ''
   if (p === 'direct') proxyMode.value = 'direct'
   else if (p.startsWith('http')) {
@@ -158,6 +164,28 @@ async function saveAutoCheck(v: boolean) {
     message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
     autoCheck.value = !v
   }
+}
+
+async function saveNotifyTask(v: boolean) {
+  const r = await api.saveSettings({ notify_task_done: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    notifyTask.value = !v
+    return
+  }
+  store.settings = { ...store.settings, notify_task_done: v }
+}
+
+async function saveCloseToTray(v: boolean) {
+  const r = await api.saveSettings({ close_to_tray: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    closeToTray.value = !v
+    return
+  }
+  store.settings = { ...store.settings, close_to_tray: v }
+  // 行为主进程执行：开关即时生效（建/撤托盘）
+  window.sv.win.setCloseToTray(v)
 }
 
 async function checkUpdate() {
@@ -475,6 +503,30 @@ async function uninstallTrc() {
             <div class="row switch-row bordered-top">
               <span class="row-text">启动时自动检查更新<small>有新版本时在顶栏版本号旁提示</small></span>
               <NSwitch v-model:value="autoCheck" size="small" @update:value="saveAutoCheck" />
+            </div>
+          </div>
+        </section>
+
+        <!-- 通知与窗口 -->
+        <section class="card">
+          <header class="card-head">
+            <div class="card-title">通知与窗口</div>
+            <div class="card-sub">任务完成提醒与关闭按钮的行为</div>
+          </header>
+          <div class="card-body">
+            <div class="row switch-row">
+              <span class="row-text">
+                任务完成系统通知
+                <small>任务完成/失败时弹系统通知并闪烁任务栏图标（仅窗口未聚焦时打扰）；任务栏图标上的进度显示不受此开关影响</small>
+              </span>
+              <NSwitch v-model:value="notifyTask" size="small" @update:value="saveNotifyTask" />
+            </div>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                关闭时最小化到托盘
+                <small>点关闭按钮或 Alt+F4 时隐藏窗口到系统托盘，任务继续处理、通知照常弹出；从托盘图标菜单可还原窗口或退出应用</small>
+              </span>
+              <NSwitch v-model:value="closeToTray" size="small" @update:value="saveCloseToTray" />
             </div>
           </div>
         </section>

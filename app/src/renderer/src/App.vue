@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
 import {
   NConfigProvider,
   NGlobalStyle,
@@ -9,6 +8,7 @@ import {
   zhCN,
   type GlobalThemeOverrides,
 } from 'naive-ui'
+import { onMounted, onUnmounted } from 'vue'
 import { initStore, retryInit, store, ui } from './store'
 import TitleBar from './components/TitleBar.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -47,7 +47,13 @@ onMounted(() => {
   initStore().catch((e) => {
     store.initError = String(e)
   })
+  // 主进程请求的页面跳转（任务完成通知点击 → 任务页）
+  offNavigate = window.sv.onNavigate((page) => {
+    if (page === 'tasks') ui.page = 'tasks'
+  })
 })
+let offNavigate: (() => void) | null = null
+onUnmounted(() => offNavigate?.())
 </script>
 
 <template>
@@ -70,18 +76,22 @@ onMounted(() => {
               <div class="init-error-detail">{{ store.initError }}</div>
               <n-button type="primary" size="small" @click="retryInit">重试</n-button>
             </div>
-            <!-- 新建任务页 v-show 常驻挂载：填一半切去别的页再回来，草稿不丢 -->
-            <NewTask v-show="ui.page === 'newtask'" />
-            <Home v-if="ui.page === 'home'" />
-            <Trim v-else-if="ui.page === 'trim'" />
-            <ImageSR v-else-if="ui.page === 'imagesr'" />
-            <CompareModels v-else-if="ui.page === 'mcompare'" />
-            <Tasks v-else-if="ui.page === 'tasks'" />
-            <Models v-else-if="ui.page === 'models'" />
-            <Perf v-else-if="ui.page === 'perf'" />
-            <Logs v-else-if="ui.page === 'logs'" />
-            <Compare v-else-if="ui.page === 'compare'" />
-            <Settings v-else-if="ui.page === 'settings'" />
+            <!-- 表单/作业页 KeepAlive 常驻（NewTask/Trim/ImageSR/CompareModels）：
+                 填一半切页草稿不丢、剪切/对比进行中切页回来结果还在；
+                 其余页面照常即挂即卸。常驻页的全局监听须配 onActivated/onDeactivated 守卫 -->
+            <KeepAlive :include="['NewTask', 'Trim', 'ImageSR', 'CompareModels']">
+              <NewTask v-if="ui.page === 'newtask'" />
+              <Home v-else-if="ui.page === 'home'" />
+              <Trim v-else-if="ui.page === 'trim'" />
+              <ImageSR v-else-if="ui.page === 'imagesr'" />
+              <CompareModels v-else-if="ui.page === 'mcompare'" />
+              <Tasks v-else-if="ui.page === 'tasks'" />
+              <Models v-else-if="ui.page === 'models'" />
+              <Perf v-else-if="ui.page === 'perf'" />
+              <Logs v-else-if="ui.page === 'logs'" />
+              <Compare v-else-if="ui.page === 'compare'" />
+              <Settings v-else-if="ui.page === 'settings'" />
+            </KeepAlive>
           </main>
         </div>
       </div>

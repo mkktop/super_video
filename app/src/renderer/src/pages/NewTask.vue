@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -18,7 +18,7 @@ import {
   NTag,
   useMessage,
 } from 'naive-ui'
-import { api, type ProbeInfo } from '../api'
+import { api, mediaSrc, type ProbeInfo } from '../api'
 import { refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
@@ -27,6 +27,7 @@ const inputs = ref<string[]>([])
 const probeInfo = ref<ProbeInfo | null>(null)
 const probing = ref(false)
 let probeSeq = 0 // 快速连续重选文件时丢弃迟到的旧 probe 响应（旧数据覆盖新文件）
+const thumbBroken = ref(false) // 首帧缩略图：浏览器解不了的编码（AVI/WMV/HEVC）时隐藏，参数条不受影响
 const modelId = ref('')
 const targetScale = ref(2)
 const resMode = ref<'scale' | 'custom'>('scale')
@@ -144,11 +145,27 @@ watch(container, (c) => {
 const srcSubs = computed(() => probeInfo.value?.subtitles ?? [])
 const subHint = computed(() => {
   if (!srcSubs.value.length) return ''
-  if (container.value === 'mkv') return `MKV 将原样保留全部 ${srcSubs.value.length} 条字幕轨`
+  if (container.value === 'mkv') return `MKV 将原样保留全部 ${srcSubs.value.length} 条字幕轨与内嵌字体`
   return 'MP4/MOV 仅支持文本字幕（转 mov_text），图形字幕（PGS 等）会被丢弃'
+})
+const audioHint = computed(() => {
+  const n = probeInfo.value?.audio_tracks?.length ?? 0
+  if (n < 2 || outKind.value !== 'video') return ''
+  if (audioMode.value === 'none') return '不保留音轨'
+  const conv = container.value === 'mkv' ? '' : '，不兼容 MP4/MOV 的轨自动转 AAC'
+  return `将保留全部 ${n} 条音轨${conv}`
 })
 
 const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
+const contentLabel = { anime: '动漫', general: '真人/通用' } as Record<string, string>
+
+/** 选模型：新模型支持当前倍率则保留，否则回落到最小倍率 */
+function selectModel(id: string) {
+  const spec = store.models.find((m) => m.id === id)
+  if (!spec || !spec.vram_ok) return
+  modelId.value = id
+  if (!spec.scale.includes(targetScale.value)) targetScale.value = Math.min(...spec.scale)
+}
 
 const isImage = computed(() => outKind.value !== 'video')
 const imgFrameHint = computed(() => {
@@ -215,11 +232,65 @@ const canSubmit = computed(
 )
 
 // ---- 文件选择 ----
+// 最近输入（localStorage，仅前端记忆；展示前过滤掉已不存在的文件）
+const RECENT_KEY = 'sv_recent_videos'
+const VIDEO_EXT = /\.(mp4|mkv|mov|avi|webm|flv|ts|m4v|wmv)$/i
+const recents = ref<string[]>([])
+
+onMounted(async () => {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
+    recents.value = Array.isArray(list) ? list.filter((x) => typeof x === 'string') : []
+  } catch {
+    recents.value = []
+  }
+  const ok: string[] = []
+  for (const p of recents.value) {
+    if (await window.sv.fsExists(p)) ok.push(p)
+  }
+  recents.value = ok.slice(0, 6)
+})
+
+function pushRecent(paths: string[]) {
+  const list = [...paths, ...recents.value.filter((x) => !paths.includes(x))].slice(0, 6)
+  recents.value = list
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list))
+  } catch {
+    /* 存储不可用只是少了快捷入口 */
+  }
+}
+
+// ---- 拖拽入队：整个页面都是放置区（File.path 已移除，路径经 webUtils 取） ----
+const dragDepth = ref(0)
+function onDragEnter(e: DragEvent) {
+  if (!e.dataTransfer?.types.includes('Files')) return
+  dragDepth.value++
+}
+function onDragLeave() {
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+}
+function onDropFiles(e: DragEvent) {
+  dragDepth.value = 0
+  const files = [...(e.dataTransfer?.files ?? [])]
+  const vids = files
+    .filter((f) => VIDEO_EXT.test(f.name))
+    .map((f) => window.sv.pathForFile(f))
+  if (vids.length) void setInput(vids)
+}
+
 async function setInput(files: string[]) {
   const seq = ++probeSeq
   inputs.value = files
   probeInfo.value = null
+  thumbBroken.value = false
   outputTouched.value = false // 新一轮选文件：恢复自动填充
+  pushRecent(files)
+  // 封装容器默认跟随源文件（.mkv→mkv 等；不认识的扩展名保持 mp4）
+  const byExt: Record<string, 'mp4' | 'mkv' | 'mov'> = {
+    '.mkv': 'mkv', '.webm': 'mkv', '.mp4': 'mp4', '.m4v': 'mp4', '.mov': 'mov',
+  }
+  container.value = byExt[files[0].slice(files[0].lastIndexOf('.')).toLowerCase()] ?? 'mp4'
   if (files.length === 1) {
     probing.value = true
     const r = await api.probe(files[0])
@@ -232,7 +303,7 @@ async function setInput(files: string[]) {
       probeInfo.value = {
         ok: false, error: e.detail ?? `HTTP ${r.status}`,
         width: 0, height: 0, fps: 0, duration_s: 0, total_frames: 0,
-        codec: '', pix_fmt: '', has_audio: false, subtitles: [],
+        codec: '', pix_fmt: '', has_audio: false, audio_tracks: [], subtitles: [],
       }
     }
     void autoFillOutput()
@@ -274,6 +345,45 @@ watch([() => ui.page, () => ui.pendingModel], () => {
 
 watch([targetScale, resMode, effW, effH, outKind, container], () => void autoFillOutput())
 
+// 任务页「改参数重试」入口：带原任务全部参数进本页，调完重新入队
+watch([() => ui.page, () => ui.pendingTaskParams], async () => {
+  if (ui.page !== 'newtask' || !ui.pendingTaskParams) return
+  const t = ui.pendingTaskParams
+  ui.pendingTaskParams = null
+  const p = (t.params ?? {}) as Record<string, unknown>
+  // 图片批量任务的输入在 params.images 里
+  const imgs = p.images as { in: string }[] | undefined
+  await setInput(Array.isArray(imgs) && imgs.length ? imgs.map((x) => x.in) : [t.input_path])
+  // 模型与倍率（模型可能已被删除：找不到就保持空，用户手选）
+  const spec = store.models.find((m) => m.id === t.model_id)
+  if (spec) {
+    modelId.value = spec.id
+    const want = Number(p.target_scale ?? p.scale ?? 0)
+    targetScale.value = want && spec.scale.includes(want) ? want : Math.min(...spec.scale)
+  }
+  const tw = p.target_w as number | undefined
+  const th = p.target_h as number | undefined
+  if (tw && th) {
+    resMode.value = 'custom'
+    targetW.value = tw
+    targetH.value = th
+  } else {
+    resMode.value = 'scale'
+  }
+  if (p.out_kind === 'png' || p.out_kind === 'jpg') outKind.value = p.out_kind
+  if (typeof p.codec === 'string') codec.value = p.codec
+  if (typeof p.crf === 'number') crf.value = Math.min(30, Math.max(12, p.crf))
+  if (p.container === 'mp4' || p.container === 'mkv' || p.container === 'mov') {
+    container.value = p.container
+  }
+  if (typeof p.audio_mode === 'string') audioMode.value = p.audio_mode
+  keepSubtitles.value = p.subtitle_mode === 'auto'
+  interp.value = p.interp === 'rife2x' ? 'rife2x' : 'off'
+  denoise.value = typeof p.denoise === 'number' ? p.denoise : null
+  tileChoice.value = typeof p.tile === 'number' ? p.tile : 0
+  message.info('已带入原任务参数，调整后点「加入队列」')
+})
+
 async function pickOutputFile() {
   if (isImage.value) {
     const p = await window.sv.pickDir()
@@ -283,7 +393,7 @@ async function pickOutputFile() {
     }
     return
   }
-  const p = await window.sv.pickOutput(output.value || 'output.mp4')
+  const p = await window.sv.pickOutput(output.value || `output.${container.value}`)
   if (p) {
     output.value = p
     outputTouched.value = true
@@ -374,11 +484,29 @@ function reset() {
   outputTouched.value = false
 }
 
-const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
+const fmtDur = (s: number) => {
+  // 先整体取整再拆分：避免 59.6s 显示成 "0分60秒"
+  const t = Math.round(s)
+  return `${Math.floor(t / 60)}分${t % 60}秒`
+}
+</script>
+
+<script lang="ts">
+// KeepAlive include 按名匹配：常驻保草稿
+export default { name: 'NewTask' }
 </script>
 
 <template>
-  <div class="newtask-page">
+  <div
+    class="newtask-page"
+    @dragenter="onDragEnter"
+    @dragover.prevent
+    @dragleave="onDragLeave"
+    @drop.prevent="onDropFiles"
+  >
+    <div v-if="dragDepth" class="drop-mask">
+      <div class="drop-tip">松开即可选入视频文件</div>
+    </div>
     <div class="page-head">
       <div>
         <h1>新建超分任务</h1>
@@ -404,16 +532,38 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
     <section class="sec">
       <h2 class="sec-title"><span class="sec-num">1</span>选择视频</h2>
       <NButton dashed block size="large" @click="pickInput">
-        {{ inputs.length ? `已选 ${inputs.length} 个文件（点击重选）` : '点击选择视频文件（可多选批量入队）' }}
+        {{ inputs.length ? `已选 ${inputs.length} 个文件（点击重选）` : '点击选择视频文件（可多选批量入队，也可直接拖进窗口）' }}
       </NButton>
+      <div v-if="!inputs.length && recents.length" class="recents">
+        <span class="recents-label">最近：</span>
+        <button
+          v-for="p in recents"
+          :key="p"
+          class="recent-chip"
+          :title="p"
+          @click="setInput([p])"
+        >
+          {{ p.split(/[\\/]/).pop() }}
+        </button>
+      </div>
       <NCard v-if="probeInfo" size="small" class="probe-card" :bordered="true">
-        <div v-if="probeInfo.ok" class="probe-grid">
-          <span>分辨率 <b>{{ probeInfo.width }}x{{ probeInfo.height }}</b></span>
-          <span>帧率 <b>{{ probeInfo.fps }}</b></span>
-          <span>时长 <b>{{ fmtDur(probeInfo.duration_s) }}</b></span>
-          <span>帧数 <b>{{ probeInfo.total_frames }}</b></span>
-          <span>编码 <b>{{ probeInfo.codec }} / {{ probeInfo.pix_fmt }}</b></span>
-          <span>音轨 <b>{{ probeInfo.has_audio ? '有' : '无' }}</b></span>
+        <div v-if="probeInfo.ok" class="probe-flex">
+          <video
+            v-if="inputs.length === 1 && !thumbBroken"
+            :src="mediaSrc(inputs[0]) + '#t=0.5'"
+            preload="metadata"
+            muted
+            class="probe-thumb"
+            @error="thumbBroken = true"
+          />
+          <div class="probe-grid">
+            <span>分辨率 <b>{{ probeInfo.width }}x{{ probeInfo.height }}</b></span>
+            <span>帧率 <b>{{ probeInfo.fps }}</b></span>
+            <span>时长 <b>{{ fmtDur(probeInfo.duration_s) }}</b></span>
+            <span>帧数 <b>{{ probeInfo.total_frames }}</b></span>
+            <span>编码 <b>{{ probeInfo.codec }} / {{ probeInfo.pix_fmt }}</b></span>
+            <span>音轨 <b>{{ probeInfo.has_audio ? '有' : '无' }}</b></span>
+          </div>
         </div>
         <div v-else class="probe-err">{{ probeInfo.error || '文件不可用' }}</div>
       </NCard>
@@ -434,7 +584,7 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
           :key="m.id"
           class="model-card"
           :class="{ selected: modelId === m.id, disabled: !m.vram_ok }"
-          @click="m.vram_ok && ((modelId = m.id), (targetScale = Math.min(...m.scale)))"
+          @click="selectModel(m.id)"
         >
           <span v-if="modelId === m.id" class="m-check">✓</span>
           <div class="m-head">
@@ -447,6 +597,7 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
             <span>{{ speedLabel[m.speed] ?? '⚖' }}</span>
             <span>x{{ m.scale.join('/x') }}</span>
             <span>{{ m.vram_gb }}GB 显存</span>
+            <span v-for="c in m.content" :key="c" class="m-content">{{ contentLabel[c] ?? c }}</span>
           </div>
           <div v-if="m.vram_note" class="m-warn">{{ m.vram_note }}</div>
         </div>
@@ -509,7 +660,10 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
               <NSelect v-model:value="container" :options="containerOptions" style="width: 300px" />
             </NFormItem>
             <NFormItem v-if="outKind === 'video'" label="音轨">
-              <NSelect v-model:value="audioMode" :options="audioOptions" style="width: 300px" />
+              <div class="sub-col">
+                <NSelect v-model:value="audioMode" :options="audioOptions" style="width: 300px" />
+                <span v-if="audioHint" class="sub-hint">{{ audioHint }}</span>
+              </div>
             </NFormItem>
             <NFormItem v-if="outKind === 'video' && srcSubs.length" label="字幕">
               <div class="sub-row">
@@ -529,7 +683,13 @@ const fmtDur = (s: number) => `${Math.floor(s / 60)}分${Math.round(s % 60)}秒`
               </NTag>
             </NFormItem>
             <NFormItem v-if="hasDenoiseVariants" label="降噪">
-              <NSelect v-model:value="denoise" :options="denoiseOptions" style="width: 320px" placeholder="选择降噪档位（默认保守模式）" />
+              <NSelect
+                v-model:value="denoise"
+                :options="denoiseOptions"
+                style="width: 320px"
+                clearable
+                placeholder="默认保守模式（点此可选档位，可清空恢复默认）"
+              />
             </NFormItem>
             <NCollapse class="adv-collapse" :default-expanded-names="[]">
               <NCollapseItem title="高级选项" name="adv">
@@ -648,16 +808,62 @@ h1 { font-size: 20px; font-weight: 700; }
 }
 
 .probe-card { background: #1a1c1f; }
+.probe-flex { display: flex; align-items: center; gap: 14px; }
+.probe-thumb {
+  width: 168px;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid #2a2d31;
+  background: #0d0e10;
+  flex-shrink: 0;
+}
 .probe-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 8px 16px;
   font-size: 13px;
   color: #9aa0a6;
+  min-width: 0;
+  flex: 1;
 }
 .probe-grid b { color: #e8eaed; font-weight: 600; margin-left: 4px; }
 .probe-err { color: #f87171; font-size: 13px; }
 .probe-hint { color: #9aa0a6; font-size: 13px; text-align: center; }
+
+.recents { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recents-label { font-size: 12px; color: #9aa0a6; }
+.recent-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 240px;
+  padding: 4px 12px;
+  border-radius: 14px;
+  border: 1px solid #33373d;
+  background: #1c1e21;
+  color: #c6cad0;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s, color 0.15s;
+}
+.recent-chip:hover { border-color: #4f8cff; color: #fff; }
+
+/* 拖拽遮罩：拖文件进窗口时整页高亮 */
+.drop-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(13, 14, 16, 0.72);
+  border: 2px dashed #4f8cff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.drop-tip { font-size: 18px; font-weight: 600; color: #e8eaed; letter-spacing: 1px; }
 
 .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .model-card {
@@ -691,7 +897,10 @@ h1 { font-size: 20px; font-weight: 700; }
 .m-head { display: flex; align-items: center; gap: 8px; }
 .m-name { font-weight: 600; font-size: 14px; }
 .m-desc { color: #9aa0a6; font-size: 12px; margin: 6px 0; }
-.m-tags { display: flex; gap: 10px; font-size: 12px; color: #7c838c; }
+.m-tags { display: flex; gap: 10px; font-size: 12px; color: #7c838c; flex-wrap: wrap; }
+.m-content {
+  color: #8fa3c8;
+}
 .m-warn { margin-top: 6px; font-size: 11.5px; color: #f87171; }
 
 /* 输出设置两列；窄窗口（内容宽 <752px）自动退化单列 */
@@ -705,6 +914,7 @@ h1 { font-size: 20px; font-weight: 700; }
 .batch-note { font-size: 12.5px; color: #9aa0a6; }
 .res-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .sub-row { display: flex; align-items: center; gap: 10px; }
+.sub-col { display: flex; flex-direction: column; gap: 4px; }
 .sub-hint { font-size: 12px; color: #9aa0a6; }
 .img-hint { margin-left: 12px; font-size: 12px; color: #9aa0a6; }
 .res-x { color: #9aa0a6; }

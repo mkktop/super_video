@@ -13,7 +13,16 @@ import { api, type Task } from '../api'
 import { openCompare, refreshStats, refreshTasks, store } from '../store'
 import { fmtBytes, fmtEta } from '../utils'
 
-const props = defineProps<{ task: Task }>()
+const props = defineProps<{
+  task: Task
+  /** 排队任务在队列内可上移/下移（undefined=非排队态隐藏箭头） */
+  canUp?: boolean
+  canDown?: boolean
+}>()
+const emit = defineEmits<{
+  (e: 'move', dir: -1 | 1): void
+  (e: 'retryParams'): void
+}>()
 const message = useMessage()
 const previewBroken = ref(false) // 预览 404/损坏时兜底（done 但预览生成失败不再显示破图图标）
 const canCompare = computed(
@@ -95,6 +104,11 @@ async function onDelete() {
 function onOpenFolder() {
   window.sv.showInFolder(props.task.output_path)
 }
+
+// 失败/取消任务：定位输入文件（此时可能还没有产出）
+function onOpenInputFolder() {
+  window.sv.showInFolder(props.task.input_path)
+}
 </script>
 
 <template>
@@ -174,10 +188,33 @@ function onOpenFolder() {
       >
         继续
       </NButton>
+      <NButton
+        v-if="task.status === 'failed' || task.status === 'canceled'"
+        size="small"
+        quaternary
+        type="info"
+        @click="emit('retryParams')"
+      >
+        改参数重试
+      </NButton>
       <NButton v-if="task.status === 'done'" size="small" quaternary type="info" @click="onOpenFolder">
         打开所在文件夹
       </NButton>
+      <NButton
+        v-if="task.status === 'failed' || task.status === 'canceled'"
+        size="small"
+        quaternary
+        type="info"
+        @click="onOpenInputFolder"
+      >
+        输入所在文件夹
+      </NButton>
       <NButton v-if="!isBusy" size="small" quaternary @click="onDelete">删除</NButton>
+      <!-- 排队顺序微调：悬停显示（拖拽的补充，触控板不好精准拖） -->
+      <span v-if="task.status === 'queued'" class="qbtns">
+        <button class="qbtn" title="上移" :disabled="!canUp" @click="emit('move', -1)">↑</button>
+        <button class="qbtn" title="下移" :disabled="!canDown" @click="emit('move', 1)">↓</button>
+      </span>
     </div>
   </n-card>
 </template>
@@ -203,7 +240,7 @@ function onOpenFolder() {
   height: 50px;
   border-radius: 6px;
   background: #1d1f22;
-  color: #6b7076;
+  color: #8a919c;
   font-size: 11px;
   display: flex;
   align-items: center;
@@ -214,4 +251,28 @@ function onOpenFolder() {
   object-fit: contain; cursor: pointer;
 }
 .spacer { flex: 1; }
+.qbtns {
+  display: inline-flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.task-card:hover .qbtns { opacity: 1; }
+.qbtn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #2a2d31;
+  border-radius: 6px;
+  background: #1a1c1f;
+  color: #9aa0a6;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, color 0.15s;
+}
+.qbtn:hover:not(:disabled) { border-color: #4f8cff; color: #4f8cff; }
+.qbtn:disabled { opacity: 0.35; cursor: default; }
 </style>

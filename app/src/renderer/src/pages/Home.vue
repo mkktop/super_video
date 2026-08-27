@@ -20,6 +20,9 @@ const runPercent = computed(() => {
 })
 
 const hw = computed(() => store.hardware)
+
+// 全新用户（还没跑过任何任务）：四宫格全 0 没有意义，换成三步上手引导
+const fresh = computed(() => store.stats.total === 0)
 </script>
 
 <template>
@@ -57,8 +60,31 @@ const hw = computed(() => store.hardware)
       </div>
     </section>
 
+    <!-- 三步上手（仅无任何历史任务时展示） -->
+    <section v-if="fresh && !running" class="card guide">
+      <div class="guide-title">三步完成第一次超分</div>
+      <div class="guide-steps">
+        <div class="g-step">
+          <span class="g-num">1</span>
+          <div><b>选视频</b>新建超分任务，把要处理的视频拖进窗口或点击选择</div>
+        </div>
+        <div class="g-step">
+          <span class="g-num">2</span>
+          <div><b>挑模型</b>不确定哪个合适？用「模型对比」拿同一段素材并排试</div>
+        </div>
+        <div class="g-step">
+          <span class="g-num">3</span>
+          <div><b>入队等待</b>处理期间可以最小化窗口，完成时会有系统通知</div>
+        </div>
+      </div>
+      <div class="guide-actions">
+        <NButton type="primary" @click="ui.page = 'newtask'">＋ 新建超分任务</NButton>
+        <NButton quaternary @click="ui.page = 'mcompare'">先对比模型</NButton>
+      </div>
+    </section>
+
     <!-- 统计 -->
-    <section class="stat-grid">
+    <section v-if="!fresh" class="stat-grid">
       <div class="card stat">
         <div class="stat-icon i-blue">▤</div>
         <div>
@@ -99,7 +125,9 @@ const hw = computed(() => store.hardware)
             <span class="hw-name">{{ hw?.gpus?.[0]?.name ?? '—' }}</span>
           </div>
           <div class="hw-tags">
-            <NTag type="success" size="small" :bordered="false">AI 推理就绪</NTag>
+            <NTag :type="store.engine ? 'success' : 'warning'" size="small" :bordered="false">
+              {{ store.engine ? 'AI 推理就绪' : '推理引擎未就绪' }}
+            </NTag>
             <NTag v-if="hw?.gpus?.[0]?.vram_gb" type="info" size="small" :bordered="false">
               显存 {{ hw.gpus[0].vram_gb }} GB
             </NTag>
@@ -227,6 +255,34 @@ h1 {
 .stat-label { font-size: 12px; color: #9aa0a6; margin-top: 2px; }
 
 .sec-title { font-size: 15px; font-weight: 600; color: #c6cad0; margin-bottom: 12px; }
+
+/* 三步上手引导 */
+.guide { padding: 22px 24px; }
+.guide-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+.guide-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.g-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #9aa0a6;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.g-step b { color: #e8eaed; margin-right: 4px; }
+.g-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #4f8cff, #8b5cf6);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.guide-actions { display: flex; gap: 12px; margin-top: 18px; }
 .sec-head { display: flex; align-items: center; justify-content: space-between; }
 .sec-head .sec-title { margin-bottom: 12px; }
 .sec-link {
@@ -250,5 +306,5 @@ h1 {
 .hw-name { font-weight: 600; font-size: 14.5px; }
 .hw-tags { display: flex; gap: 8px; }
 .hw-detail { font-size: 13px; color: #c6cad0; word-break: break-all; }
-.hw-sub { font-size: 12px; color: #6b7280; }
+.hw-sub { font-size: 12px; color: #8a919c; }
 </style>

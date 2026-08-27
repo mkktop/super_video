@@ -10,7 +10,7 @@ import {
   NTag,
   useMessage,
 } from 'naive-ui'
-import { api } from '../api'
+import { api, mediaSrc } from '../api'
 import { refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
@@ -41,17 +41,19 @@ const srModels = computed(() => {
   const all = store.models.filter((m) => m.kind !== 'interp')
   return all.sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled))
 })
-const modelOptions = computed(() =>
-  srModels.value.map((m) => ({
-    label: `${m.name}（x${m.scale.join('/x')}，${m.vram_gb}GB 显存${m.installed || m.bundled ? '' : '，需下载'}）`,
-    value: m.id,
-    disabled: !m.vram_ok,
-  })),
-)
+const contentLabel = { anime: '动漫', general: '真人/通用' } as Record<string, string>
 const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
 const scaleOptions = computed(
   () => (selectedModel.value?.scale ?? []).map((s) => ({ label: `x${s}`, value: s })),
 )
+
+/** 选模型：新模型支持当前倍率则保留，否则回落到最小倍率（与新建任务页一致） */
+function selectModel(id: string) {
+  const spec = store.models.find((m) => m.id === id)
+  if (!spec || !spec.vram_ok) return
+  modelId.value = id
+  if (!spec.scale.includes(targetScale.value)) targetScale.value = Math.min(...spec.scale)
+}
 const tileOptions = [
   { label: '自动（模型默认）', value: 0 },
   ...[128, 192, 256, 384, 512, 768, 1024].map((v) => ({ label: `${v} px`, value: v })),
@@ -65,14 +67,36 @@ const outDirLabel = computed(() => {
 function baseName(p: string): string {
   return p.split(/[\\/]/).pop() ?? p
 }
+// file:// 直拼对含 #/? 的文件名会破（mediaSrc 已做逐段编码，这里复用）
 function thumbUrl(p: string): string {
-  // Windows 路径 → file:// URL（webSecurity 保持关闭的产品决策下可用）
-  return `file:///${p.replace(/\\/g, '/')}`
+  return mediaSrc(p)
+}
+
+const IMAGE_EXT = /\.(png|jpe?g|webp|bmp|tiff?)$/i
+
+// ---- 拖拽入队：整个页面都是放置区 ----
+const dragDepth = ref(0)
+function onDragEnter(e: DragEvent) {
+  if (!e.dataTransfer?.types.includes('Files')) return
+  dragDepth.value++
+}
+function onDragLeave() {
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+}
+function onDropFiles(e: DragEvent) {
+  dragDepth.value = 0
+  const dropped = [...(e.dataTransfer?.files ?? [])]
+  const imgs = dropped
+    .filter((f) => IMAGE_EXT.test(f.name))
+    .map((f) => window.sv.pathForFile(f))
+  for (const p of imgs) if (!files.value.some((x) => x.toLowerCase() === p.toLowerCase())) files.value.push(p)
 }
 
 function pick() {
   void window.sv.pickImages().then((picked) => {
-    for (const p of picked) if (!files.value.includes(p)) files.value.push(p)
+    for (const p of picked) {
+      if (!files.value.some((x) => x.toLowerCase() === p.toLowerCase())) files.value.push(p)
+    }
   })
 }
 
@@ -123,8 +147,22 @@ async function submit() {
 }
 </script>
 
+<script lang="ts">
+// KeepAlive include 按名匹配：选了一半图片切页回来不丢
+export default { name: 'ImageSR' }
+</script>
+
 <template>
-  <div class="imgsr-page">
+  <div
+    class="imgsr-page"
+    @dragenter="onDragEnter"
+    @dragover.prevent
+    @dragleave="onDragLeave"
+    @drop.prevent="onDropFiles"
+  >
+    <div v-if="dragDepth" class="drop-mask">
+      <div class="drop-tip">松开即可加入图片</div>
+    </div>
     <div class="page-head">
       <div>
         <h1>图片超分</h1>
@@ -136,7 +174,7 @@ async function submit() {
     <section class="sec">
       <h2 class="sec-title"><span class="sec-num">1</span>选择图片</h2>
       <NButton dashed block size="large" @click="pick">
-        {{ files.length ? `已选 ${files.length} 张（点击继续追加）` : '点击选择图片（可多选批量入队）' }}
+        {{ files.length ? `已选 ${files.length} 张（点击继续追加）` : '点击选择图片（可多选批量入队，也可直接拖进窗口）' }}
       </NButton>
       <div v-if="files.length" class="thumb-grid">
         <div v-for="(f, i) in files" :key="f" class="thumb-cell">
@@ -152,31 +190,39 @@ async function submit() {
       <h2 class="sec-title">
         <span class="sec-num">2</span>模型与输出
         <span class="sel-chip" :class="{ on: !!selectedModel }">
-          {{ selectedModel ? `已选 ${selectedModel.name} · x${targetScale}` : '先选模型' }}
+          {{ selectedModel ? `已选 ${selectedModel.name} · x${targetScale}` : '点击卡片选择' }}
         </span>
       </h2>
-      <div class="form-rows">
-        <div class="row stack">
-          <span class="lbl">模型{{ selectedModel && !selectedModel.vram_ok ? '（显存不足，请换）' : '' }}</span>
-          <NSelect
-            v-model:value="modelId"
-            :options="modelOptions"
-            placeholder="选择超分模型"
-            filterable
-            style="max-width: 460px"
-          />
+      <div class="model-grid">
+        <div
+          v-for="m in srModels"
+          :key="m.id"
+          class="model-card"
+          :class="{ selected: modelId === m.id, disabled: !m.vram_ok }"
+          @click="selectModel(m.id)"
+        >
+          <span v-if="modelId === m.id" class="m-check">✓</span>
+          <div class="m-head">
+            <span class="m-name">{{ m.name }}</span>
+            <NTag v-if="!m.installed && !m.bundled" size="tiny" :bordered="false" type="warning">需下载 {{ m.size_mb }}MB</NTag>
+            <NTag v-if="!m.vram_ok" size="tiny" :bordered="false" type="error">显存不足</NTag>
+          </div>
+          <div class="m-desc">{{ m.description }}</div>
+          <div class="m-tags">
+            <span>x{{ m.scale.join('/x') }}</span>
+            <span>{{ m.vram_gb }}GB 显存</span>
+            <span v-for="c in m.content" :key="c" class="m-content">{{ contentLabel[c] ?? c }}</span>
+          </div>
         </div>
+      </div>
+      <div class="form-rows">
         <div class="row inline">
           <span class="lbl">放大倍数</span>
           <NRadioGroup v-model:value="targetScale" size="small">
-            <NRadioButton v-for="s in selectedModel?.scale ?? []" :key="s" :value="s">x{{ s }}</NRadioButton>
+            <NRadioButton v-for="s in scaleOptions" :key="s.value" :value="s.value">x{{ s.value }}</NRadioButton>
           </NRadioGroup>
-          <NTag
-            v-if="files.length === 1"
-            size="small"
-            :bordered="false"
-          >
-            单张结果约 {{ targetScale * 100 }}% 尺寸增大
+          <NTag v-if="files.length === 1" size="small" :bordered="false">
+            边长 ×{{ targetScale }} · 面积 ×{{ targetScale * targetScale }}
           </NTag>
         </div>
         <div class="row inline">
@@ -303,6 +349,60 @@ h1 { font-size: 20px; font-weight: 700; }
   border-radius: 12px;
   padding: 6px 18px 12px;
 }
+
+/* 模型卡片网格（与新建任务页同款交互） */
+.model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.model-card {
+  position: relative;
+  border: 1.5px solid #2a2d31;
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.model-card:hover { border-color: #4a4f55; }
+.model-card.selected { border-color: #4f8cff; background: rgba(79, 140, 255, 0.08); }
+.model-card.disabled { opacity: 0.45; cursor: not-allowed; }
+.m-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #4f8cff;
+  color: #fff;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.m-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-name { font-weight: 600; font-size: 14px; }
+.m-desc {
+  color: #9aa0a6;
+  font-size: 12px;
+  margin: 6px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.m-tags { display: flex; gap: 10px; font-size: 12px; color: #7c838c; flex-wrap: wrap; }
+.m-content { color: #8fa3c8; }
+
+.drop-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(13, 14, 16, 0.72);
+  border: 2px dashed #4f8cff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.drop-tip { font-size: 18px; font-weight: 600; color: #e8eaed; letter-spacing: 1px; }
 .row { padding: 12px 0; }
 .row.stack {
   display: flex;

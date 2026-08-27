@@ -284,14 +284,14 @@ function fmtVal(v: number | null): string {
   cursor: pointer;
 }
 .lg:hover { background: #23262b; color: #e8eaed; }
-.lg.off { color: #5c626b; text-decoration: line-through; }
+.lg.off { color: #767d88; text-decoration: line-through; }
 .swatch { width: 9px; height: 9px; border-radius: 2.5px; }
 .tc-svg { display: block; }
 .grid-line { stroke: #24272c; stroke-width: 1; }
-.tick { fill: #6b7280; font-size: 10.5px; text-anchor: end; }
+.tick { fill: #8a919c; font-size: 10.5px; text-anchor: end; }
 .tick-x { text-anchor: middle; }
 .crosshair { stroke: #4a4f57; stroke-width: 1; stroke-dasharray: 3 3; }
-.empty { fill: #5c626b; font-size: 12.5px; text-anchor: middle; }
+.empty { fill: #767d88; font-size: 12.5px; text-anchor: middle; }
 .tc-tip {
   position: absolute;
   top: 8px;

@@ -3,6 +3,7 @@
 校验层直接调用路由函数（不起 TestClient/runner）：避免与 test_server 的
 runner 共享 SV_DB 产生双消费者竞争；任务行即建即删。
 """
+import json as _json
 import os
 import subprocess
 from pathlib import Path
@@ -67,23 +68,34 @@ def test_video_codec_args_families():
 
 def test_audio_args_modes():
     enc = EncodeOpts(audio_mode="none")
-    assert audio_args(enc, True, "aac") == []
-    assert audio_args(EncodeOpts(audio_mode="copy"), True, "flac") == ["-c:a", "copy"]
-    assert audio_args(EncodeOpts(audio_mode="flac"), False, "x") == ["-c:a", "flac"]
-    a = audio_args(EncodeOpts(audio_mode="aac"), True, "aac")
+    assert audio_args(enc, True, ["aac"]) == []
+    assert audio_args(EncodeOpts(audio_mode="copy"), True, ["flac"]) == ["-c:a", "copy"]
+    assert audio_args(EncodeOpts(audio_mode="flac"), False, ["x"]) == ["-c:a", "flac"]
+    a = audio_args(EncodeOpts(audio_mode="aac"), True, ["aac"])
     assert a[:2] == ["-c:a", "aac"] and "-b:a" in a
     # auto：mp4 家族可拷则拷；mkv 混流宽一律无损 copy；mp4 不可拷转 aac
-    assert audio_args(EncodeOpts(), True, "aac") == ["-c:a", "copy"]
-    assert audio_args(EncodeOpts(), False, "flac") == ["-c:a", "copy"]
-    assert audio_args(EncodeOpts(), True, "opus")[1] == "aac"
-    assert audio_args(EncodeOpts(), False, None) == []
+    assert audio_args(EncodeOpts(), True, ["aac"]) == ["-c:a", "copy"]
+    assert audio_args(EncodeOpts(), False, ["flac"]) == ["-c:a", "copy"]
+    assert audio_args(EncodeOpts(), True, ["opus"])[1] == "aac"
+    assert audio_args(EncodeOpts(), False, []) == []
+
+
+def test_audio_args_multi_track():
+    """多音轨 auto：mkv 全轨统一 copy；mp4 逐轨定，混合源不整体重编码。"""
+    assert audio_args(EncodeOpts(), False, ["aac", "flac", "truehd"]) == ["-c:a", "copy"]
+    # aac 可拷、flac 不可拷（mp4 白名单外）→ 逐轨 copy/aac
+    args = audio_args(EncodeOpts(), True, ["aac", "flac"])
+    assert args == ["-c:a:0", "copy", "-c:a:1", "aac", "-b:a:1", "192k"]
+    # 显式模式全轨统一，不逐轨
+    assert audio_args(EncodeOpts(audio_mode="copy"), True, ["flac"]) == ["-c:a", "copy"]
+    assert audio_args(EncodeOpts(), True, []) == []
 
 
 def test_subtitle_args_by_container():
-    # mkv：全部字幕流原样保留
+    # mkv：全部字幕流原样保留 + 内嵌字体附件（ASS 特效字依赖）
     enc_mkv = EncodeOpts(subtitle_mode="auto", container="mkv")
     assert subtitle_args(enc_mkv, ["subrip", "hdmv_pgs_subtitle"]) == \
-        ["-map", "1:s?", "-c:s", "copy"]
+        ["-map", "1:s?", "-c:s", "copy", "-map", "1:t?"]
     # mp4：全文本字幕 → mov_text；含图形字幕 → 整体丢弃（不产生半套映射）
     enc_mp4 = EncodeOpts(subtitle_mode="auto", container="mp4")
     assert subtitle_args(enc_mp4, ["subrip", "ass"]) == \
@@ -108,11 +120,35 @@ def test_encoder_cmd_mux_source_without_audio():
 
 def test_encoder_cmd_container_faststart():
     cmd_mp4 = encoder_cmd(Path("in.mp4"), Path("out.mp4"), 320, 180, 320, 180,
-                          "24/1", EncodeOpts(), True, "aac")
+                          "24/1", EncodeOpts(), True, ["aac"])
     assert "-movflags" in cmd_mp4
     cmd_mov = encoder_cmd(Path("in.mp4"), Path("out.mov"), 320, 180, 320, 180,
-                          "24/1", EncodeOpts(container="mov"), True, "aac")
+                          "24/1", EncodeOpts(container="mov"), True, ["aac"])
     assert "-movflags" in cmd_mov
+
+
+def test_encoder_cmd_multi_audio_and_chapters():
+    """多音轨全映射（不再只取 1:a:0）+ 章节显式继承；mp4 逐轨 copy/aac。"""
+    enc = EncodeOpts()  # auto, mp4
+    cmd = encoder_cmd(Path("in.mkv"), Path("out.mp4"), 320, 180, 320, 180,
+                      "24/1", enc, True, ["aac", "flac"])
+    assert "1:a:0?" not in cmd and "1:a?" in cmd
+    i = cmd.index("-map_chapters")
+    assert cmd[i + 1] == "1"
+    # aac 可拷、flac 转 aac：逐轨参数
+    assert cmd[cmd.index("-c:a:0") + 1] == "copy"
+    assert cmd[cmd.index("-c:a:1") + 1] == "aac"
+    assert cmd[cmd.index("-b:a:1") + 1] == "192k"
+    # mkv：全轨统一 copy；字幕保留时连字体附件一起映射
+    m = encoder_cmd(Path("in.mkv"), Path("out.mkv"), 320, 180, 320, 180, "24/1",
+                    EncodeOpts(container="mkv", subtitle_mode="auto"),
+                    True, ["aac", "flac"], ["subrip"])
+    assert m[m.index("-c:a") + 1] == "copy" and "-c:a:0" not in m
+    assert m.count("-map") == 4  # 0:v:0 / 1:a? / 1:s? / 1:t?
+    # 不挂源（分段段内编码）：无音轨映射也无章节参数
+    seg = encoder_cmd(Path("in.mkv"), Path("seg.mp4"), 320, 180, 320, 180,
+                      "24/1", enc, False, ["aac"])
+    assert "1:a?" not in seg and "-map_chapters" not in seg
 
 
 # ---- 校验层（直接调路由函数，不起 runner）----
@@ -264,7 +300,6 @@ class _Nearest2x:
 def test_segmented_mkv_flac_subtitle_e2e(clip):
     """完整链路：分段超分 → concat 时挂 FLAC 音轨 + srt 字幕进 mkv。"""
     import asyncio
-    import json as _json
 
     from sv.pipeline.probe import probe, validate_m0
     from sv.pipeline.segmented import SegmentedPipeline
@@ -290,3 +325,77 @@ def test_segmented_mkv_flac_subtitle_e2e(clip):
     assert codecs["video"] == "h264"
     assert codecs["audio"] == "flac"
     assert codecs["subtitle"] == "subrip"
+
+
+@pytest.fixture(scope="module")
+def multi_av(clip):
+    """多音轨源：aac + flac 双音轨、srt 字幕、章节、内嵌字体附件（1s 小样本）。"""
+    p = TEMP_DIR / "eo_multi.mkv"
+    if not p.exists():
+        meta = TEMP_DIR / "eo_meta.txt"
+        with open(meta, "w", encoding="utf-8", newline="\n") as f:
+            f.write("FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=900\ntitle=c1\n")
+        srt = TEMP_DIR / "eo.srt"
+        srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+        font = TEMP_DIR / "eo_font.ttf"
+        font.write_bytes(b"FAKEFONT")
+        subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+             "-i", str(clip), "-f", "lavfi", "-i", "sine=frequency=880",
+             "-f", "ffmetadata", "-i", str(meta), "-i", str(srt),
+             "-map", "0:v", "-map", "0:a", "-map", "1:a", "-map", "3:s",
+             "-map_metadata", "2", "-attach", str(font),
+             "-metadata:s:t:0", "mimetype=application/x-truetype-font",
+             "-c", "copy", "-c:a:1", "flac", "-c:s", "srt",
+             "-shortest", str(p)],
+            check=True, creationflags=WINDOWS_CREATE_FLAGS,
+        )
+    return p
+
+
+def _probe_streams(path):
+    data = _json.loads(subprocess.run(
+        [ffprobe_bin(), "-hide_banner", "-loglevel", "error",
+         "-print_format", "json", "-show_streams", "-show_chapters", str(path)],
+        capture_output=True, check=True, creationflags=WINDOWS_CREATE_FLAGS,
+    ).stdout)
+    return ([(s["codec_type"], s["codec_name"]) for s in data["streams"]],
+            len(data.get("chapters", [])))
+
+
+def test_segmented_multi_audio_chapters_attachment_e2e(multi_av):
+    """多音轨/章节/附件端到端：mkv 全轨无损 + 字体附件；mp4 逐轨（flac→aac）、
+    章节跟随、附件不进 mp4。"""
+    import asyncio
+
+    from sv.pipeline.probe import probe, validate_m0
+    from sv.pipeline.segmented import SegmentedPipeline
+
+    info = probe(multi_av)
+    validate_m0(info)
+    assert [a.codec for a in info.audio] == ["aac", "flac"]
+    assert info.subtitles == ["subrip"]
+
+    def run(out, container):
+        asyncio.run(SegmentedPipeline(
+            info, out, _Nearest2x(),
+            EncodeOpts(codec="h264", crf=22, container=container,
+                       audio_mode="auto", subtitle_mode="auto"),
+            task_id=f"t_eo_multi_{container}", seg_frames=24,
+        ).run())
+
+    out_mkv = TEMP_DIR / "eo_multi_out.mkv"
+    run(out_mkv, "mkv")
+    streams, chapters = _probe_streams(out_mkv)
+    assert [c for t, c in streams if t == "audio"] == ["aac", "flac"]  # 全轨无损
+    assert ("subtitle", "subrip") in streams
+    assert ("attachment", "ttf") in streams  # 字体附件随字幕保留
+    assert chapters == 1
+
+    out_mp4 = TEMP_DIR / "eo_multi_out.mp4"
+    run(out_mp4, "mp4")
+    streams, chapters = _probe_streams(out_mp4)
+    assert [c for t, c in streams if t == "audio"] == ["aac", "aac"]  # 逐轨 copy/aac
+    assert ("subtitle", "mov_text") in streams
+    assert not any(t == "attachment" for t, _ in streams)  # 附件只进 mkv
+    assert chapters == 1
