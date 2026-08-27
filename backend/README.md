@@ -39,11 +39,13 @@ $py cli.py models download realesr-animevideov3
 $py cli.py run ../.tmp/test.mp4 -m realesr-animevideov3
 $py cli.py run xxx.mp4 -m realesrgan-x4plus --tile 64 --crf 17
 
-# 启动 sidecar 服务（M1，Electron 会自动拉起；手动调试用）
+# 启动 sidecar 服务（Electron 会自动拉起；手动调试用）
 $py cli.py serve --port 8730
 ```
 
-## 桌面端（app/，M1）
+其余子命令 `worker` / `ort-check` / `selftest` 为打包链路与自检内部使用，日常开发不需直接调用。
+
+## 桌面端（app/）
 
 ```bash
 cd app && pnpm install && pnpm build && npx electron .   # 或 pnpm dev
@@ -66,13 +68,17 @@ sv/
 │  ├─ onnx_engine.py   ONNX 引擎（EP 回退链、u8 图手术、批量）
 │  ├─ torch_engine.py  PyTorch 引擎（CUDA 环境，fp16 autocast）
 │  ├─ trt_runtime.py   TensorRT 可选组件的发现/激活
+│  ├─ nvidia_dlls.py   NVIDIA DLL 目录注册（CUDA/TRT 运行库定位）
 │  ├─ u8_wrap.py       uint8 直进直出图手术（前后处理 GPU 化）
 │  └─ rife.py          RIFE 补帧（RGB uint8 契约）
 ├─ server/
-│  ├─ app.py           FastAPI 路由 + 本地 token 鉴权 + trim 队列
+│  ├─ app.py           FastAPI 路由 + 本地 token 鉴权 + 任务/剪切/对比入口
 │  ├─ runner.py        串行任务调度（取消杀树、退出语义、孤儿清杀）
-│  ├─ worker.py        任务 worker 子进程（stdout JSON 事件协议）
+│  ├─ worker.py        任务 worker 子进程（stdout JSON 事件协议；视频与图片两类）
 │  ├─ db.py            SQLite 任务表（WAL）
+│  ├─ settings.py      应用设置持久化与校验（含默认输出目录）
+│  ├─ hardware.py      GPU/CPU 硬件检测
+│  ├─ compare.py       模型对比作业（独立线程：切段/静帧 × 多模型，不占任务队列）
 │  ├─ engine_select.py 解释器/后端选择（CUDA/TRT/DML 探测）
 │  ├─ trt_component.py TRT 组件安装/卸载/状态
 │  ├─ perf.py          性能采样（CPU/GPU/任务资源）
@@ -83,9 +89,25 @@ sv/
 │  ├─ fp16.py          fp16 变体转换（原子写）
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
-scripts/               calibrate_color.py（IO 校准）、build_trt_component.py、bench_*.py（基准）
-tests/                 30 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/回归）
+scripts/               calibrate_color.py（IO 校准）、convert_fp16.py / export_onnx_x4plus.py、build_trt_component.py、bench_*.py（基准）
+tests/                 29 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/回归）
 ```
+
+## HTTP API 一览
+
+sidecar 仅监听 localhost（本地 token 鉴权），完整定义见 `server/app.py`：
+
+| 分组 | 端点 | 说明 |
+|---|---|---|
+| 系统 | GET `/api/health` `/api/engine` `/api/hardware` `/api/perf/history` `/api/presets` | 版本 / 引擎后端选择 / GPU·CPU 检测 / 性能采样 / 输出预设 |
+| 设置 | GET · PUT `/api/settings` | fp16/tile/双路并行/默认输出目录等 |
+| 探测 | POST `/api/probe` · GET `/api/log-tail` | 媒体信息（带探测缓存）/ 日志尾部 |
+| 模型 | GET `/api/models` · POST `/api/models/{id}/download` · DELETE `/api/models/{id}` · POST `/api/models/import` | 清单与适配性 / 下载（sha256）/ 删除 / 自定义导入 |
+| 任务 | POST `/api/tasks` · GET `/api/tasks` · GET `/api/stats` · POST `/api/tasks/reorder` · `{id}/cancel` · `{id}/resume` · DELETE `{id}` · GET `{id}/preview` | 视频（单个或 inputs 批量）与图片（inputs 清单合并一任务）创建；串行队列 / 断点续跑 / 结果预览 |
+| 剪切 | POST `/api/trim` · GET `/api/trim/{job_id}` · POST `…/cancel` | smart / fast / exact 三模式后台作业 |
+| 对比 | POST `/api/compare` · GET `/api/compare/{job_id}` · POST `…/cancel` · GET `…/asset/{key:path}` | 多模型对比作业（素材切割 × 各模型处理）/ 白名单资产读取 |
+| TRT | GET `/api/trt-component` · POST `…/install` · DELETE | TensorRT 组件状态 / 安装 / 卸载 |
+| 事件 | WS `/ws` | 进度 / 状态 / 日志 / 下载进度 / TRT 安装进度广播 |
 
 ## 模型 IO 约定（校准结论，2026-08-23 实测）
 
