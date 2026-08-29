@@ -361,6 +361,7 @@ class StreamPipeline:
         async def reader() -> None:
             """解码帧搬运：干净 EOF 放行哨兵；异常直接抛（外层取消同伴，不会卡死）。"""
             t_read = 0.0
+            n_read = 0
             while True:
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise TaskCanceled()
@@ -378,12 +379,19 @@ class StreamPipeline:
                                 await q_in.put(items if batch > 1 else items[0])
                             await q_in.put(None)
                             self.stage_stats["read"] = t_read
+                            # 分段请求帧数没拿满就干净 EOF = 真实片尾提前（probe 按
+                            # 容器 duration 估总帧数，MKV BDRemux 元数据偏大实测
+                            # +247 帧）；产满 max_frames 后解码器正常退出同样走
+                            # 这里，不算——只有"没拿满"才是文件真到尾的可靠信号
+                            if self.max_frames is not None and n_read < self.max_frames:
+                                self.stage_stats["decode_eof"] = 1.0
                             return
                         tail = " | ".join(dec_err)
                         raise PipelineError(
                             f"解码流在帧中间截断({len(e.partial)}/{frame_size}字节): {tail}"
                         ) from e
                     items.append(np.frombuffer(buf, dtype=np.uint8).reshape(info.height, info.width, 3))
+                    n_read += 1
                 await q_in.put(items if batch > 1 else items[0])
 
         async def inferer() -> None:

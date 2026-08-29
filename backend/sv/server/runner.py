@@ -230,13 +230,17 @@ class Runner:
         # 以 worker 显式上报的事件为准；Windows 硬杀时靠取消标记兜底
         if final.get("type") == "done":
             t = db.get_task(task_id) or {}
+            # 真实片尾修正：probe 估算偏大被解码 EOF 证伪时，worker 的 done 事件
+            # 带 total_frames 实测值回填（旧 worker/图片路径无此键，按估算值兜底）
+            done_total = final.get("total_frames") or t.get("total_frames", 0)
             db.update_task(
                 task_id, status="done", out_bytes=final.get("out_bytes", 0),
                 preview_path=final.get("preview"),
                 preview_src=final.get("src_preview"),
                 elapsed_s=final.get("elapsed", 0) or 0,
                 fps_avg=fps_avg(final.get("frames", 0), final.get("elapsed", 0) or 0),
-                progress_frames=t.get("total_frames", 0),
+                total_frames=done_total,
+                progress_frames=done_total,
                 error=None,  # 成功任务不能残留运行期的日志尾部
             )
             self.bus.publish({"type": "task_status", "task_id": task_id, "status": "done"})
