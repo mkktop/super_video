@@ -4,10 +4,11 @@
 操作，不占任务队列、不写任务库，重启后对比记录丢失（产物文件仍在磁盘）。
 
 产物目录 DATA_ROOT/compare/<job_id>/：
-  seg.mp4            视频模式切出的标准化片段（图片模式无）
-  src_still.png      源素材中点静帧（像素级对比基准）
-  <model_id>.mp4     视频模式：该模型的成片
-  <model_id>.png     图片模式：该模型的成品图（视频模式为中点静帧）
+seg.mp4            视频模式切出的标准化片段（图片模式无）
+stills/src_<i>.png 视频模式源静帧样本（4 帧避黑选定，像素级对比基准）
+<model_id>.mp4     视频模式：该模型的成片
+stills/<model>_<i>.png 视频模式：各模型成片与源同时间戳的静帧样本
+<model_id>.png     图片模式：该模型的成品图
 
 取消粒度=模型之间：当前模型跑到自然结束（片段短），后续模型跳过。
 """
@@ -30,6 +31,7 @@ from .events import EventBus
 COMPARE_ROOT = DATA_ROOT / "compare"
 MAX_MODELS = 6
 MAX_SEG_S = 20.0  # 对比片段时长上限：对比要快，长片段没有额外信息量
+STILL_COUNT = 4  # 视频模式静帧样本数：片段均分四段各取一帧（避黑）
 
 JOBS: dict[str, dict] = {}
 _QUEUE: "queue.Queue[str]" = queue.Queue()
@@ -73,6 +75,7 @@ def create(kind: str, input_path: Path, start_s: float, end_s: float,
     job = {
         "id": jid, "kind": kind, "input": str(input_path),
         "start_s": start_s, "end_s": end_s, "scale": scale,
+        "still_count": STILL_COUNT if kind == "video" else 1,
         "status": "queued", "error": None, "cancel_requested": False,
         "created_at": time.time(),
         "entries": [
@@ -111,7 +114,8 @@ def request_cancel(jid: str) -> bool:
 
 
 def asset_path(jid: str, key: str) -> Path | None:
-    """产物文件解析：key ∈ {seg, src_still, out/<model_id>, still/<model_id>}，
+    """产物文件解析：key ∈ {seg, src_still/<i>, out/<model_id>,
+    still/<model_id>/<i>（视频多帧）| still/<model_id>（图片成品图）}，
     白名单标识，不开放任意路径（防目录穿越读任意文件）。"""
     job = JOBS.get(jid)
     if job is None:
@@ -120,9 +124,12 @@ def asset_path(jid: str, key: str) -> Path | None:
     if key == "seg":
         p = root / "seg.mp4"
         return p if p.exists() else None
-    if key == "src_still":
-        p = root / "src_still.png"
-        return p if p.exists() else None
+    if key.startswith("src_still/"):
+        i = key[len("src_still/"):]
+        if i.isdigit():
+            p = root / "stills" / f"src_{int(i)}.png"
+            return p if p.exists() else None
+        return None
     ids = {e["model_id"] for e in job["entries"]}
     if key.startswith("out/"):
         m = key[4:]
@@ -132,12 +139,18 @@ def asset_path(jid: str, key: str) -> Path | None:
             if p.exists():
                 return p
     elif key.startswith("still/"):
-        m = key[6:]
+        parts = key[6:].split("/")
+        m = parts[0]
         if m in ids:
-            # 视频模式：成片中点静帧；图片模式：成品图本身就是静帧
-            p = root / (f"{m}_still.png" if job["kind"] == "video" else f"{m}.png")
-            if p.exists():
-                return p
+            # 视频模式：与源同时间戳的成片多帧静帧；图片模式：成品图本身就是静帧
+            if len(parts) == 2 and parts[1].isdigit():
+                p = root / "stills" / f"{m}_{int(parts[1])}.png"
+                if p.exists():
+                    return p
+            elif len(parts) == 1 and job["kind"] == "image":
+                p = root / f"{m}.png"
+                if p.exists():
+                    return p
     return None
 
 
@@ -203,13 +216,59 @@ def _ffmpeg(args: list[str]) -> None:
             f"ffmpeg 失败: {proc.stderr.decode('utf-8', 'replace').strip()[-300:]}")
 
 
-def _extract_still(video: Path, out_png: Path) -> None:
-    """中点静帧（PNG 无损，供像素级对比缩放）。"""
+def _extract_still(video: Path, out_png: Path, t: float | None = None) -> None:
+    """静帧（PNG 无损，供像素级对比缩放）。t 缺省取中点。"""
     from ..pipeline.probe import probe
 
-    mid = probe(video).duration_s / 2
-    _ffmpeg(["-ss", f"{mid:.3f}", "-i", str(video),
+    if t is None:
+        t = probe(video).duration_s / 2
+    _ffmpeg(["-ss", f"{t:.3f}", "-i", str(video),
              "-frames:v", "1", str(out_png)])
+
+
+def _frame_dark(video: Path, t: float) -> bool | None:
+    """t 时刻抽一帧判黑：灰度均值 < 20 视为黑场（转场/淡入淡出）。
+    抽不出帧（如 t 落在片尾之外）返回 None——与黑场区分，调用方换候选。"""
+    import io
+
+    from PIL import Image, ImageStat
+
+    proc = subprocess.run(
+        [ffmpeg_bin(), "-hide_banner", "-loglevel", "error",
+         "-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1",
+         "-f", "image2pipe", "-vcodec", "png", "-"],
+        capture_output=True, creationflags=WINDOWS_CREATE_FLAGS)
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    try:
+        im = Image.open(io.BytesIO(proc.stdout)).convert("L")
+    except Exception:
+        return None
+    return ImageStat.Stat(im).mean[0] < 20
+
+
+def _pick_still_times(video: Path, duration_s: float | None = None,
+                      n: int = STILL_COUNT) -> list[float]:
+    """挑 n 个静帧时间戳：片段均分 n 段、段中点为锚、段内避黑（扩散钳在段内，
+    相邻段不会选到同一帧）。时间戳由源与各模型成片共用——统一 -ss 才能帧级
+    对齐（各自取中点会因时长探测的 ±半帧偏差错开一帧）。段内全黑则保留锚点：
+    该段素材本来就是黑场，如实展示比挪去别段冒重复样本好。"""
+    from ..pipeline.probe import probe
+
+    d = duration_s if duration_s is not None else probe(video).duration_s
+    ts: list[float] = []
+    for i in range(n):
+        lo = d * i / n
+        hi = d * (i + 1) / n
+        anchor = (lo + hi) / 2
+        t = anchor
+        for off in (0.0, -0.5, 0.5, -1.0, 1.0):
+            cand = min(max(anchor + off, lo), max(hi - 0.05, lo))
+            if _frame_dark(video, cand) is False:
+                t = cand
+                break
+        ts.append(t)
+    return ts
 
 
 def _load_engine(spec, scale: int, warmup_hw: tuple[int, int], log):
@@ -247,15 +306,20 @@ def _run_job(job: dict) -> None:
     def _log(line: str) -> None:
         _publish({"type": "compare_log", "id": jid, "line": line})
 
-    # ---- 素材准备：视频切标准化片段 + 源静帧；图片直接取中点静帧 ----
+    # ---- 素材准备：视频切标准化片段 + 多帧源静帧；图片直接取原图 ----
     src_still = work / "src_still.png"
+    still_ts: list[float] = []  # 视频模式：源/各模型成片共用的时间戳组（帧级对齐+避黑）
     if job["kind"] == "video":
         seg = work / "seg.mp4"
         _ffmpeg(["-ss", f"{job['start_s']:.3f}", "-to", f"{job['end_s']:.3f}",
                  "-i", job["input"], "-c:v", "libx264", "-crf", "18",
                  "-preset", "veryfast", "-an", "-pix_fmt", "yuv420p", str(seg)])
-        _extract_still(seg, src_still)
         info = probe(seg)
+        stills = work / "stills"
+        stills.mkdir(exist_ok=True)
+        still_ts = _pick_still_times(seg, info.duration_s)
+        for i, t in enumerate(still_ts):
+            _extract_still(seg, stills / f"src_{i}.png", t)
         warmup_hw = (info.height, info.width)
     else:
         from PIL import Image, ImageOps
@@ -291,9 +355,10 @@ def _run_job(job: dict) -> None:
                 stats = asyncio.run(StreamPipeline(
                     info, out, engine,
                     EncodeOpts(audio_mode="none"), progress_cb=cb).run())
-                still = work / f"{mid}_still.png"
-                _extract_still(out, still)
-                e["output"], e["still"] = str(out), str(still)
+                stills_dir = work / "stills"
+                for i, t in enumerate(still_ts):
+                    _extract_still(out, stills_dir / f"{mid}_{i}.png", t)
+                e["output"] = str(out)
                 e["fps"] = round(stats.fps, 2)
                 e["out_w"], e["out_h"] = info.width * job["scale"], info.height * job["scale"]
                 e["out_bytes"] = out.stat().st_size if out.exists() else 0

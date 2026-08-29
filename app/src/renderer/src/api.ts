@@ -165,12 +165,14 @@ export interface CompareJob {
   start_s: number
   end_s: number
   scale: number
+  /** 视频模式静帧样本数（4），图片模式恒为 1 */
+  still_count: number
   status: 'queued' | 'running' | 'done' | 'failed' | 'canceled'
   error: string | null
   entries: CompareEntry[]
 }
 
-/** 对比产物资源地址（静帧/成片，key: seg | src_still | out/<mid> | still/<mid>） */
+/** 对比产物资源地址（key: seg | src_still/<i> | out/<mid> | still/<mid>[/<i>]） */
 export function compareAssetUrl(id: string, key: string): string {
   return withToken(`${baseUrl}/api/compare/${id}/asset/${key}`)
 }

@@ -72,14 +72,35 @@ const fmt = (t: number) => {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-// 以输出视频为主时钟，rAF 持续把源视频对齐（两路时长可能差 ±1 帧）
+// 以输出视频为主时钟，rAF 持续把源视频对齐（两路时长可能差 ±1 帧）。
+// 三档校正：半帧内不动；大偏差（拖动恢复/loop 绕回/卡顿后）硬 seek；
+// 中间偏差用 playbackRate 在 ±10% 内平滑追赶——对比场景跳帧闪烁比轻微变速扎眼得多，
+// 而单一 0.05s 死区会放任 1~3 帧的持续错位（运动画面肉眼可辨，30fps 一帧仅 33ms）
+const FRAME_TOL = 0.02
+const HARD_DRIFT = 0.3
 let raf = 0
 let lastCur = -1
 function tick() {
   const s = srcV.value
   const o = outV.value
   if (s && o) {
-    if (Math.abs(s.currentTime - o.currentTime) > 0.05 && !s.seeking) s.currentTime = o.currentTime
+    // 任一路在 seek 中不校：o 的 currentTime 还是中间态，跟着对只会来回抖
+    if (!s.seeking && !o.seeking && !srcBroken.value) {
+      const drift = s.currentTime - o.currentTime
+      if (Math.abs(drift) > HARD_DRIFT) {
+        s.currentTime = o.currentTime
+        s.playbackRate = 1
+      } else if (o.paused) {
+        // 暂停态画面静止，直接对齐没有闪烁问题
+        if (Math.abs(drift) > FRAME_TOL) s.currentTime = o.currentTime
+        if (s.playbackRate !== 1) s.playbackRate = 1
+      } else if (Math.abs(drift) > FRAME_TOL) {
+        // drift<0 源落后→加速追，>0 超前→减速让
+        s.playbackRate = Math.min(1.1, Math.max(0.9, 1 - drift * 0.5))
+      } else if (s.playbackRate !== 1) {
+        s.playbackRate = 1
+      }
+    }
     if (!o.paused && s.paused && !srcBroken.value) void s.play().catch(() => {})
     if (o.paused && !s.paused) s.pause()
     playing.value = !o.paused

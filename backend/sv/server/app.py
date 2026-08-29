@@ -1118,7 +1118,8 @@ def cancel_compare(job_id: str) -> dict:
 
 @app.get("/api/compare/{job_id}/asset/{key:path}")
 def compare_asset(job_id: str, key: str):
-    """对比产物文件：key 为白名单标识（seg/src_still/<model_id>），不开放任意路径。"""
+    """对比产物文件：key 为白名单标识（seg/src_still/<i>/out/<mid>/still/<mid>[/<i>]），
+    不开放任意路径。"""
     p = compare.asset_path(job_id, key)
     if p is None:
         raise HTTPException(404)

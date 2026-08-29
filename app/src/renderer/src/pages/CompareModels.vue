@@ -186,6 +186,7 @@ async function run() {
       scale: scale.value,
     })
     job.value = j
+    stillIdx.value = 0
     startPolling(j.id)
   } catch (e) {
     running.value = false
@@ -202,6 +203,7 @@ function reset() {
   job.value = null
   running.value = false
   curModel.value = ''
+  stillIdx.value = 0
 }
 
 const modelName = (id: string) =>
@@ -223,24 +225,32 @@ const curEntry = computed(() =>
 
 // 视频模式：静帧/成片两种对比载体；图片只有静帧
 const view = ref<'frames' | 'video'>('frames')
+// 静帧多帧样本：切片段均匀取 4 帧（后端避黑选定），源/模型同索引=同时间戳
+const stillIdx = ref(0)
+const stillCount = computed(() => job.value?.still_count ?? 1)
 
 const srcStillUrl = computed(() =>
-  job.value ? compareAssetUrl(job.value.id, 'src_still') : '')
+  job.value ? compareAssetUrl(job.value.id, `src_still/${stillIdx.value}`) : '')
 const outStillUrl = computed(() =>
   job.value && curModel.value
-    ? compareAssetUrl(job.value.id, `still/${curModel.value}`) : '')
+    ? compareAssetUrl(job.value.id, `still/${curModel.value}/${stillIdx.value}`) : '')
 const srcVideoUrl = computed(() =>
   job.value ? compareAssetUrl(job.value.id, 'seg') : '')
 const outVideoUrl = computed(() =>
   job.value && curModel.value
     ? compareAssetUrl(job.value.id, `out/${curModel.value}`) : '')
 
-/** 数字键 1~6 快速切换模型（←/→ 已被分割线占用） */
+/** 数字键 1~6 快速切换模型（←/→ 已被分割线占用）；[ ] 切换静帧样本 */
 function onKey(e: KeyboardEvent) {
   if (!job.value || e.target instanceof HTMLInputElement) return
   const n = parseInt(e.key, 10)
   if (n >= 1 && n <= doneEntries.value.length) {
     curModel.value = doneEntries.value[n - 1].model_id
+  } else if (e.key === '[' || e.key === ']') {
+    if (view.value !== 'frames' || stillCount.value <= 1) return
+    stillIdx.value = e.key === '['
+      ? Math.max(0, stillIdx.value - 1)
+      : Math.min(stillCount.value - 1, stillIdx.value + 1)
   }
 }
 // 本页 KeepAlive 常驻：卸载不再发生，切页时须手动摘掉全局键盘监听
@@ -449,9 +459,27 @@ function useModel(mid: string) {
           <CompareSlider v-else :src-url="srcStillUrl" :out-url="outStillUrl" />
         </div>
 
+        <!-- 静帧样本条：缩略图取源帧，点选/[ ] 切换；切模型保持当前帧 -->
+        <div
+          v-if="job.kind === 'video' && view === 'frames' && stillCount > 1"
+          class="frame-strip"
+        >
+          <button
+            v-for="i in stillCount"
+            :key="i"
+            class="f-thumb"
+            :class="{ on: stillIdx === i - 1 }"
+            :title="`样本帧 ${i}/${stillCount}`"
+            @click="stillIdx = i - 1"
+          >
+            <img :src="compareAssetUrl(job.id, `src_still/${i - 1}`)" alt="" loading="lazy" />
+            <span class="f-idx">{{ i }}</span>
+          </button>
+        </div>
+
         <div class="stage-foot">
           <span class="hint-inline">
-            数字键 1~{{ doneEntries.length }} 切换模型 · 拖动分割线对比原版（←/→ 微调）·
+            数字键 1~{{ doneEntries.length }} 切换模型 · 拖动分割线对比原版（←/→ 微调）{{ stillCount > 1 ? ' · [ ] 换静帧样本' : '' }} ·
             当前：{{ curEntry.out_w }}x{{ curEntry.out_h }} ·
             {{ job.kind === 'video' ? `${curEntry.fps.toFixed(1)} fps · ` : '' }}{{ curEntry.elapsed_s }}s
           </span>
@@ -586,6 +614,40 @@ h1 { font-size: 20px; font-weight: 700; }
   background: #0d0e10;
   overflow: hidden;
 }
+.frame-strip { display: flex; gap: 8px; }
+.f-thumb {
+  position: relative;
+  width: 104px;
+  height: 58px;
+  padding: 0;
+  border: 2px solid #2a2d31;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #0d0e10;
+  flex-shrink: 0;
+}
+.f-thumb:hover { border-color: #4a4f55; }
+.f-thumb.on { border-color: #4f8cff; }
+.f-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.f-idx {
+  position: absolute;
+  left: 4px;
+  bottom: 3px;
+  min-width: 14px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 14px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #c8cdd4;
+}
+.f-thumb.on .f-idx { background: rgba(79, 140, 255, 0.85); color: #fff; }
 .stage-foot {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
   flex-wrap: wrap;

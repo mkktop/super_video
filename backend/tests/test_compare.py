@@ -3,6 +3,7 @@
 推理与引擎加载全部打桩（不依赖 GPU 与真实模型），覆盖胶水层：
 素材准备（ffmpeg 真跑）、逐模型串行、指标记录、产物落盘。
 """
+import io
 import os
 import subprocess
 import threading
@@ -80,6 +81,27 @@ def _make_clip(path: Path, frames: int = 24):
         check=True, creationflags=WINDOWS_CREATE_FLAGS)
 
 
+def _make_black_lead_clip(path: Path, black_s: float = 1.2, tail_s: float = 0.8):
+    """前段黑场后段 testsrc2（默认共 2s、中点 1.0 恰落黑场）——静帧避黑的素材。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", f"color=black:size=64x36:rate=24:duration={black_s}",
+         "-f", "lavfi", "-i", f"testsrc2=size=64x36:rate=24:duration={tail_s}",
+         "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+         "-map", "[v]", "-c:v", "libx264", "-crf", "22",
+         "-pix_fmt", "yuv420p", str(path)],
+        check=True, creationflags=WINDOWS_CREATE_FLAGS)
+
+
+def _gray_mean(png_bytes: bytes) -> float:
+    import io
+
+    from PIL import Image, ImageStat
+
+    return ImageStat.Stat(Image.open(io.BytesIO(png_bytes)).convert("L")).mean[0]
+
+
 def _make_png(path: Path, w=32, h=20):
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(np.arange(w * h * 3, dtype=np.uint8).reshape(h, w, 3)).save(str(path))
@@ -131,9 +153,10 @@ def test_video_compare_runs_all_models(client, tmp_path, fake_engines):
         assert e["fps"] > 0 and e["elapsed_s"] > 0
         assert e["out_w"] == 128 and e["out_h"] == 72
         assert e["has_output"] is True
-        assert client.get(f"/api/compare/{jid}/asset/still/{e['model_id']}").status_code == 200
+        assert client.get(f"/api/compare/{jid}/asset/still/{e['model_id']}/0").status_code == 200
         assert client.get(f"/api/compare/{jid}/asset/out/{e['model_id']}").status_code == 200
-    assert client.get(f"/api/compare/{jid}/asset/src_still").status_code == 200
+    assert client.get(f"/api/compare/{jid}/asset/src_still/0").status_code == 200
+    assert client.get(f"/api/compare/{jid}/asset/src_still/3").status_code == 200
     assert client.get(f"/api/compare/{jid}/asset/seg").status_code == 200
     # 白名单外键 404（目录穿越防护）
     assert client.get(f"/api/compare/{jid}/asset/zzz").status_code == 404
@@ -149,6 +172,7 @@ def test_image_compare_runs(client, tmp_path, fake_engines):
     jid = r.json()["id"]
     job = _wait_job(client, jid)
     assert job["status"] == "done"
+    assert job["still_count"] == 1  # 图片模式无多帧概念
     e = job["entries"][0]
     assert e["out_w"] == 80 and e["out_h"] == 48
     # 图片模式：out 与 still 同为成品图
@@ -167,6 +191,70 @@ def test_seg_too_long_auto_capped(client, tmp_path, fake_engines):
     job = _wait_job(client, jid)
     assert job["end_s"] - job["start_s"] <= 20.0 + 1e-6
     assert job["status"] == "done"
+
+
+# ---- 静帧取帧：多帧样本 + 避黑场 + 源/成片同时间戳 ----
+
+def test_pick_still_times_skip_black(tmp_path):
+    """四段采样：前两段全黑保留锚点（如实展示黑场），后两段落正常画面。
+    容器 duration 含末帧长度（约 2.04s），断言按语义/区间而非硬编码时间。"""
+    clip = tmp_path / "blacklead.mp4"
+    _make_black_lead_clip(clip)  # 黑约 1.208s + testsrc，共 49 帧
+    ts = cmp_mod._pick_still_times(clip)
+    assert len(ts) == 4
+    # 段2 锚已越过黑段末尾，应命中非黑帧
+    assert 1.21 < ts[2] < 1.5
+    assert cmp_mod._frame_dark(clip, ts[2]) is False
+    assert cmp_mod._frame_dark(clip, ts[3]) is False
+    # 前两段整段皆黑：保留锚（仍落黑场段内），不越段硬挪
+    assert cmp_mod._frame_dark(clip, ts[0]) is True
+    assert cmp_mod._frame_dark(clip, ts[1]) is True
+
+
+def test_pick_still_times_all_black_returns_anchors(tmp_path):
+    """整段全黑（素材本身如此）时四段各保留锚点：互异、递增、都在片内。"""
+    clip = tmp_path / "allblack.mp4"
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "color=black:size=64x36:rate=24:duration=1",
+         "-c:v", "libx264", "-crf", "22", "-pix_fmt", "yuv420p", str(clip)],
+        check=True, creationflags=WINDOWS_CREATE_FLAGS)
+    ts = cmp_mod._pick_still_times(clip)
+    assert len(ts) == 4 and ts == sorted(ts) and len(set(ts)) == 4
+    assert 0.0 <= ts[0] and ts[3] <= 1.05
+
+
+def test_video_compare_still_avoids_black(client, tmp_path, fake_engines):
+    """黑场素材跑完整作业：正常段样本帧避黑；同索引源/模型静帧取自同一
+    时间戳（模型是 2x 最近邻放大，整数下采样后灰度均值应几乎一致）。"""
+    clip = tmp_path / "blackmid.mp4"
+    _make_black_lead_clip(clip)
+    r = client.post("/api/compare", json={
+        "kind": "video", "input": str(clip), "start_s": 0, "end_s": 2,
+        "models": ["cmp-a", "cmp-b"], "scale": 2})
+    assert r.status_code == 201, r.text
+    jid = r.json()["id"]
+    job = _wait_job(client, jid)
+    assert job["status"] == "done"
+    assert job["still_count"] == 4
+    # 黑场段的样本如实是黑，正常段避黑
+    assert _gray_mean(client.get(f"/api/compare/{jid}/asset/src_still/0").content) < 20
+    for i in (2, 3):
+        assert _gray_mean(client.get(f"/api/compare/{jid}/asset/src_still/{i}").content) > 20
+    # 越界/非数字索引与无索引 key 都应 404
+    assert client.get(f"/api/compare/{jid}/asset/src_still/9").status_code == 404
+    assert client.get(f"/api/compare/{jid}/asset/src_still/x").status_code == 404
+    assert client.get(f"/api/compare/{jid}/asset/src_still").status_code == 404
+    for e in job["entries"]:
+        src = np.asarray(Image.open(io.BytesIO(
+            client.get(f"/api/compare/{jid}/asset/src_still/2").content)).convert("L"),
+            dtype=np.float64)
+        out = np.asarray(Image.open(io.BytesIO(
+            client.get(f"/api/compare/{jid}/asset/still/{e['model_id']}/2").content)
+        ).convert("L"), dtype=np.float64)[::2, ::2]
+        assert out.shape == src.shape
+        assert abs(out.mean() - src.mean()) < 3, "同索引静帧不是同一时间戳"
 
 
 def test_cancel_skips_remaining_models(client, tmp_path, fake_engines, monkeypatch):
