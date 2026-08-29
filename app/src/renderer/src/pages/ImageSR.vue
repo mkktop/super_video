@@ -2,6 +2,7 @@
 import { computed, onActivated, onMounted, ref } from 'vue'
 import {
   NButton,
+  NCheckbox,
   NInputNumber,
   NRadioButton,
   NRadioGroup,
@@ -37,6 +38,7 @@ const targetScale = ref(2)
 const format = ref<'png' | 'jpg'>('png')
 const jpgQuality = ref(92)
 const tileChoice = ref(0) // 0 = 模型默认
+const mergePdf = ref(false) // 批量 ≥2 张可勾选：另出一份无损封装的 PDF
 const submitting = ref(false)
 
 // ---- 模型 ----
@@ -124,6 +126,7 @@ async function submit() {
   submitting.value = true
   // 批量合并为一个任务：后端一次模型加载循环处理全部图片
   const n = files.value.length
+  const wantPdf = mergePdf.value && n >= 2
   const r = await api.createTask({
     inputs: files.value,
     model_id: modelId.value,
@@ -134,12 +137,13 @@ async function submit() {
       format: format.value,
       ...(format.value === 'jpg' ? { jpg_quality: jpgQuality.value } : {}),
       ...(tileChoice.value ? { tile: tileChoice.value } : {}),
+      ...(wantPdf ? { merge_pdf: true } : {}),
     },
   })
   submitting.value = false
   if (r.ok) {
     message.success(
-      `已加入队列（${n} 张图片合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}）`,
+      `已加入队列（${n} 张图片合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`,
     )
     files.value = []
     ui.page = 'tasks'
@@ -239,6 +243,12 @@ export default { name: 'ImageSR' }
             <NSlider v-model:value="jpgQuality" :min="60" :max="100" :step="1" style="width: 180px" />
           </template>
         </div>
+        <div v-if="files.length >= 2" class="row inline">
+          <span class="lbl">批量合并</span>
+          <NCheckbox v-model:checked="mergePdf">
+            另外输出一份 PDF（全部结果按顺序无损封装，逐张图片文件仍保留）
+          </NCheckbox>
+        </div>
         <div class="row stack">
           <span class="lbl">分块大小（高级）</span>
           <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
@@ -246,7 +256,8 @@ export default { name: 'ImageSR' }
         <p class="hint-row">
           自动=按模型默认；超大图（如 8K 扫描件）显存不足时调小分块。结果保存到「{{
             outDirLabel
-          }}」，目录内无同名时沿用原文件名，同名冲突自动改用「原名_倍率」后缀，不覆盖现有文件。
+          }}」，目录内无同名时沿用原文件名，同名冲突自动改用「原名_倍率」后缀，不覆盖现有文件。PDF
+          无损口径：PNG 结果逐像素一致直接嵌入，JPG 结果按原文件字节嵌入不再压缩。
         </p>
       </div>
     </section>

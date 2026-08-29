@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import {
   NButton,
   NInput,
+  NInputNumber,
   NPopover,
   NPopconfirm,
   NProgress,
@@ -40,6 +41,25 @@ const srProfiling = ref(false) // 超分性能日志（完成的任务可查看�
 // ---- 对比缓存：产物不自动清理（见 sv/server/compare.py），这里手动清 ----
 const cacheStats = ref<{ jobs: number; bytes: number } | null>(null)
 const clearingCache = ref(false)
+// 对比静帧样本数（1~8）：创建作业时后端快照，改完对下一次「开始对比」生效
+const stillCount = ref(4)
+const savingStillCount = ref(false)
+async function saveStillCount() {
+  const v = Math.round(stillCount.value)
+  if (!Number.isFinite(v) || v < 1 || v > 8) {
+    message.error('静帧样本数需在 1~8 之间')
+    return
+  }
+  savingStillCount.value = true
+  const r = await api.saveSettings({ compare_still_count: v })
+  savingStillCount.value = false
+  if (r.ok) {
+    stillCount.value = v
+    message.success('已保存，下次开始对比时生效')
+  } else {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+  }
+}
 async function loadCacheStats() {
   try {
     cacheStats.value = await api.compareCacheStats()
@@ -144,6 +164,7 @@ onMounted(async () => {
     notify_task_done?: boolean
     close_to_tray?: boolean
     sr_profiling?: boolean
+    compare_still_count?: number
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
@@ -154,6 +175,7 @@ onMounted(async () => {
   notifyTask.value = s.notify_task_done !== false
   closeToTray.value = s.close_to_tray === true
   srProfiling.value = s.sr_profiling === true
+  stillCount.value = Math.min(8, Math.max(1, Math.round(Number(s.compare_still_count) || 4)))
   const p = s.download_proxy ?? ''
   if (p === 'direct') proxyMode.value = 'direct'
   else if (p.startsWith('http')) {
@@ -509,11 +531,29 @@ async function uninstallTrc() {
         <!-- 对比缓存 -->
         <section class="card">
           <header class="card-head">
-            <div class="card-title">对比缓存</div>
-            <div class="card-sub">模型对比的切片与成片产物，保留在本地且不会自动清理</div>
+            <div class="card-title">对比</div>
+            <div class="card-sub">静帧样本数设置，以及切片/成片产物的缓存管理（产物保留在本地且不会自动清理）</div>
           </header>
           <div class="card-body">
             <div class="row switch-row">
+              <span class="row-text">
+                静帧样本数
+                <small>每次对比的静帧模式取几张样本帧（片段均匀分布、自动避开黑场）；越多样本越全，产物占用也越大。对已经开始的对比无影响</small>
+              </span>
+              <NSpace :size="8" :wrap="false" align="center">
+                <NInputNumber
+                  v-model:value="stillCount"
+                  size="small"
+                  :min="1"
+                  :max="8"
+                  :show-button="false"
+                  style="width: 84px"
+                  @update:value="(v: number | null) => v === null && (stillCount = 4)"
+                />
+                <NButton size="small" type="primary" :loading="savingStillCount" @click="saveStillCount">保存</NButton>
+              </NSpace>
+            </div>
+            <div class="row switch-row bordered-top">
               <span class="row-text">
                 已用空间 <b>{{ cacheStats ? fmtBytes(cacheStats.bytes) : '…' }}</b>
                 <small>共 {{ cacheStats ? cacheStats.jobs : '…' }} 个作业 · 清理不影响任务输出与剪切文件</small>

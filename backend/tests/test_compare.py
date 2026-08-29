@@ -53,6 +53,15 @@ def fake_engines(monkeypatch):
         lambda spec, scale, variant=None: Path("fake.onnx"))
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_settings(tmp_path, monkeypatch):
+    """隔离本机 settings.json：静帧样本数等设置被用户改过后不得影响断言
+    （作业的 still_count 断言默认值 4，本机设置非 4 会把无关测试搞挂）。"""
+    from sv.server import settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
+
+
 @pytest.fixture(scope="module")
 def client():
     from sv.server.app import app
@@ -326,6 +335,54 @@ def test_cancel_queued_job(client, tmp_path, fake_engines, monkeypatch):
     hold.set()
     job = _wait_job(client, jid1)
     assert job["status"] == "canceled"
+
+
+# ---- 静帧样本数设置（settings.compare_still_count，创建作业时快照） ----
+
+def test_still_count_setting_roundtrip(tmp_path, monkeypatch):
+    from sv.server import settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "rt.json")
+    assert settings_mod.load()["compare_still_count"] == 4  # 默认 4 帧
+    assert settings_mod.save({"compare_still_count": 6})["compare_still_count"] == 6
+    assert settings_mod.load()["compare_still_count"] == 6
+    for bad in (0, 9, "4", 4.5, True, None):  # 越界/类型错/bool（int 子类）全拒
+        with pytest.raises(ValueError):
+            settings_mod.save({"compare_still_count": bad})
+
+
+def test_still_count_setting_clamped_when_hand_edited():
+    """settings.json 被手改越界/写坏时读入兜底钳制，不影响作业创建。"""
+    from sv.server import settings as settings_mod
+
+    settings_mod.SETTINGS_PATH.write_text('{"compare_still_count": 99}', encoding="utf-8")
+    assert cmp_mod._still_count_setting() == 8
+    settings_mod.SETTINGS_PATH.write_text('{"compare_still_count": "bad"}', encoding="utf-8")
+    assert cmp_mod._still_count_setting() == 4
+
+
+def test_video_compare_still_count_snapshot(client, tmp_path, fake_engines):
+    """设 2 帧：作业快照 still_count=2，源与每个模型正好各 2 张，越界 404。"""
+    from sv.server import settings as settings_mod
+
+    settings_mod.save({"compare_still_count": 2})
+    clip = tmp_path / "c2.mp4"
+    _make_clip(clip, 24)  # 1s
+    r = client.post("/api/compare", json={
+        "kind": "video", "input": str(clip), "start_s": 0, "end_s": 1,
+        "models": ["cmp-a", "cmp-b"], "scale": 2})
+    assert r.status_code == 201, r.text
+    jid = r.json()["id"]
+    job = _wait_job(client, jid)
+    assert job["status"] == "done"
+    assert job["still_count"] == 2
+    for i in (0, 1):
+        assert client.get(f"/api/compare/{jid}/asset/src_still/{i}").status_code == 200
+    assert client.get(f"/api/compare/{jid}/asset/src_still/2").status_code == 404
+    for e in job["entries"]:
+        for i in (0, 1):
+            url = f"/api/compare/{jid}/asset/still/{e['model_id']}/{i}"
+            assert client.get(url).status_code == 200
 
 
 # ---- 对比缓存清理（设置页入口） ----

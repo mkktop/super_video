@@ -31,7 +31,8 @@ from .events import EventBus
 COMPARE_ROOT = DATA_ROOT / "compare"
 MAX_MODELS = 6
 MAX_SEG_S = 20.0  # 对比片段时长上限：对比要快，长片段没有额外信息量
-STILL_COUNT = 4  # 视频模式静帧样本数：片段均分四段各取一帧（避黑）
+STILL_COUNT = 4  # 静帧样本数默认值（settings.compare_still_count 可调，创建作业时快照）
+MAX_STILL_COUNT = 8  # 样本数上限：PNG 无损+超分分辨率，多了产物体积与抽帧耗时失控
 
 JOBS: dict[str, dict] = {}
 _QUEUE: "queue.Queue[str]" = queue.Queue()
@@ -68,6 +69,17 @@ def _worker() -> None:
             _publish({"type": "compare", "id": jid, "status": "failed"})
 
 
+def _still_count_setting() -> int:
+    """设置项读入并钳制：json 可能被手改越界/写坏，这里兜底成合法值。"""
+    from .settings import load as load_settings
+
+    v = load_settings().get("compare_still_count", STILL_COUNT)
+    try:
+        return max(1, min(MAX_STILL_COUNT, int(v)))
+    except (TypeError, ValueError):
+        return STILL_COUNT
+
+
 def create(kind: str, input_path: Path, start_s: float, end_s: float,
            model_ids: list[str], scale: int) -> dict:
     """校验并排入对比作业。调用方（app.py 路由）已完成模型注册表校验。"""
@@ -75,7 +87,8 @@ def create(kind: str, input_path: Path, start_s: float, end_s: float,
     job = {
         "id": jid, "kind": kind, "input": str(input_path),
         "start_s": start_s, "end_s": end_s, "scale": scale,
-        "still_count": STILL_COUNT if kind == "video" else 1,
+        # 创建时快照：之后改设置不影响已排队的作业，still_count 恒等于产物张数
+        "still_count": _still_count_setting() if kind == "video" else 1,
         "status": "queued", "error": None, "cancel_requested": False,
         "created_at": time.time(),
         "entries": [
@@ -317,7 +330,7 @@ def _run_job(job: dict) -> None:
         info = probe(seg)
         stills = work / "stills"
         stills.mkdir(exist_ok=True)
-        still_ts = _pick_still_times(seg, info.duration_s)
+        still_ts = _pick_still_times(seg, info.duration_s, job["still_count"])
         for i, t in enumerate(still_ts):
             _extract_still(seg, stills / f"src_{i}.png", t)
         warmup_hw = (info.height, info.width)

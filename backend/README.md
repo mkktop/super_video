@@ -56,6 +56,7 @@ cd app && pnpm install && pnpm build && npx electron .   # 或 pnpm dev
 ```
 sv/
 ├─ paths.py            项目路径 / ffmpeg 定位 / 数据目录迁移
+├─ pdfmerge.py         批量图片 → 单份 PDF 无损封装（Flate+PNG 预测器 / JPEG 直嵌，零依赖手写 PDF 对象）
 ├─ pipeline/
 │  ├─ probe.py         ffprobe 封装 + 探测缓存（接受 10bit/VFR→CFR 化，拒绝 HDR）
 │  ├─ stream.py        核心流式管线（解码→逐帧/批量推理→编码，管道不落盘）
@@ -90,7 +91,7 @@ sv/
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
 scripts/               calibrate_color.py（IO 校准）、convert_fp16.py / export_onnx_x4plus.py、build_trt_component.py、bench_*.py（基准）
-tests/                 29 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/回归）
+tests/                 30 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/回归）
 ```
 
 ## HTTP API 一览
@@ -129,6 +130,6 @@ sidecar 仅监听 localhost（本地 token 鉴权），完整定义见 `server/a
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 182 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/回归；从 backend 目录跑）
+$py -m pytest tests/ -q          # 207 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/回归；从 backend 目录跑）
 $py scripts/bench.py             # 速度与内存基准表
 ```

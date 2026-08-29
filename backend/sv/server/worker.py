@@ -231,6 +231,9 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     方向）→ 推理 → 原子落盘（.part + replace，取消/中断不留半个文件）。
 
     单图失败跳过并记日志（个别坏图不拖垮整批），全部失败才算任务失败。
+    merge_pdf：全部图片落盘后把成功页无损封装成一份 PDF（PNG→Flate 逐像素
+    一致，JPG→原样直嵌）；合并失败任务判失败——图片产物保留（清理链对图片
+    任务豁免），错误信息说明这一层。
     不走分段/checkpoint（单帧无意义）；取消靠 runner 杀进程兜底，已完成
     的输出文件保留（runner._cleanup_partial 对图片任务豁免）。
     """
@@ -331,6 +334,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     ok = 0
     out_bytes_total = 0
     failed_names: list[str] = []
+    written: list[Path] = []  # 本轮成功落盘的输出（PDF 按此清单与顺序封装）
     t_dec = t_inf = t_sav = 0.0  # 剖析口径：解码 / 推理 / 编码落盘 合计
     first_pair: tuple[np.ndarray, np.ndarray] | None = None
 
@@ -376,6 +380,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                 else:
                     t_sav += time.perf_counter() - _t
                     ok += 1
+                    written.append(dst)
                     out_bytes_total += dst.stat().st_size
                     if first_pair is None:
                         first_pair = (frame, out)
@@ -395,6 +400,31 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
               f"{len(failed_names)} 张失败/跳过: {', '.join(failed_names[:10])}"
               + ("…" if len(failed_names) > 10 else "")})
 
+    # ---- 合并输出 PDF（merge_pdf）：成功页按处理顺序无损封装 ----
+    pdf_pages = 0
+    if params.get("merge_pdf") and written:
+        if not params.get("pdf_out"):
+            emit({"type": "failed", "error": "merge_pdf 任务缺少 pdf_out 参数"})
+            return 1
+        pdf_out = Path(str(params["pdf_out"]))
+        _t = time.perf_counter()
+        try:
+            from sv.pdfmerge import write_pdf
+
+            pdf_pages = write_pdf(written, pdf_out)["pages"]
+        except Exception as e:  # noqa: BLE001 — 合并失败必须显式上报，不静默
+            emit({"type": "failed", "error":
+                  f"图片已全部产出（{ok} 张保留在输出目录），但 PDF 合并失败: "
+                  f"{type(e).__name__}: {e}"})
+            return 1
+        dt = time.perf_counter() - _t
+        out_bytes_total += pdf_out.stat().st_size
+        emit({"type": "log", "line":
+              f"已无损合并 {pdf_pages} 页 → {pdf_out.name}"
+              f"（{pdf_out.stat().st_size / 1048576:.1f} MB，用时 {dt:.1f}s"
+              + (f"，另 {len(failed_names)} 张失败图未含" if failed_names else "")
+              + "）"})
+
     if _prof_enabled():
         el = time.perf_counter() - t0
         _prof_write(task["id"], "\n".join([
@@ -404,6 +434,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
             f"引擎加载 {load_s:.1f}s · 解码合计 {t_dec:.2f}s · 推理合计 {t_inf:.2f}s"
             f" · 编码落盘合计 {t_sav:.2f}s",
             f"成功 {ok}/{n} 张 · 总用时 {el:.1f}s · 平均 {ok / el if el > 0 else 0:.2f} 张/秒（端到端口径）",
+            *([f"PDF 合并 {pdf_pages} 页（无损封装）"] if pdf_pages else []),
         ]) + "\n\n")
 
     # 预览缩略图（对照页/任务卡，取第一张成功的），失败不影响主流程

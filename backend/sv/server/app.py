@@ -487,7 +487,9 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
 
     与视频任务共用模型/倍率纪律；批量时只允许倍数放大（自定义分辨率需逐图
     尺寸校验，暂不开放）。params.images 携带 [{in,out},...] 清单，worker 端
-    一次模型加载循环处理。输出默认 PNG（无损），可选 JPG + 质量。
+    一次模型加载循环处理。输出默认 PNG（无损），可选 JPG + 质量。批量可勾选
+    merge_pdf：逐图产物照常落盘，另把全部成功页无损封装成一份 PDF（任务
+    output 指向 PDF），pdf_out 与逐图产物同命名系、不覆盖现有文件。
     """
     params_in = dict(body.params)
     inputs_raw = list(body.inputs) if body.inputs else [body.input]
@@ -530,6 +532,7 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     denoise = params_in.get("denoise")
     if denoise is not None and int(denoise) not in (0, 1, 2, 3):
         raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
+    merge_pdf = bool(params_in.get("merge_pdf"))  # 批量合并输出 PDF（无损封装）
 
     # 逐图可用性校验 + 尺寸读取（EXIF 方向转正后的真实宽高）
     from PIL import Image, ImageOps
@@ -568,6 +571,12 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
             out = str(body.output)
             used.add(os.path.normcase(out))
         images_meta.append({"in": str(p), "out": out})
+    pdf_out = None
+    if merge_pdf:
+        # PDF 沿用首图名系（首图撞名拿了 _倍率 后缀时 PDF 跟随），与逐图
+        # 产物互不覆盖；名字在创建期定死，worker 只消费
+        pdf_out = _sr_output_name(
+            out_root, Path(images_meta[0]["out"]).stem, "pdf", res_label, used)
     try:  # 与视频同规则：目录不存在自动建，指向不可写处给可读错误
         out_root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -586,8 +595,11 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         params["target_scale"] = scale  # 整数倍率字段退位为模型原生档
     if denoise is not None:
         params["denoise"] = int(denoise)
+    if pdf_out is not None:
+        params["merge_pdf"] = True
+        params["pdf_out"] = pdf_out
     task = db.new_task(
-        str(paths[0]), images_meta[0]["out"], body.model_id, params,
+        str(paths[0]), pdf_out or images_meta[0]["out"], body.model_id, params,
         src={"w": src_w, "h": src_h, "fps": 0.0, "total_frames": len(paths)},
     )
     bus.publish({"type": "task_status", "task_id": task["id"], "status": "queued"})

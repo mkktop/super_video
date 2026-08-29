@@ -17,6 +17,7 @@ DEFAULTS = {
     "notify_task_done": True,  # 任务完成/失败时系统通知+闪任务栏（renderer 读；窗口聚焦时不打扰）
     "close_to_tray": False,  # 关闭按钮=最小化到系统托盘继续处理任务（托盘菜单退出应用）
     "sr_profiling": False,  # 超分性能日志：任务结束保留分段耗时明细到 DATA_ROOT/data/sr_logs，供分析速度瓶颈
+    "compare_still_count": 4,  # 模型对比静帧样本数（1~8，与 compare.py MAX_STILL_COUNT 一致）：创建对比作业时快照
 }
 
 SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
@@ -61,6 +62,10 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 close_to_tray 值: {v}")
             if k == "sr_profiling" and not isinstance(v, bool):
                 raise ValueError(f"非法 sr_profiling 值: {v}")
+            if k == "compare_still_count":
+                # bool 是 int 子类，须显式排除
+                if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= 8:
+                    raise ValueError(f"非法 compare_still_count 值: {v}（1~8）")
             if k == "output_dir":
                 if not isinstance(v, str):
                     raise ValueError(f"非法 output_dir 值: {v}")
