@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -40,6 +41,34 @@ def shard_starts(starts: list[int], shard: int | None, nshards: int) -> list[int
     if shard is None or nshards <= 1:
         return starts
     return [s for i, s in enumerate(starts) if i % nshards == shard]
+
+
+def _write_eof_marker(work: Path, real_total_in: int) -> None:
+    """真实片尾落盘（原子写）：另一路与续跑据此跳过界外段。
+
+    取更小值覆盖：先撞尾的一路若只拿到"空段起点"这种粗上界（0 帧段），
+    另一路随后发现的精确值（短段起点+实得帧数）应覆盖它。tmp 名带 pid——
+    双路两进程共用目录，同名 tmp 会互踩（checkpoint 单文件时代的旧坑）。
+    """
+    m = work / "eof.json"
+    if m.exists():
+        old = read_eof_marker(work)
+        if old is not None and old <= real_total_in:
+            return
+    tmp = work / f"eof.json.tmp{os.getpid()}"
+    tmp.write_text(json.dumps({"real_total_in": int(real_total_in)}))
+    tmp.replace(m)
+
+
+def read_eof_marker(work: Path) -> int | None:
+    """读真实片尾标记（输入帧口径）；无/损坏按 None（继续按估算总长跑）。"""
+    m = work / "eof.json"
+    if not m.exists():
+        return None
+    try:
+        return int(json.loads(m.read_text())["real_total_in"])
+    except (ValueError, KeyError, OSError):
+        return None
 
 
 def _concat_line(p: Path) -> str:
@@ -172,12 +201,17 @@ class SegmentedPipeline:
         local_done = 0  # 本路已完成段的输出帧数（分片模式进度按局部口径上报）
         tot: dict[str, float] = {}  # 分段计时累计（剖析用，写 perf_stages.jsonl）
         gap_prev_end = None
+        real_total_in: int | None = None  # 解码 EOF 证实的真实总长（probe 估算可能偏大）
         try:
             for s in starts:
                 if s in done:
                     continue  # 续跑：跳过已完成段
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise TaskCanceled()
+                if real_total_in is None:
+                    real_total_in = read_eof_marker(work)  # 另一路/上次运行已发现片尾
+                if real_total_in is not None and s >= real_total_in:
+                    break  # starts 升序，其后全在真实片尾外：不解码、不入 checkpoint
                 n_in = min(seg, total_in - s)
                 if self.shard is not None and self.progress_cb is not None:
                     # StreamPipeline 上报的是全局帧号（seg_start+local）；分片模式下
@@ -212,15 +246,25 @@ class SegmentedPipeline:
                 # 段产出帧数校验：非末段短产=解码/probe 异常，硬失败不入 checkpoint
                 # （静默固化的短段会让 concat 总帧数 < 预期 → 音画漂移且续跑无法自愈）；
                 # 末段短产容忍（VFR/probe 帧数估算偏差的已知取舍），记录缺口供剖析。
+                # 例外——解码器干净 EOF 且未产满请求帧数 = 文件真到尾了（probe 按
+                # 容器 duration 估帧数，MKV BDRemux 元数据偏大：139813 估 / 139566 实，
+                # 尾段 139200 产出 366/600 曾被误判"解码异常"，正式版两次复现）。
                 expect = n_in * factor
                 got = int(stats.get("frames", 0.0))
-                if got != expect:
+                eof_tail = bool(stats.get("decode_eof")) and got < expect
+                if got != expect and not eof_tail:
                     last_seg = s + n_in >= total_in
                     if not last_seg or got > expect:
                         raise PipelineError(
                             f"段 {s} 产出 {got} 帧 ≠ 预期 {expect} 帧（解码异常，本段未入 checkpoint，重试可恢复）"
                         )
                     tot["tail_short"] = tot.get("tail_short", 0.0) + (expect - got)
+                if eof_tail and got == 0:
+                    # 段起点已在真实片尾之外（双路另一路先撞尾）：无产物不入
+                    # checkpoint（入了会让续跑跳过"看似完成"的空段），只落粗上界
+                    real_total_in = s
+                    _write_eof_marker(work, real_total_in)
+                    break
                 for k, v in stats.items():
                     tot[k] = tot.get(k, 0.0) + v
                 tot["n_segs"] = tot.get("n_segs", 0.0) + 1
@@ -232,15 +276,25 @@ class SegmentedPipeline:
                 local_done += got
                 processed_out += got
                 self._save_ckpt(work, ckpt_file, done)
+                if eof_tail:
+                    # 真实片尾 = 段起点 + 实得输入帧数（补帧 factor 下输出恰好 2N）
+                    real_total_in = s + got // factor
+                    _write_eof_marker(work, real_total_in)
+                    break  # 本路 starts 升序，其后段全在真实片尾外
         finally:
             if tot:
                 frames = tot.get("frames", 0.0)
                 rec = {"summary": True, **{k: round(v, 3) for k, v in tot.items()},
                        "fps": round(frames / tot["wall"], 2) if tot.get("wall") else 0.0,
                        "ms_per_frame": {k: round(v * 1000 / frames, 2) for k, v in tot.items()
-                                        if k not in ("frames", "n_segs", "wall") and frames > 0}}
+                                        if k not in ("frames", "n_segs", "wall", "decode_eof")
+                                        and frames > 0}}
                 with (work / "perf_stages.jsonl").open("a", encoding="utf-8") as f:
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+        if real_total_in is not None:
+            # probe 估算被解码 EOF 证伪：进度与产物口径改用真实帧数
+            total_out = real_total_in * factor
 
         if sharded:
             # 分片 worker 到此为止：不 trim/不 concat/不清理（协调者统一做）

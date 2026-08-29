@@ -30,7 +30,7 @@ from sv.models.fp16 import ensure_fp16_file
 from sv.models.registry import get_model, model_file
 from sv.paths import SR_LOG_DIR, TEMP_DIR
 from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
-from sv.pipeline.segmented import SegmentedPipeline
+from sv.pipeline.segmented import SegmentedPipeline, read_eof_marker
 from sv.pipeline.stream import EncodeOpts, PipelineError, RunStats, TaskCanceled
 from sv.server import db, settings
 
@@ -728,11 +728,16 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
                             output_path)
             if prof:
                 _prof_collect(task_id, work_dir)
+            # 真实片尾修正（probe 高估被 EOF 证伪）：done 帧数/进度按实际值；
+            # 先读标记再清目录
+            real_in = read_eof_marker(work_dir)
+            real_out = (real_in * (2 if interp is not None else 1)
+                        if real_in is not None else out_total)
             shutil.rmtree(work_dir, ignore_errors=True)
             stats = RunStats(
-                frames=out_total,
+                frames=real_out,
                 elapsed_s=time.perf_counter() - t0,
-                fps=out_total / max(time.perf_counter() - t0, 1e-6),
+                fps=real_out / max(time.perf_counter() - t0, 1e-6),
                 out_path=output_path,
                 out_bytes=output_path.stat().st_size if output_path.exists() else 0,
             )
@@ -763,6 +768,7 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
 
     emit({
         "type": "done", "frames": stats.frames,
+        "total_frames": stats.frames,  # 真实片尾修正后回填 DB（旧事件无此键按估算）
         "elapsed": round(stats.elapsed_s, 1),
         "out_bytes": stats.out_bytes, "preview": str(preview_path),
         "src_preview": str(src_preview_path),
