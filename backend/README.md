@@ -66,7 +66,7 @@ sv/
 │  └─ trim.py          视频剪切（smart/fast/exact 三模式，可取消）
 ├─ engines/
 │  ├─ base.py          引擎接口 + 分块调度
-│  ├─ onnx_engine.py   ONNX 引擎（EP 回退链、u8 图手术、批量）
+│  ├─ onnx_engine.py   ONNX 引擎（EP 回退链、u8 图手术、批量、io 仿射/pad 分档）
 │  ├─ torch_engine.py  PyTorch 引擎（CUDA 环境，fp16 autocast）
 │  ├─ trt_runtime.py   TensorRT 可选组件的发现/激活
 │  ├─ nvidia_dlls.py   NVIDIA DLL 目录注册（CUDA/TRT 运行库定位）
@@ -88,10 +88,11 @@ sv/
 │  ├─ registry.py      manifest 注册表
 │  ├─ manager.py       下载 / sha256 校验 / 7z 成员提取
 │  ├─ fp16.py          fp16 变体转换（原子写）
+│  ├─ ASSETS.md        models-v1 资产页说明（Release body 的事实源）
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
 scripts/               calibrate_color.py（IO 校准）、convert_fp16.py / export_onnx_x4plus.py、build_trt_component.py、bench_*.py（基准）
-tests/                 30 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/回归）
+tests/                 41 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归）
 ```
 
 ## HTTP API 一览
@@ -110,14 +111,18 @@ sidecar 仅监听 localhost（本地 token 鉴权），完整定义见 `server/a
 | TRT | GET `/api/trt-component` · POST `…/install` · DELETE | TensorRT 组件状态 / 安装 / 卸载 |
 | 事件 | WS `/ws` | 进度 / 状态 / 日志 / 下载进度 / TRT 安装进度广播 |
 
-## 模型 IO 约定（校准结论，2026-08-23 实测）
+## 模型 IO 约定（manifest `io` 字段；结论均为真机实测）
 
-| 模型 | 尺寸输入 | 数值范围 | 通道序 | 分块 |
-|---|---|---|---|---|
-| realesr-animevideov3 | 动态 | 0-1 归一化 | BGR | 不需要 |
-| realesrgan-x4plus | 固定 64x64 | 0-1 归一化 | BGR | tile=64 必须 |
+| 字段 | 取值 | 说明 |
+|---|---|---|
+| color | `rgb` / `bgr` | 训练通道序（AnimeVideo 系是 BGR 特例，其余均 RGB） |
+| range | `0-1` / `0-255` | 数值范围；现役模型全部 0-1 归一化 |
+| pad | 整数，或 `{"2":2,"3":4}` 按倍率分档 | 输入边长最小倍数；同族不同倍率需求可不同（CUGAN up2x 只需偶数、up3x 需 4 的倍数——pad 按 3 对齐曾致 45/51/63 高度崩溃） |
+| affine | `[a, b]` | 0-1 域入图 `x*a+b`、出图 `(y-b)/a`；CUGAN Pro 动态范围压缩缺它输出直接爆炸，带仿射模型自动跳过 u8 包装 |
+| graph_opt | `basic` / `disable` | DML 图优化降档（CUGAN 系 Add 算子全量优化崩溃） |
+| batch_hint | 整数 | 批帧建议（动态 batch 模型单 run 多帧） |
 
-范围与通道序由 `scripts/calibrate_color.py` 的 PSNR 对照实验确定；新模型入库前必须跑一遍校准。
+通道序用红绿分屏法实测、范围用 0-255 喂入爆炸对照、pad 用 8..64 全尺寸扫描——完整口径与踩坑见根目录 `BENCH.md`（脚本历史参考 `scripts/calibrate_color.py`）。新模型入库流程：核实上游许可 → 逐项实测 IO → 上传 models-v1（平铺引用，`ASSETS.md` 同步维护资产页说明）→ 写 manifest（sha256 + size）→ 真实权重端到端验证。
 
 ## 已知取舍（2026-08-26 审查拍板，勿顺手"修复"）
 
@@ -130,6 +135,6 @@ sidecar 仅监听 localhost（本地 token 鉴权），完整定义见 `server/a
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 207 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/回归；从 backend 目录跑）
+$py -m pytest tests/ -q          # 292 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归；从 backend 目录跑）
 $py scripts/bench.py             # 速度与内存基准表
 ```
