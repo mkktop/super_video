@@ -1,0 +1,30 @@
+{
+  "id": "ani4k-v2-ultracompact",
+  "name": "Ani4K v2 UltraCompact（极速）",
+  "vendor": "Sirosky (Upscale-Hub)",
+  "license": "CC BY-NC 4.0（非商业使用，再分发需署名原作者）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [2],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "fastest",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "description": "Ani4K v2 极速档（105K 步）：1080p→4K 实时级；任意边长免对齐；画质兜底档",
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 4
+  },
+  "files": [
+    {
+      "name": "2x_Ani4Kv2_G6i2_UltraCompact_105K_fp32.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_Ani4Kv2_G6i2_UltraCompact_105K_fp32.onnx",
+      "sha256": "7bcc365d2c3a474402eecdd0f98c861e4dcbe5b08cdb7300e53283b7bdf61b5a",
+      "size": 1224535,
+      "source": "Sirosky/Upscale-Hub Ani4K-v2 release 官方 ONNX（fp32 导出）"
+    }
+  ]
+}

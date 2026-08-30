@@ -23,7 +23,8 @@
     "color": "rgb",
     "range": "0-1",
     "graph_opt": "basic",
-    "batch_hint": 4
+    "batch_hint": 4,
+    "pad": {"2": 2, "3": 4, "4": 4}
   },
   "files": [
     {

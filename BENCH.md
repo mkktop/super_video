@@ -558,3 +558,40 @@ h264_nvenc 对超限分辨率报误导性的 `No capable devices found`（裸命
    尺寸再怀疑设备（engine 层 frame_w=源宽×倍率，x4 遇 1080p 源即越界）。
    该行以双路+libx264 作参考值（12.1/11.8 fps，双双吃满 CPU，再次印证
    「双路必须配硬编」）。
+
+## 第一梯队新模型实证：CUGAN Pro / Ani4K v2（2026-08-30，对标 VSET 补齐）
+
+新增 real-cugan-pro（x2/x3 × 保守/不降噪/denoise3，6 权重）与 Ani4K v2
+Compact/UltraCompact（2 权重），资产已传 models-v1（21→29）。全部结论为
+CPU 会话逐模型实测（.tmp/models_vset 探测脚本），非文档转述：
+
+1. **CUGAN Pro 的动态范围仿射不可省**：Pro 训练输入被压缩到 [0.15, 0.85]
+   （上游 vsmlrt conformance 语义：入图 x*0.7+0.15、出图 (y-0.15)/0.7）。
+   实测缺省喂 [0,1]：conservative-up3x 输出 ±1e2、denoise3x-up2x 输出
+   -4654 级爆炸；带仿射后 6 权重红绿分屏全部精确复现（左纯红/右绿）。
+   引擎新增 io.affine=[a,b]（单帧+批帧两路径），带仿射模型跳过 u8 包装
+   （包装图不含仿射）。通道序 RGB、0-1 域、批维 >1 均与 latest 一致。
+2. **CUGAN 系 pad 整除性按倍率分档**：up2x 只需偶数、up3x 需 4 的倍数
+   （UNet 下采样路径；实测 30x30 拒跑 32x32 通过，x2 则 30 通过 31 拒跑）。
+   引擎 io.pad 支持按倍率字典 {"2":2,"3":4}。**顺带修掉 latest 潜伏 bug**：
+   real-cugan.json 原默认 pad=scale=3，x3 遇 45/51/63 等高度（%3==0 且奇）
+   直接 broadcast 崩溃——生产视频多为 mod2/mod16 未踩中故无事故。修复后
+   x3 崩溃尺寸全部跑通，x2/x4 行为逐位不变（x4 实测最小整除也是 2，保持
+   4 仅维持现状输出）。
+3. **Ani4K v2（Sirosky/Upscale-Hub，CC BY-NC 4.0）**：RGB/0-1 与
+   AnimeJaNai 生态同约定；任意边长原生免对齐（8..64 全尺寸直跑，含奇数）；
+   fp32→fp16 转换数值干净（随机帧 u8 域 maxdiff=1/255，两档同）；真实权重
+   端到端 u8 包装自动生效（内建 A/B 校验通过，GPU 前后处理优化可用）。
+   许可为 NC：免费分发场景可再分发但须署名，registry 已显式记录——若产品
+   未来商业化需先摘除这两个条目。
+4. **Pro 继承家族围栏**：spec.id 含 "cugan" 自动命中 worker 的 DML/CUDA
+   拒绝（显存泄漏前科）与引擎的 DML 禁包装/主线程内联——Pro 架构同族，
+   未单独复测泄漏，按保守处理（TRT/CPU 可用，描述文案已注明）。
+   fp16 转换标记不可用（latest 前科：转换后 DML 崩）。
+5. 测试 +10（test_new_models.py：变体映射/pad 分档/affine 数学（探针模型
+   精确断言 ((v/255*a+b)*k-b)/a）/包装互斥/manifest 完整性）；全量
+   292 passed + 1 skipped。真实权重端到端：6+2 权重 × 奇数边长 47x63
+   （含 latest x3 45x63 回归）全部尺寸/范围正确。
+
+待办：TRT 真机基准（pro 6 权重 + ani4k 两档）出数后决定 _ANIME_PREF 推荐
+位次是否调整；仿射折入 u8 包装图（TRT 下 pro 提速空间）。

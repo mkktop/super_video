@@ -3,7 +3,10 @@
 输入约定由 manifest 的 io 字段描述：
   color: "bgr" | "rgb"（模型训练时的通道序）
   range: "0-255"（float32，不归一化——Real-ESRGAN 系约定）
-pad: 输入边长需对齐的最小倍数（pixelshuffle 需要，通常 = scale）
+pad: 输入边长需对齐的最小倍数（pixelshuffle 需要，通常 = scale）；
+  可按倍率分档 {"2":2,"3":4}（CUGAN 系 up3x 需 4 的倍数而非 3）
+affine: [a, b]（0-1 域入图 x*a+b、出图 (y-b)/a——CUGAN Pro 动态范围压缩，
+  对齐上游 vsmlrt conformance；带仿射的模型跳过 u8 包装）
 """
 from __future__ import annotations
 
@@ -73,7 +76,17 @@ class OnnxSrEngine(BaseEngine):
         io = io or {}
         self.color = io.get("color", "bgr")
         self.value_range = io.get("range", "0-255")
-        self.pad = int(io.get("pad", scale))
+        # pad 可按倍率分档（{"2":2,"3":4}）：同族不同倍率的整除需求不同——
+        # CUGAN 系 up2x 只需偶数、up3x 需 4 的倍数（UNet 两次下采样，实测
+        # 30x30 拒跑而 32x32 通过），单一值要么错要么过度补边
+        pad_spec = io.get("pad", scale)
+        if isinstance(pad_spec, dict):
+            pad_spec = pad_spec.get(str(scale), scale)
+        self.pad = int(pad_spec)
+        # 入图仿射（0-1 域 x*a+b，出图 (y-b)/a）：CUGAN Pro 训练时输入动态
+        # 范围压缩到 [0.15,0.85]，缺省不喂会输出爆炸（conservative-up3x 实测
+        # ±1e2 量级），语义对齐上游 vsmlrt 的 conformance 开关
+        self.affine = tuple(io["affine"]) if io.get("affine") else None
         # "basic"|"disable"：个别老导出模型（如 real-cugan）在 DML 默认扩展优化下
         # 算子融合会触发 DML 自定义算子崩溃，降级图优化即可稳定运行
         self.graph_opt = io.get("graph_opt", "all")
@@ -85,6 +98,10 @@ class OnnxSrEngine(BaseEngine):
         # TRT 主链的包装 A/B 已验证健康（14.9fps 端到端），不受此限。
         self._spec_allow_wrap = manifest_allow_wrap or device == "trt"
         self.u8_wrap_enabled = u8_wrap and self._spec_allow_wrap
+        # 包装图只内嵌 color/range 前后处理，不含仿射——affine 模型跳过包装
+        #（cugan-pro 系本就 manifest 禁包装，此处兜底未来带仿射的新模型）
+        if self.affine:
+            self.u8_wrap_enabled = False
         self.validate_hw = validate_hw
         self.session = None
         self.provider_used: list[str] = []
@@ -313,11 +330,17 @@ class OnnxSrEngine(BaseEngine):
         x = np.ascontiguousarray(x.transpose(2, 0, 1)[None].astype(np.float32))
         if self.value_range == "0-1":
             x = x / 255.0
+        if self.affine:
+            a, b = self.affine
+            x = x * a + b
         if self._in_fp16:
             x = x.astype(np.float16)
 
         y = self.session.run(self._out_names, {self._in_name: x})[0]
         y = np.squeeze(y, axis=0).transpose(1, 2, 0).astype(np.float32)  # CHW -> HWC
+        if self.affine:
+            a, b = self.affine
+            y = (y - b) / a
         if self.value_range == "0-1":
             y = y * 255.0
         # 截断（非 round）是刻意的：与 u8 包装图内 Cast 的量化方式保持一致，
@@ -350,10 +373,16 @@ class OnnxSrEngine(BaseEngine):
         x = np.ascontiguousarray(x.transpose(0, 3, 1, 2).astype(np.float32))  # NCHW
         if self.value_range == "0-1":
             x = x / 255.0
+        if self.affine:
+            a, b = self.affine
+            x = x * a + b
         if self._in_fp16:
             x = x.astype(np.float16)
 
         y = self.session.run(self._out_names, {self._in_name: x})[0]  # N,3,H',W'
+        if self.affine:
+            a, b = self.affine
+            y = (y - b) / a
         if self.value_range == "0-1":
             y = y * 255.0
         y = np.clip(y.astype(np.float32), 0, 255).astype(np.uint8).transpose(0, 2, 3, 1)  # NHWC

@@ -1,0 +1,81 @@
+{
+  "id": "real-cugan-pro",
+  "name": "Real-CUGAN Pro（动漫·高画质）",
+  "vendor": "bilibili",
+  "license": "Apache-2.0",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [2, 3],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "balanced",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": false,
+  "u8_wrap": false,
+  "description": "B 站 Real-CUGAN Pro（v3 训练 + SE 注意力）：比 latest 画质更好但更慢；仅 x2/x3，降噪只有 0/3 档；训练输入动态范围压缩（引擎自动做仿射前后处理）。与 latest 同前科：DirectML/CUDA 后端不可用，仅 TensorRT 与 CPU",
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "graph_opt": "basic",
+    "batch_hint": 4,
+    "affine": [0.7, 0.15],
+    "pad": {"2": 2, "3": 4}
+  },
+  "files": [
+    {
+      "name": "pro-conservative-up2x.onnx",
+      "scale": 2,
+      "variant": "conservative",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/pro-conservative-up2x.onnx",
+      "sha256": "391a30605ca4101b54ff968728512b344ef277d8dbd1f686b12f0bf6c0c2d9e8",
+      "size": 5148695,
+      "source": "vs-mlrt model-20211209 cugan-pro_v3.7z（bilibili 官方权重 ONNX 导出）"
+    },
+    {
+      "name": "pro-no-denoise3x-up2x.onnx",
+      "scale": 2,
+      "variant": "denoise0",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/pro-no-denoise3x-up2x.onnx",
+      "sha256": "93492fa650d5cdb8aa4a26d694acfeca5e57e8c720849791e14bad3e4ec38df9",
+      "size": 5148695,
+      "source": "同上（上游命名 no-denoise3x = 不降噪档）"
+    },
+    {
+      "name": "pro-denoise3x-up2x.onnx",
+      "scale": 2,
+      "variant": "denoise3",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/pro-denoise3x-up2x.onnx",
+      "sha256": "39d45f6bd3969f69af7348184ffacc4dfac4609a6c23dba4a3fc07548330bf76",
+      "size": 5148695,
+      "source": "同上"
+    },
+    {
+      "name": "pro-conservative-up3x.onnx",
+      "scale": 3,
+      "variant": "conservative",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/pro-conservative-up3x.onnx",
+      "sha256": "d9a36e8ecd2512e1425a1c9847040c9d95c236d72f9ae72cadd534b8819da5ae",
+      "size": 5155609,
+      "source": "同上（x3 输入需 4 的倍数，引擎按倍率自动补边）"
+    },
+    {
+      "name": "pro-no-denoise3x-up3x.onnx",
+      "scale": 3,
+      "variant": "denoise0",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/pro-no-denoise3x-up3x.onnx",
+      "sha256": "bb79a315b3be3490e17e931791f3cae95af2ed7dd32cb452f5a0a79b0cbc63fb",
+      "size": 5155609,
+      "source": "同上"
+    },
+    {
+      "name": "pro-denoise3x-up3x.onnx",
+      "scale": 3,
+      "variant": "denoise3",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/pro-denoise3x-up3x.onnx",
+      "sha256": "89bf6c826e8ffe64f360f1baa861db4f2058140a3bb57bfe6cc0b355c3f48582",
+      "size": 5155609,
+      "source": "同上"
+    }
+  ]
+}

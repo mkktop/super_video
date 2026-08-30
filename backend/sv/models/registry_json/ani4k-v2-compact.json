@@ -1,0 +1,30 @@
+{
+  "id": "ani4k-v2-compact",
+  "name": "Ani4K v2 Compact（画质）",
+  "vendor": "Sirosky (Upscale-Hub)",
+  "license": "CC BY-NC 4.0（非商业使用，再分发需署名原作者）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [2],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "description": "2025 新模型，G6i2 紧凑架构：HD 动漫→4K 画质档（107500 步训练）；任意边长免对齐；fp16 转换数值已验证（u8 域 ≤1/255）",
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 4
+  },
+  "files": [
+    {
+      "name": "2x_Ani4Kv2_G6i2_Compact_107500_fp32.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_Ani4Kv2_G6i2_Compact_107500_fp32.onnx",
+      "sha256": "747163e8572650380b0b2f16f89e8c3ce2c29cd19525e9af8782d4bf1fe653c2",
+      "size": 2413474,
+      "source": "Sirosky/Upscale-Hub Ani4K-v2 release 官方 ONNX（fp32 导出）"
+    }
+  ]
+}

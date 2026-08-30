@@ -1,6 +1,6 @@
 {
   "name": "super-video-app",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "super_video 桌面端 —— AI 视频超分",
   "main": "out/main/index.js",
   "private": true,
