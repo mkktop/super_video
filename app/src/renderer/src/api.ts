@@ -95,6 +95,8 @@ export interface Stats {
   done: number
   frames: number
   bytes: number
+  /** 处理时机闸门（定时/闲时）：false=队列挂起等待中，reason 为提示文案 */
+  queue_gate?: { active: boolean; reason: string }
 }
 
 /** TRT 可选组件的资产描述（release 上的 7z 分包） */
@@ -379,6 +381,20 @@ export const api = {
   },
   previewUrl(id: string, updatedAt: number, src = false): string {
     return withToken(`${baseUrl}/api/tasks/${id}/preview?t=${updatedAt}${src ? '&src=1' : ''}`)
+  },
+  /** 生成对比分享卡片（长图/滑块动图）；返回产物路径与可展示的 URL */
+  async createShareCard(id: string, kind: 'image' | 'gif'): Promise<{ path: string; kind: string; url: string }> {
+    const r = await _fetch(`${baseUrl}/api/tasks/${id}/share-card`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind }),
+    })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
+    return r.json()
+  },
+  /** 分享卡片产物的资源地址（<img> 无法带头，走 token 查询参数） */
+  shareCardUrl(id: string, kind: 'image' | 'gif', bust: number): string {
+    return withToken(`${baseUrl}/api/tasks/${id}/share-card/file?kind=${kind}&t=${bust}`)
   },
   async cancelTrim(id: string): Promise<Response> {
     return _fetch(`${baseUrl}/api/trim/${id}/cancel`, { method: 'POST' })

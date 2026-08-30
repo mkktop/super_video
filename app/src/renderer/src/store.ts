@@ -231,6 +231,11 @@ function handleWsEvent(raw: MessageEvent) {
       }
       return
     }
+    // 处理时机闸门（定时/闲时）：就地更新 stats 内嵌字段，低频事件
+    if (ev.type === 'queue_gate') {
+      store.stats = { ...store.stats, queue_gate: { active: !!ev.active, reason: String(ev.reason ?? '') } }
+      return
+    }
     // 队列完成动作（关机/休眠倒计时）：低频、只驱动任务页横幅，直接处理
     if (ev.type === 'queue_done') {
       if (ev.grace_s > 0) {

@@ -246,7 +246,9 @@ def test_resume_api(client, clips):
     assert client.post(f"/api/tasks/{tid}/cancel").status_code == 200
     t = wait_status(client, tid, ("canceled",), timeout=30)
     assert client.post(f"/api/tasks/{tid}/resume").status_code == 200
-    assert client.get(f"/api/tasks/{tid}").json()["status"] == "queued"
+    # 慢机上断言前 runner 可能已把任务领走：queued/running 都是"续跑已生效"
+    st = client.get(f"/api/tasks/{tid}").json()["status"]
+    assert st in ("queued", "running")
     assert client.post(f"/api/tasks/{tid}/resume").status_code == 409  # 已在排队
     assert client.post(f"/api/tasks/{tid}/cancel").status_code == 200  # 清理队列
     wait_status(client, tid, ("canceled",), timeout=30)
@@ -287,7 +289,9 @@ def _insert_done_rows(ids: list[str], base_ts: float) -> None:
 def test_stats_endpoint(client):
     """/api/stats 与库内直接聚合一致（首页四宫格不受列表上限影响）。"""
     s = client.get("/api/stats").json()
-    assert set(s) == {"total", "done", "frames", "bytes"}
+    # 聚合四键必在；queue_gate 是处理时机闸门透出（任务页"挂起中"提示）
+    assert {"total", "done", "frames", "bytes"} <= set(s)
+    assert "queue_gate" in s and isinstance(s["queue_gate"].get("active"), bool)
     from sv.server.db import db_conn
 
     with db_conn() as c:
@@ -298,7 +302,8 @@ def test_stats_endpoint(client):
             " COALESCE(SUM(CASE WHEN status='done' THEN out_bytes ELSE 0 END), 0)"
             " FROM tasks"
         ).fetchone()
-    assert s == {"total": total, "done": done, "frames": frames, "bytes": out_bytes}
+    assert {k: s[k] for k in ("total", "done", "frames", "bytes")} == {
+        "total": total, "done": done, "frames": frames, "bytes": out_bytes}
 
 
 def test_task_history_cap(client):
@@ -309,7 +314,9 @@ def test_task_history_cap(client):
         tasks = client.get("/api/tasks").json()
         junk = [t for t in tasks if t["id"].startswith("caphist")]
         assert len(junk) == 100  # 120 条 junk 只显示最新 100 条
-        assert len(tasks) == 100  # 更旧的真实历史行被挤出
+        # 历史截断到 100；慢机上前面测试的真实任务可能仍在跑（active 区不受上限影响）
+        active = [t for t in tasks if t["status"] in ("queued", "running")]
+        assert len(tasks) == 100 + len(active)
         assert junk[0]["id"] == "caphist119"  # 最新在前（倒序）
         assert junk[-1]["id"] == "caphist020"
         s = client.get("/api/stats").json()

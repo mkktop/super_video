@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { NButton, NEmpty, NRadioButton, NRadioGroup, NTag } from 'naive-ui'
+import { NButton, NEmpty, NModal, NRadioButton, NRadioGroup, NTag, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { store, ui } from '../store'
 import { useFullscreen } from '../utils'
 import CompareSlider from '../components/CompareSlider.vue'
 import VideoCompare from '../components/VideoCompare.vue'
 
+const message = useMessage()
 const task = computed(() => store.tasks.find((t) => t.id === ui.compareTaskId))
 
 /** 整页进真全屏：对比画面铺满显示器（该页本就隐藏侧栏，再上一层到屏幕级） */
@@ -41,6 +42,26 @@ function back() {
   ui.compareTaskId = null
   ui.page = 'tasks'
 }
+
+// ---- 分享卡片：源 vs 输出同时间点抽帧 → 长图 / 滑块动图 ----
+const canShare = computed(() => task.value?.status === 'done')
+const shareBusy = ref<'' | 'image' | 'gif'>('')
+const sharePreview = ref<{ url: string; path: string; kind: string } | null>(null)
+const shareShow = ref(false)
+const showInFolder = (p: string) => window.sv.showInFolder(p)
+async function makeShare(kind: 'image' | 'gif') {
+  const t = task.value
+  if (!t) return
+  shareBusy.value = kind
+  try {
+    sharePreview.value = await api.createShareCard(t.id, kind)
+    shareShow.value = true
+  } catch (e) {
+    message.error((e as Error).message || '生成失败')
+  } finally {
+    shareBusy.value = ''
+  }
+}
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     // 全屏态下 ESC 交给浏览器原生退出全屏，别同时退回任务页
@@ -69,6 +90,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <NRadioButton value="frames">静帧</NRadioButton>
         <NRadioButton value="video" :disabled="!canVideo">视频</NRadioButton>
       </NRadioGroup>
+      <NButton v-if="canShare" size="small" :loading="shareBusy === 'image'" @click="makeShare('image')">
+        📷 分享长图
+      </NButton>
+      <NButton v-if="canShare" size="small" :loading="shareBusy === 'gif'" @click="makeShare('gif')">
+        🎞 分享动图
+      </NButton>
       <NButton size="small" @click="togglePageFull">
         {{ pageFull ? '退出全屏（ESC）' : '⛶ 全屏' }}
       </NButton>
@@ -95,6 +122,27 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         </template>
       </NEmpty>
     </div>
+
+    <!-- 分享卡片预览：长图/动图 + 打开产物位置 -->
+    <NModal
+      v-model:show="shareShow"
+      :auto-focus="false"
+      transform-origin="center"
+    >
+      <div v-if="sharePreview" class="share-modal">
+        <div class="share-head">
+          <span>分享卡片已生成{{ sharePreview.kind === 'gif' ? '（滑块动图 GIF）' : '（长图 PNG）' }}</span>
+          <NButton size="tiny" quaternary @click="shareShow = false">关闭</NButton>
+        </div>
+        <img class="share-img" :src="api.shareCardUrl(task!.id, sharePreview.kind as 'image' | 'gif', Date.now())" />
+        <div class="share-foot">
+          <span class="share-path" :title="sharePreview.path">{{ sharePreview.path }}</span>
+          <NButton size="small" type="primary" @click="showInFolder(sharePreview.path)">
+            打开所在文件夹
+          </NButton>
+        </div>
+      </div>
+    </NModal>
   </div>
 </template>
 
@@ -139,4 +187,42 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   background: #0d0e10;
 }
 .empty { margin: auto; }
+
+.share-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(760px, 86vw);
+  max-height: 86vh;
+  background: #1a1c1f;
+  border: 1px solid #2c3138;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+}
+.share-img {
+  width: 100%;
+  border-radius: 6px;
+  overflow-y: auto;
+}
+.share-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.share-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #9aa0a6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 </style>

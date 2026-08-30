@@ -19,6 +19,11 @@ DEFAULTS = {
     "sr_profiling": False,  # 超分性能日志：任务结束保留分段耗时明细到 DATA_ROOT/data/sr_logs，供分析速度瓶颈
     "compare_still_count": 4,  # 模型对比静帧样本数（1~8，与 compare.py MAX_STILL_COUNT 一致）：创建对比作业时快照
     "queue_done_action": "none",  # 队列全部完成后：none 无动作 | notify 系统通知 | shutdown 关机 | sleep 休眠
+    "queue_schedule": "always",  # 处理时机：always 立即 | window 指定时段 | idle 电脑空闲（只拦新任务，不打断进行中）
+    "schedule_start": "22:00",  # window 起始时刻（HH:MM；起>止=跨午夜，如 22:00~08:00；起=止视为全天）
+    "schedule_end": "08:00",  # window 结束时刻
+    "idle_minutes": 15,  # idle 模式：键鼠静置多少分钟后才开始处理
+    "output_name_template": "",  # 输出命名模板：空=沿用原名（冲突加_倍率后缀）；变量 {name}/{model}/{scale}/{res}/{date}
 }
 
 SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
@@ -28,6 +33,14 @@ def _valid_proxy(v: str) -> bool:
     if v in ("", "direct"):
         return True
     return v.startswith("http://") or v.startswith("https://")
+
+
+def _valid_hhmm(v: str) -> bool:
+    try:
+        h, m = v.split(":")
+        return 0 <= int(h) <= 23 and 0 <= int(m) <= 59
+    except ValueError:
+        return False
 
 
 def load() -> dict:
@@ -69,6 +82,25 @@ def save(updates: dict) -> dict:
                     raise ValueError(f"非法 compare_still_count 值: {v}（1~8）")
             if k == "queue_done_action" and v not in ("none", "notify", "shutdown", "sleep"):
                 raise ValueError(f"非法 queue_done_action 值: {v}（none/notify/shutdown/sleep）")
+            if k == "queue_schedule" and v not in ("always", "window", "idle"):
+                raise ValueError(f"非法 queue_schedule 值: {v}（always/window/idle）")
+            if k in ("schedule_start", "schedule_end"):
+                from re import fullmatch
+
+                if not isinstance(v, str) or not fullmatch(r"\d{1,2}:\d{2}", v.strip()) \
+                        or not _valid_hhmm(v.strip()):
+                    raise ValueError(f"非法 {k} 值: {v}（需 HH:MM，如 22:00）")
+                v = v.strip()
+            if k == "idle_minutes":
+                if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= 240:
+                    raise ValueError(f"非法 idle_minutes 值: {v}（1~240 分钟）")
+            if k == "output_name_template":
+                from re import sub
+
+                if not isinstance(v, str) or len(v) > 80:
+                    raise ValueError("输出命名模板需为 80 字符以内的字符串")
+                if any(c in v for c in '<>:"/\\|?*') or "\x00" in v:
+                    raise ValueError("命名模板含文件名非法字符（<>:\"/\\|?*）")
             if k == "output_dir":
                 if not isinstance(v, str):
                     raise ValueError(f"非法 output_dir 值: {v}")

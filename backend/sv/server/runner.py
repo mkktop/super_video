@@ -19,6 +19,55 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 QUEUE_ACTIONS = ("none", "notify", "shutdown", "sleep")
 QUEUE_ACTION_GRACE_S = 60  # 关机/休眠前的反悔窗口（新任务入队/手动取消都可撤）
 
+SCHEDULE_MODES = ("always", "window", "idle")
+
+
+def _windows_idle_seconds() -> float:
+    """距上次键鼠输入的秒数（GetLastInputInfo，系统 API 零依赖）。
+
+    探测失败/取值异常按 0（不空闲）处理：闲时模式宁可多跑不误挂起——
+    挂住了用户会以为软件坏了。GetTickCount 49.7 天回绕产生的巨大差值
+    同样按不空闲丢弃。
+    """
+    try:
+        import ctypes
+
+        class LASTINPUTINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+        lii = LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO))
+        if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            millis = int(ctypes.windll.kernel32.GetTickCount()) - int(lii.dwTime)
+            if 0 <= millis < 2**31:
+                return millis / 1000.0
+    except Exception:  # noqa: BLE001 — 非 Windows/权限异常一律按不空闲
+        pass
+    return 0.0
+
+
+def _parse_hhmm(s: str) -> tuple[int, int] | None:
+    try:
+        h, m = str(s).split(":")
+        h, m = int(h), int(m)
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return h, m
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
+def _in_window(now: tuple[int, int], start: tuple[int, int], end: tuple[int, int]) -> bool:
+    """时段判断（分钟数比较）。start==end 视为全天放行（配置退化的宽容解）；
+    start<=end 常规区间；start>end 跨午夜（如 22:00~08:00）。"""
+    t = now[0] * 60 + now[1]
+    a = start[0] * 60 + start[1]
+    b = end[0] * 60 + end[1]
+    if a == b:
+        return True
+    if a < b:
+        return a <= t < b
+    return t >= a or t < b
+
 
 def _execute_power_action(action: str) -> bool:
     """执行关机/休眠（executor 线程）。测试 monkeypatch 本函数拦截。
@@ -80,6 +129,7 @@ class Runner:
         self._queue_gen = 0  # 队列活动计数：递增使进行中的倒计时作废
         self._queue_countdown: asyncio.Task | None = None
         self._queue_armed_action: str | None = None
+        self._gate_state: tuple[bool, str] | None = None  # 处理时机闸门（None=未判定）
 
     # ---- 生命周期 ----
 
@@ -145,10 +195,58 @@ class Runner:
         if self._loop_task:
             await asyncio.gather(self._loop_task, return_exceptions=True)
 
-    # ---- 主循环：严格串行 ----
+    # ---- 主循环：严格串行（处理时机闸门只拦"开始下一个任务"） ----
+
+    def gate_state(self) -> dict:
+        """当前放行状态（stats 端点透出；未判定按放行）。"""
+        active, reason = self._gate_state or (True, "")
+        return {"active": active, "reason": reason}
+
+    def _queue_gate(self) -> tuple[bool, str]:
+        """是否允许领取新任务：always 立即 / window 指定时段 / idle 键鼠静置。
+
+        只拦"开始下一个任务"，不打断进行中的任务——checkpoint 语义安全，
+        代价是闸门关上前已开跑的任务会跑完（通常正是期望：别留半成品）。
+        """
+        from datetime import datetime
+
+        from .settings import load as load_settings
+
+        try:
+            s = load_settings()
+            mode = s.get("queue_schedule", "always")
+            if mode == "window":
+                start = _parse_hhmm(str(s.get("schedule_start", "22:00")))
+                end = _parse_hhmm(str(s.get("schedule_end", "08:00")))
+                if start is None or end is None:
+                    return True, ""  # 配置坏了不拦队列（宽容解）
+                now = datetime.now()
+                ok = _in_window((now.hour, now.minute), start, end)
+                label = f"{start[0]:02d}:{start[1]:02d}~{end[0]:02d}:{end[1]:02d}"
+                return ok, ("" if ok else f"等待处理时段（{label}）")
+            if mode == "idle":
+                need = max(1, int(s.get("idle_minutes", 15) or 15))
+                ok = _windows_idle_seconds() >= need * 60
+                return ok, ("" if ok else f"等待电脑空闲（键鼠静置 {need} 分钟后开始）")
+        except Exception:  # noqa: BLE001 — 设置读不了按放行，闸门绝不卡死队列
+            pass
+        return True, ""
+
+    def _report_gate(self, active: bool, reason: str) -> None:
+        """闸门状态变化才广播（关着时 5s 一查，不变不刷事件）。"""
+        state = (active, reason)
+        if state != self._gate_state:
+            self._gate_state = state
+            self.bus.publish({"type": "queue_gate", "active": active, "reason": reason})
 
     async def _loop(self) -> None:
         while not self._stopping.is_set():
+            gate_open, reason = self._queue_gate()
+            if not gate_open:
+                self._report_gate(False, reason)
+                await asyncio.sleep(5.0)
+                continue
+            self._report_gate(True, "")
             task = db.next_queued()
             if task is None:
                 await asyncio.sleep(0.5)

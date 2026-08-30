@@ -32,6 +32,14 @@ async function cancelQueueAction() {
   }
 }
 
+// ---- 处理时机挂起提示（定时/闲时模式：有排队任务但闸门未放行） ----
+const gateSuspended = computed(() => {
+  const g = store.stats.queue_gate
+  if (!g || g.active) return null
+  const hasWaiting = store.tasks.some((t) => t.status === 'queued' || t.status === 'running')
+  return hasWaiting ? g.reason : null
+})
+
 // ---- 状态筛选 ----
 type Filter = 'all' | 'active' | 'done' | 'failed'
 const filter = ref<Filter>('all')
@@ -162,6 +170,11 @@ function retryWithParams(t: Task) {
       </NSpace>
     </div>
 
+    <!-- 处理时机挂起：定时/闲时模式下队列等待放行 -->
+    <div v-if="gateSuspended" class="gate-banner">
+      <span>⏸ 队列挂起中 · {{ gateSuspended }}（进行中的任务不受影响，跑完即停；可在 设置 → 处理时机 调整）</span>
+    </div>
+
     <!-- 完成动作倒计时：新任务入队 / 手动取消 / 改设置都会撤销 -->
     <div v-if="queueBanner" class="queue-done-banner">
       <span class="qd-text">
@@ -258,5 +271,14 @@ h1 { font-size: 20px; font-weight: 700; }
   font-size: 16px;
   color: #fbbf24;
   font-variant-numeric: tabular-nums;
+}
+
+.gate-banner {
+  padding: 10px 14px;
+  border: 1px solid rgba(79, 140, 255, 0.4);
+  border-radius: 8px;
+  background: rgba(79, 140, 255, 0.07);
+  font-size: 13px;
+  color: #9aa0a6;
 }
 </style>

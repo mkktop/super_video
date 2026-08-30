@@ -38,6 +38,63 @@ const notifyTask = ref(true) // 任务完成/失败系统通知
 const closeToTray = ref(false) // 关闭按钮=最小化到托盘
 const queueDoneAction = ref<'none' | 'notify' | 'shutdown' | 'sleep'>('none') // 队列全部完成后
 const savedQueueDone = ref<'none' | 'notify' | 'shutdown' | 'sleep'>('none') // 回滚基准
+
+// ---- 处理时机（定时/闲时：只拦"开始下一个任务"，不打断进行中） ----
+const queueSchedule = ref<'always' | 'window' | 'idle'>('always')
+const scheduleStart = ref('22:00')
+const scheduleEnd = ref('08:00')
+const idleMinutes = ref(15)
+const savingSchedule = ref(false)
+const scheduleOptions = [
+  { label: '立即处理', value: 'always' },
+  { label: '指定时段', value: 'window' },
+  { label: '电脑空闲时', value: 'idle' },
+]
+const isValidHHMM = (s: string) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim())
+  if (!m) return false
+  const h = Number(m[1]), mi = Number(m[2])
+  return h <= 23 && mi <= 59
+}
+async function saveSchedule() {
+  if (queueSchedule.value === 'window'
+    && (!isValidHHMM(scheduleStart.value) || !isValidHHMM(scheduleEnd.value))) {
+    message.error('时段需为 HH:MM 格式（如 22:00）')
+    return
+  }
+  savingSchedule.value = true
+  const r = await api.saveSettings({
+    queue_schedule: queueSchedule.value,
+    schedule_start: scheduleStart.value.trim(),
+    schedule_end: scheduleEnd.value.trim(),
+    idle_minutes: Math.round(idleMinutes.value) || 15,
+  })
+  savingSchedule.value = false
+  if (r.ok) {
+    message.success('已保存，下一个任务起按此规则领取（进行中的任务不受影响）')
+  } else {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+  }
+}
+
+// ---- 输出命名模板 ----
+const nameTemplate = ref('')
+const savingNameTpl = ref(false)
+async function saveNameTemplate() {
+  const v = nameTemplate.value.trim()
+  if (/[<>:"/\\|?*]/.test(v)) {
+    message.error('模板含文件名非法字符（<>:"/\\|?*）')
+    return
+  }
+  savingNameTpl.value = true
+  const r = await api.saveSettings({ output_name_template: v })
+  savingNameTpl.value = false
+  if (r.ok) {
+    message.success(v ? '已保存，新任务按模板命名' : '已恢复默认命名（沿用原文件名）')
+  } else {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+  }
+}
 const queueDoneOptions = [
   { label: '不做任何事', value: 'none' },
   { label: '系统通知', value: 'notify' },
@@ -195,6 +252,11 @@ onMounted(async () => {
     sr_profiling?: boolean
     compare_still_count?: number
     queue_done_action?: 'none' | 'notify' | 'shutdown' | 'sleep'
+    queue_schedule?: 'always' | 'window' | 'idle'
+    schedule_start?: string
+    schedule_end?: string
+    idle_minutes?: number
+    output_name_template?: string
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
@@ -206,6 +268,11 @@ onMounted(async () => {
   closeToTray.value = s.close_to_tray === true
   queueDoneAction.value = s.queue_done_action ?? 'none'
   savedQueueDone.value = queueDoneAction.value
+  queueSchedule.value = s.queue_schedule ?? 'always'
+  scheduleStart.value = s.schedule_start ?? '22:00'
+  scheduleEnd.value = s.schedule_end ?? '08:00'
+  idleMinutes.value = Math.min(240, Math.max(1, Math.round(Number(s.idle_minutes) || 15)))
+  nameTemplate.value = String(s.output_name_template ?? '')
   srProfiling.value = s.sr_profiling === true
   stillCount.value = Math.min(8, Math.max(1, Math.round(Number(s.compare_still_count) || 4)))
   const p = s.download_proxy ?? ''
@@ -563,6 +630,22 @@ async function uninstallTrc() {
             目录不存在时会自动创建。输出文件在目录内没有同名时直接沿用原文件名；
             已有同名（含源文件本身）时自动改用「原名_倍率」后缀，不覆盖任何现有文件。
           </p>
+          <div class="row switch-row bordered-top">
+            <span class="row-text">
+              输出命名模板
+              <small>留空沿用原文件名；变量：{name} 原名 · {model} 模型 · {scale} 倍率 · {res} 输出分辨率 · {date} 日期。如 {name}_{model}_{scale}；同名冲突仍自动加后缀不覆盖</small>
+            </span>
+            <NSpace :size="8" :wrap="false" align="center">
+              <NInput
+                v-model:value="nameTemplate"
+                size="small"
+                placeholder="{name}_{model}_{scale}"
+                style="width: 260px"
+                @keyup.enter="saveNameTemplate"
+              />
+              <NButton size="small" :loading="savingNameTpl" @click="saveNameTemplate">保存</NButton>
+            </NSpace>
+          </div>
           </div>
         </section>
 
@@ -695,6 +778,43 @@ async function uninstallTrc() {
                 style="width: 190px"
                 @update:value="saveQueueDone"
               />
+            </div>
+          </div>
+        </section>
+
+        <!-- 处理时机 -->
+        <section class="card">
+          <header class="card-head">
+            <div class="card-title">处理时机</div>
+            <div class="card-sub">队列什么时候开始处理下一个任务——白天不抢机器，夜间/空闲自动跑</div>
+          </header>
+          <div class="card-body">
+            <div class="row stack">
+              <span class="row-label">领取时机</span>
+              <NRadioGroup v-model:value="queueSchedule" size="small">
+                <NRadioButton value="always">立即处理</NRadioButton>
+                <NRadioButton value="window">指定时段</NRadioButton>
+                <NRadioButton value="idle">电脑空闲时</NRadioButton>
+              </NRadioGroup>
+            </div>
+            <div v-if="queueSchedule === 'window'" class="row inline-wrap">
+              <span class="row-text">时段</span>
+              <NInput v-model:value="scheduleStart" size="small" style="width: 90px" placeholder="22:00" />
+              <span class="row-text">至</span>
+              <NInput v-model:value="scheduleEnd" size="small" style="width: 90px" placeholder="08:00" />
+              <span class="hint-inline">起止跨午夜即夜间段（如 22:00 ~ 08:00）；只在时段内开始新任务</span>
+            </div>
+            <div v-if="queueSchedule === 'idle'" class="row inline-wrap">
+              <span class="row-text">键鼠静置</span>
+              <NInputNumber v-model:value="idleMinutes" size="small" :min="1" :max="240" style="width: 110px" />
+              <span class="row-text">分钟后开始</span>
+            </div>
+            <p class="hint">
+              只拦截「开始下一个任务」，不会打断进行中的任务（跑完当前任务即停，断点续跑安全）；
+              挂起期间任务页会显示等待原因。设置立即生效，无需重启。
+            </p>
+            <div class="save-row">
+              <NButton type="primary" size="small" :loading="savingSchedule" @click="saveSchedule">保存</NButton>
             </div>
           </div>
         </section>

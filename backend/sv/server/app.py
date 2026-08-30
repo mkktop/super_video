@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import queue
+import re
 import shutil
 import threading
 import time
@@ -576,6 +577,30 @@ def _sr_output_name(out_root: Path, stem: str, fmt: str, res_label: str,
         n += 1
 
 
+_TEMPLATE_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _render_output_stem(template: str, stem: str, model_id: str, res_label: str,
+                        out_w: int, out_h: int) -> str:
+    """输出命名模板渲染：空模板返回原 stem（沿用旧行为）。
+
+    变量：{name} 原文件主名 / {model} 模型 id / {scale} 倍率或自定义分辨率档
+    （与冲突后缀同源，如 2x、1920x1080）/ {res} 输出分辨率 / {date} 当天日期。
+    未知变量原样保留（用户能一眼看出拼写错误）；模板注入的非法文件名字符
+    兜底替换为下划线（设置端已挡，此处防手改配置文件）。
+    """
+    if not template:
+        return stem
+    s = (template
+         .replace("{name}", stem)
+         .replace("{model}", model_id)
+         .replace("{scale}", res_label)
+         .replace("{res}", f"{out_w}x{out_h}")
+         .replace("{date}", time.strftime("%Y%m%d")))
+    s = _TEMPLATE_ILLEGAL.sub("_", s).strip(" .")[:120]
+    return s or stem
+
+
 def _create_image_task(body: TaskCreate, spec) -> dict:
     """图片超分任务的创建校验与入库（单张或批量合一，批量=一个任务循环跑）。
 
@@ -651,16 +676,20 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
                 f"{src_w * scale}x{src_h * scale}，请提高放大倍数或换更高倍率模型"))
 
     res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
-    odir = str(load_settings().get("output_dir") or "").strip()
+    st = load_settings()
+    odir = str(st.get("output_dir") or "").strip()
+    tmpl = str(st.get("output_name_template") or "")
     out_root = Path(odir) if odir else paths[0].parent
     if batch and body.output:
         raise HTTPException(400, "批量图片由系统逐图命名输出，不能指定单一输出文件")
     # 逐图输出命名：目录无同名则沿用原名，冲突退 _倍率 后缀（不覆盖现有文件）
     images_meta: list[dict] = []
     used: set[str] = set()
+    ow, oh = (tw, th) if tw is not None else (src_w * target, src_h * target)
     for p in paths:
         if batch or not body.output:
-            out = _sr_output_name(out_root, p.stem, fmt, res_label, used)
+            stem = _render_output_stem(tmpl, p.stem, body.model_id, res_label, ow, oh)
+            out = _sr_output_name(out_root, stem, fmt, res_label, used)
         else:
             out = str(body.output)
             used.add(os.path.normcase(out))
@@ -822,16 +851,20 @@ def create_task(body: TaskCreate) -> dict:
 
     res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
     # 未显式指定输出时：全局设置里的输出目录优先（目录懒创建），否则沿用源视频同目录
-    odir = str(load_settings().get("output_dir") or "").strip()
+    _st = load_settings()
+    odir = str(_st.get("output_dir") or "").strip()
+    _tmpl = str(_st.get("output_name_template") or "")
     out_root = Path(odir) if odir else input_path.parent
+    ow, oh = (tw, th) if tw is not None else (info.width * target, info.height * target)
+    stem = _render_output_stem(_tmpl, input_path.stem, body.model_id, res_label, ow, oh)
     if out_kind == "video":
-        # 目录无同名则沿用原文件名（如 mkv→mp4 换封装），同名冲突（含源文件
-        # 本身）退 _倍率 后缀——同规则见 _sr_output_name
+        # 目录无同名则沿用（模板渲染后的）名字，同名冲突（含源文件本身）
+        # 退 _倍率 后缀——同规则见 _sr_output_name
         out = body.output or _sr_output_name(
-            out_root, input_path.stem, container, res_label, set())
+            out_root, stem, container, res_label, set())
     else:
         # 图片序列：输出是文件夹，帧图按 000001.png 起逐帧编号
-        out = body.output or str(out_root / f"{input_path.stem}_{res_label}_frames")
+        out = body.output or str(out_root / f"{stem}_{res_label}_frames")
         if Path(out).exists() and not Path(out).is_dir():
             raise HTTPException(400, "图片序列的输出路径需为文件夹")
     try:  # 目录不存在时自动创建（设置里指向新盘/新目录的场景）；失败给出可读错误
@@ -890,7 +923,8 @@ def task_sr_log(task_id: str):
 
 @app.get("/api/stats")
 def get_stats() -> dict:
-    return db.stats()
+    """首页四宫格 + 处理时机闸门状态（任务页"挂起中"提示用）。"""
+    return db.stats() | {"queue_gate": runner.gate_state()}
 
 
 @app.get("/api/tasks/{task_id}")
@@ -1291,6 +1325,86 @@ def task_preview(task_id: str, src: int = 0):
     if not p or not Path(p).exists():
         raise HTTPException(404, "暂无预览")
     return FileResponse(p, media_type="image/jpeg")
+
+
+# ---- 对比分享卡片（晒图长图 / 滑块动图）----
+
+
+class ShareCardBody(BaseModel):
+    kind: str = "image"  # image 长图（PNG） | gif 滑块动图
+    t_s: float = -1  # 抽帧时间点；<0 = 自动取 40% 时长（避开片头黑场）
+
+
+def _share_card_meta(task: dict) -> dict:
+    p = task.get("params") or {}
+    tw, th = p.get("target_w"), p.get("target_h")
+    if tw and th:
+        scale = f"{task.get('src_w', 0)}→{tw}×{th}"
+    else:
+        k = p.get("target_scale") or p.get("scale") or 1
+        scale = f"x{k}"
+    try:
+        model = get_model(task["model_id"]).name
+    except Exception:  # noqa: BLE001 — 模型被删也能出图，回退 id
+        model = task["model_id"]
+    return {
+        "model": model, "scale": scale,
+        "name": Path(task["input_path"]).stem,
+        "date": time.strftime("%Y-%m-%d"),
+    }
+
+
+@app.post("/api/tasks/{task_id}/share-card", status_code=201)
+async def create_share_card(task_id: str, body: ShareCardBody) -> dict:
+    """生成对比分享卡片：源与任务输出在同一时间点抽帧合成。"""
+    if body.kind not in ("image", "gif"):
+        raise HTTPException(400, "kind 仅支持 image / gif")
+    t = db.get_task(task_id)
+    if t is None:
+        raise HTTPException(404)
+    if t["status"] != "done" or not Path(t["output_path"]).exists():
+        raise HTTPException(409, "任务未完成或输出已不存在，暂无法生成")
+    src, out = Path(t["input_path"]), Path(t["output_path"])
+    if out.is_dir():
+        raise HTTPException(409, "图片序列任务的输出是文件夹，暂不支持分享卡片")
+    if not src.exists():
+        raise HTTPException(409, "源文件已不存在")
+    try:
+        info = probe(src)
+    except (UnsupportedMedia, FileNotFoundError) as e:
+        raise HTTPException(409, f"源探测失败: {e}") from e
+    t_s = body.t_s if body.t_s >= 0 else info.duration_s * 0.4
+    t_s = max(0.0, min(t_s, info.duration_s - 0.05))
+    meta = _share_card_meta(t)
+
+    from ..sharecard import make_long_image, make_slider_gif
+
+    suffix = "png" if body.kind == "image" else "gif"
+    dest = TEMP_DIR / "share" / f"{task_id}_{body.kind}.{suffix}"
+    loop = asyncio.get_running_loop()
+    try:
+        if body.kind == "image":
+            await loop.run_in_executor(
+                None, make_long_image, src, out, t_s, t_s, meta, dest)
+        else:
+            await loop.run_in_executor(
+                None, make_slider_gif, src, out, t_s, t_s, meta, dest)
+    except Exception as e:  # noqa: BLE001 — 抽帧/合成失败给可读错误
+        raise HTTPException(422, f"分享卡片生成失败: {e}") from e
+    return {"path": str(dest), "kind": body.kind,
+            "url": f"/api/tasks/{task_id}/share-card/file?kind={body.kind}&t={time.time()}"}
+
+
+@app.get("/api/tasks/{task_id}/share-card/file")
+def share_card_file(task_id: str, kind: str = "image"):
+    """分享卡片产物文件（POST 生成后此处取；无则 404）。"""
+    if kind not in ("image", "gif"):
+        raise HTTPException(400, "kind 仅支持 image / gif")
+    suffix = "png" if kind == "image" else "gif"
+    p = TEMP_DIR / "share" / f"{task_id}_{kind}.{suffix}"
+    if not p.is_file():
+        raise HTTPException(404, "请先生成分享卡片")
+    return FileResponse(p, media_type=f"image/{suffix}")
 
 
 @app.websocket("/ws")
