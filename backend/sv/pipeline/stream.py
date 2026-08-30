@@ -84,10 +84,15 @@ def decoder_cmd(
     cfr_fps: str | None = None,
     seek_s: float | None = None,
     max_frames: int | None = None,
+    hwaccel: str | None = None,
 ) -> list[str]:
     cmd = [
         ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-nostdin",
     ]
+    if hwaccel:
+        # 硬件解码：解码帧自动拷回系统内存后再 swscale 到 rgb24，管线其余零改动。
+        # 可用性由 probe_hwaccel 用真实源预验证过，此处不做运行中回退
+        cmd += ["-hwaccel", hwaccel]
     if seek_s is not None:
         # 输入 seek（-ss 在 -i 前）：CFR 源帧精确；VFR 源 ±1-2 帧偏差（分段续跑可接受）
         cmd += ["-ss", f"{seek_s:.6f}"]
@@ -282,6 +287,7 @@ class StreamPipeline:
         seg_start: int = 0,  # 分段续跑：本段在总输出帧中的起始偏移（进度上报用）
         seg_total: int | None = None,  # 分段续跑：总输出帧数覆盖（进度上报用）
         frame_start: int = 1,  # 图片序列分段：本段首帧全局帧号（000001 起编号）
+        decode_hwaccel: str | None = None,  # 硬解 '-hwaccel' 值（None=软解；probe_hwaccel 预验证过）
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -301,6 +307,7 @@ class StreamPipeline:
         self.seg_start = seg_start
         self.seg_total = seg_total
         self.frame_start = frame_start
+        self.decode_hwaccel = decode_hwaccel
         # 分段计时（性能剖析用；SegmentedPipeline 汇总落盘，平时无人读）：
         # read=解码管道读取 infer=process() 写=编码管道写入+drain preview=预览 JPEG
         # qin_wait/qout_wait=协程等队列（饥饿时间） enc_finish=段尾编码进程收尾
@@ -324,7 +331,8 @@ class StreamPipeline:
 
         dec = asyncio.create_subprocess_exec(
             *decoder_cmd(info.path, cfr_fps=info.fps_str if info.vfr else None,
-                         seek_s=self.seek_s, max_frames=self.max_frames),
+                         seek_s=self.seek_s, max_frames=self.max_frames,
+                         hwaccel=self.decode_hwaccel),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,

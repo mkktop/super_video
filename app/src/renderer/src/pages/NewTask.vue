@@ -36,6 +36,7 @@ const targetH = ref(0)
 const tileChoice = ref(0) // 0 = 模型默认
 const outKind = ref<'video' | 'png' | 'jpg'>('video')
 const codec = ref('h264')
+const decoder = ref<'sw' | 'nvdec' | 'd3d11va'>('sw')
 const crf = ref(18)
 const container = ref<'mp4' | 'mkv' | 'mov'>('mp4')
 const audioMode = ref('auto')
@@ -132,6 +133,18 @@ const containerOptions = [
   { label: 'MKV（字幕/音频全兼容）', value: 'mkv' },
   { label: 'MOV（QuickTime）', value: 'mov' },
 ]
+// 解码器：单文件按本文件实测（probe 返回 decoder map，含源编码是否支持）；
+// 批量无逐文件探测，按设备能力兜底——个别文件不支持时 worker 端回退软解并记日志
+const probedDecoder = computed(() => probeInfo.value?.decoder ?? null)
+const nvdecOk = computed(() =>
+  probedDecoder.value ? probedDecoder.value.nvdec : (store.hardware?.nvdec ?? false))
+const d3d11vaOk = computed(() =>
+  probedDecoder.value ? probedDecoder.value.d3d11va : (store.hardware?.d3d11va ?? false))
+const decoderOptions = computed(() => [
+  { label: '软件解码（默认，兼容性最好）', value: 'sw' },
+  { label: nvdecOk.value ? '硬件解码 NVDEC（NVIDIA 显卡）' : '硬件解码 NVDEC（当前设备/视频不支持）', value: 'nvdec', disabled: !nvdecOk.value },
+  { label: d3d11vaOk.value ? '硬件解码 D3D11VA（AMD / Intel 显卡）' : '硬件解码 D3D11VA（当前设备/视频不支持）', value: 'd3d11va', disabled: !d3d11vaOk.value },
+])
 const audioOptions = computed(() => [
   { label: '自动（兼容则原样保留）', value: 'auto' },
   { label: '原样保留（copy，需容器兼容）', value: 'copy' },
@@ -293,11 +306,14 @@ async function setInput(files: string[]) {
   container.value = byExt[files[0].slice(files[0].lastIndexOf('.')).toLowerCase()] ?? 'mp4'
   if (files.length === 1) {
     probing.value = true
-    const r = await api.probe(files[0])
+    const r = await api.probe(files[0], true)
     if (seq !== probeSeq) return // 已重选其他文件：丢弃过期响应
     probing.value = false
     if (r.ok) {
       probeInfo.value = (await r.json()) as ProbeInfo
+      // 换文件后当前选的硬解可能不再支持（老编码/设备差异）：回落软解，避免带着无效值提交
+      const d = probeInfo.value.decoder
+      if (d && decoder.value !== 'sw' && !d[decoder.value]) decoder.value = 'sw'
     } else {
       const e = await r.json()
       probeInfo.value = {
@@ -372,6 +388,9 @@ watch([() => ui.page, () => ui.pendingTaskParams], async () => {
   }
   if (p.out_kind === 'png' || p.out_kind === 'jpg') outKind.value = p.out_kind
   if (typeof p.codec === 'string') codec.value = p.codec
+  if (p.decoder === 'sw' || p.decoder === 'nvdec' || p.decoder === 'd3d11va') {
+    decoder.value = p.decoder
+  }
   if (typeof p.crf === 'number') crf.value = Math.min(30, Math.max(12, p.crf))
   if (p.container === 'mp4' || p.container === 'mkv' || p.container === 'mov') {
     container.value = p.container
@@ -455,6 +474,7 @@ async function submit() {
               subtitle_mode: keepSubtitles.value ? 'auto' : 'none',
             }),
         interp: interp.value,
+        decoder: decoder.value,
         ...(denoise.value !== null ? { denoise: denoise.value } : {}),
         ...(tileChoice.value ? { tile: tileChoice.value } : {}),
       },
@@ -653,6 +673,12 @@ export default { name: 'NewTask' }
                 先以 x{{ customScale }} 原生超分，再 lanczos 缩放至 {{ effW }}x{{ effH }}（宽高自动取偶数）
               </span>
             </div>
+            <NFormItem label="解码器">
+              <div class="sub-col">
+                <NSelect v-model:value="decoder" :options="decoderOptions" style="width: 300px" />
+                <span class="sub-hint">硬解可加快解码速度；按所选视频实测支持情况开放，运行时不可用自动回退软件解码</span>
+              </div>
+            </NFormItem>
             <NFormItem v-if="outKind === 'video'" label="编码器">
               <NSelect v-model:value="codec" :options="codecOptions" style="width: 300px" />
             </NFormItem>

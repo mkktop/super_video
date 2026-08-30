@@ -146,6 +146,7 @@ class SegmentedPipeline:
         cleanup: bool = True,  # 成功后删除工作目录（测试保留以便构造续跑场景）
         shard: int | None = None,  # 双路并行：本 worker 处理第 shard 路（0 基）
         nshards: int = 1,
+        decode_hwaccel: str | None = None,  # 硬解 '-hwaccel' 值（None=软解；worker 预验证过）
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -163,6 +164,7 @@ class SegmentedPipeline:
         self.cleanup = cleanup
         self.shard = shard
         self.nshards = nshards
+        self.decode_hwaccel = decode_hwaccel
 
     async def run(self) -> RunStats:
         info, tx = self.info, self.tx
@@ -240,6 +242,7 @@ class SegmentedPipeline:
                     seg_start=s * factor,
                     seg_total=total_out,
                     frame_start=s * factor + 1 if img_mode else 1,
+                    decode_hwaccel=self.decode_hwaccel,
                 )
                 await pipe.run()
                 stats = pipe.stage_stats

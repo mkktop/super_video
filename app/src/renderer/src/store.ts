@@ -49,6 +49,8 @@ export const store = reactive({
     av1_nvenc?: boolean
     amf?: boolean
     svt_av1?: boolean
+    nvdec?: boolean
+    d3d11va?: boolean
   },
 })
 

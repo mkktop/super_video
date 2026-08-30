@@ -29,7 +29,14 @@ from ..models.registry import (
     model_dir,
 )
 from ..paths import ROOT, SR_LOG_DIR, TEMP_DIR, migrate_legacy_data
-from ..pipeline.probe import UnsupportedMedia, probe, validate_m0
+from ..pipeline.probe import (
+    DECODERS,
+    HWACCEL_CODECS,
+    UnsupportedMedia,
+    probe,
+    probe_hwaccel,
+    validate_m0,
+)
 from ..pipeline.trim import run_trim
 from . import compare
 from . import db
@@ -211,6 +218,7 @@ def get_presets() -> list[dict]:
 
 class ProbeBody(BaseModel):
     path: str
+    hwdecode: bool = False  # 附带硬件解码可用性（真解码 3 帧实测，+~1s；任务页门控解码器选项用）
 
 
 @app.post("/api/probe")
@@ -228,7 +236,7 @@ def probe_media(body: ProbeBody) -> dict:
             m0_error = str(e)
     except UnsupportedMedia as e:
         raise HTTPException(422, str(e))
-    return {
+    resp = {
         "ok": m0_error is None,
         "error": m0_error,
         "width": info.width, "height": info.height,
@@ -240,6 +248,13 @@ def probe_media(body: ProbeBody) -> dict:
         "audio_tracks": [a.codec for a in info.audio],
         "subtitles": info.subtitles,
     }
+    if body.hwdecode and m0_error is None:
+        # 按本文件实测的硬解可用性（编码矩阵 + 真解码验证），UI 据此禁用不支持的选项
+        resp["decoder"] = {
+            name: probe_hwaccel(p, hw, info.video_codec)
+            for name, hw in (("nvdec", "cuda"), ("d3d11va", "d3d11va"))
+        }
+    return resp
 
 
 @app.get("/api/settings")
@@ -672,6 +687,17 @@ def create_task(body: TaskCreate) -> dict:
     if hw_flag and not cached_hardware().get(hw_flag):
         raise HTTPException(400, f"本机 {hw_flag} 不可用，请选择软件编码")
     params["codec"] = codec
+    # 解码器：软解默认；硬解按源编码矩阵校验（驱动/逐文件实测在 worker 端
+    # probe_hwaccel 预验证，失败回退软解，不影响任务成败）
+    decoder = params.get("decoder", "sw")
+    if decoder not in DECODERS:
+        raise HTTPException(400, f"decoder 仅支持 {' / '.join(DECODERS)}")
+    hw_dec = DECODERS[decoder]
+    if hw_dec and info.video_codec not in HWACCEL_CODECS[hw_dec]:
+        raise HTTPException(400, (
+            f"视频编码 {info.video_codec} 不支持 {decoder} 硬件解码，请选择软件解码"
+        ))
+    params["decoder"] = decoder
     container = params.get("container", "mp4")
     if container not in _CONTAINERS:
         raise HTTPException(400, "container 仅支持 mp4 / mkv / mov")

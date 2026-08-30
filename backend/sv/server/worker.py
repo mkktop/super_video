@@ -29,7 +29,13 @@ from sv.models import manager
 from sv.models.fp16 import ensure_fp16_file
 from sv.models.registry import get_model, model_file
 from sv.paths import SR_LOG_DIR, TEMP_DIR
-from sv.pipeline.probe import UnsupportedMedia, probe, validate_m0
+from sv.pipeline.probe import (
+    DECODERS,
+    UnsupportedMedia,
+    probe,
+    probe_hwaccel,
+    validate_m0,
+)
 from sv.pipeline.segmented import SegmentedPipeline, read_eof_marker
 from sv.pipeline.stream import EncodeOpts, PipelineError, RunStats, TaskCanceled
 from sv.server import db, settings
@@ -79,7 +85,7 @@ def _prof_write_video_header(task_id: str, ctx: dict) -> None:
         f"模型 {ctx['model']} · 推理后端 {ctx['provider']} · 精度 {ctx['precision']}"
         f" · GPU前后处理包装 {'开' if ctx['u8'] else '关'}",
         f"设置 engine={ctx['engine_setting']} · tile={ctx['tile']} · batch={ctx['batch']}"
-        f" · 补帧={ctx['interp']}",
+        f" · 补帧={ctx['interp']} · 解码={ctx.get('decoder', 'sw')}",
         f"源 {ctx['src_w']}x{ctx['src_h']} @{ctx['fps']:.3f}fps {ctx['frames']}帧"
         f" → 目标 {ctx['target']}",
         f"引擎加载+预热 {ctx['load_s']:.1f}s · {seg_txt}"
@@ -562,6 +568,22 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         "output": str(output_path),
     })
 
+    # ---- 解码器：任务参数选择 + 真实源预验证（验证失败回退软解） ----
+    # 预验证必须做在分段开始前：分段中途硬解初始化失败会被当成"帧中间截断"，
+    # 段落落入 checkpoint 但内容缺失，破坏断点续跑语义。硬解是性能选项，
+    # 创建后环境变化（换卡/驱动更新）不值得让任务硬失败，回退 + 日志说明
+    decoder_param = params.get("decoder", "sw")
+    decode_hwaccel = None
+    if decoder_param != "sw":
+        hw_dec = DECODERS.get(decoder_param)
+        if hw_dec and probe_hwaccel(input_path, hw_dec, info.video_codec):
+            decode_hwaccel = hw_dec
+            emit({"type": "log", "line": f"硬件解码已启用（{decoder_param.upper()}）"})
+        else:
+            emit({"type": "log", "line": (
+                f"{decoder_param} 硬件解码不可用（编码 {info.video_codec} 不支持"
+                f" 或本机驱动不可用），本次使用软件解码")})
+
     # 批处理仅对小分辨率有益（≤720p 实测 +6%）；大分辨率单帧已喂饱，批了反而慢 9%
     batch = int(params.get("batch") or spec.io.get("batch_hint", 1) or 1)
     if info.width * info.height > 1280 * 720:
@@ -592,6 +614,7 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
                 "precision": "fp16-autocast", "u8": False,
                 "engine_setting": "cuda(torch)", "tile": int(params.get("tile") or 512),
                 "batch": 1, "interp": interp_mode,
+                "decoder": decoder_param,
                 "src_w": info.width, "src_h": info.height, "fps": info.fps,
                 "frames": info.total_frames,
                 "target": (f"{target_size[0]}x{target_size[1]}" if target_size
@@ -620,6 +643,7 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             preview_path=preview_dir / f"{task_id}.jpg",
             src_preview_path=preview_dir / f"{task_id}_src.jpg",
             target_size=target_size,
+            decode_hwaccel=decode_hwaccel,
         )
         try:
             stats = asyncio.run(pipeline.run())
@@ -684,6 +708,7 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             "u8": bool(getattr(engine, "u8_wrapped", False)),
             "engine_setting": settings.load().get("engine", "auto"),
             "tile": tile, "batch": batch, "interp": interp_mode,
+            "decoder": decoder_param,
             "src_w": info.width, "src_h": info.height, "fps": info.fps,
             "frames": info.total_frames,
             "target": (f"{target_size[0]}x{target_size[1]}" if target_size
@@ -739,6 +764,7 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         shard=my_shard, nshards=my_nshards,
         # 剖析模式：成功后不删工作目录，等 _prof_collect 把分段耗时并入日志再清
         cleanup=(not sharded) and not prof,
+        decode_hwaccel=decode_hwaccel,
     )
     work_dir = TEMP_DIR / "segmented" / task_id
     try:

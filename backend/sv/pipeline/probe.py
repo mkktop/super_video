@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 
-from ..paths import ffprobe_bin
+from ..paths import ffmpeg_bin, ffprobe_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS
 
 
@@ -178,3 +178,53 @@ def validate_m0(info: MediaInfo) -> None:
         )
     if info.total_frames <= 0:
         raise UnsupportedMedia(f"{info.path.name}: 无法确定总帧数")
+
+
+# ---- 解码器（任务参数 decoder 值 → ffmpeg '-hwaccel' 值；None = 软件解码） ----
+DECODERS: dict[str, str | None] = {"sw": None, "nvdec": "cuda", "d3d11va": "d3d11va"}
+
+# 各硬解加速器支持的源视频编码。ffmpeg 构建（BtbN）里实现了对应 hwaccel 的
+# 解码器集合；之外的编码 get_format 根本不会给出硬件格式，-hwaccel 形同虚设
+# （且无任何报错），须在跑真解码验证前先用这张表挡掉。
+HWACCEL_CODECS: dict[str, set[str]] = {
+    "cuda": {  # NVDEC
+        "h264", "hevc", "vp8", "vp9", "av1",
+        "mpeg1video", "mpeg2video", "mpeg4", "vc1", "mjpeg",
+    },
+    "d3d11va": {  # DXVA：AMD / Intel / N 卡通用
+        "h264", "hevc", "vp9", "av1",
+        "mpeg2video", "vc1", "mjpeg",
+    },
+}
+
+
+def probe_hwaccel(input_path: Path, hwaccel: str, codec: str | None = None) -> bool:
+    """硬件解码对真实源码流是否可用：真解码 3 帧验证。
+
+    ffmpeg 的 -hwaccel 是"尽力而为"——初始化失败会静默回退软解且退出码仍为
+    0，所以除退出码外还须查警告级 stderr（"hwaccel initialisation returned
+    error"），两者都干净才算硬解真正建立。codec 给定时先过 HWACCEL_CODECS
+    矩阵（解码器没实现该 hwaccel 时静默软解、无任何警告，退出码判不出来）。
+
+    调用纪律：必须在分段管线开始前对整个文件验证一次。分段中途硬解初始化
+    失败会被当成"帧中间截断"，段落落入 checkpoint 但内容缺失，破坏断点续跑。
+    """
+    if codec is not None and codec not in HWACCEL_CODECS.get(hwaccel, set()):
+        return False
+    cmd = [
+        ffmpeg_bin(), "-hide_banner", "-loglevel", "warning", "-nostdin",
+        "-hwaccel", hwaccel,
+        "-i", str(input_path),
+        "-map", "0:v:0", "-an", "-sn", "-dn",
+        "-frames:v", "3", "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=30,
+                           creationflags=WINDOWS_CREATE_FLAGS)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if r.returncode != 0:
+        return False
+    err = r.stderr.decode("utf-8", "replace")
+    return "hwaccel initialisation returned error" not in err \
+        and "Failed setup for format" not in err

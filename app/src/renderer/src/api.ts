@@ -115,6 +115,8 @@ export interface ProbeInfo {
   has_audio: boolean
   audio_tracks?: string[]
   subtitles?: string[]
+  /** 按本文件实测的硬解可用性（hwdecode=true 时附带） */
+  decoder?: { nvdec: boolean; d3d11va: boolean }
 }
 
 export interface Task {
@@ -228,11 +230,11 @@ export const api = {
   async presets(): Promise<Preset[]> {
     return (await _fetch(`${baseUrl}/api/presets`)).json()
   },
-  async probe(path: string): Promise<Response> {
+  async probe(path: string, hwdecode = false): Promise<Response> {
     return _fetch(`${baseUrl}/api/probe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ path, hwdecode }),
     })
   },
   async settings(): Promise<Record<string, unknown>> {

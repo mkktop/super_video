@@ -144,6 +144,15 @@ const encSummary = computed(() => {
   if (h.svt_av1) parts.push('SVT-AV1（软件）')
   return parts.length ? parts.join(' · ') : '无（使用软件编码）'
 })
+/** 硬件解码能力汇总（任务页按所选视频实测后开放对应选项） */
+const decSummary = computed(() => {
+  const h = store.hardware
+  if (!h) return ''
+  const parts: string[] = []
+  if (h.nvdec) parts.push('NVDEC（NVIDIA）')
+  if (h.d3d11va) parts.push('D3D11VA（AMD / Intel）')
+  return parts.length ? parts.join(' · ') : '无（使用软件解码）'
+})
 /** 长路径中段省略：保留盘符开头与末级文件夹名 */
 const outDirShown = computed(() => {
   const p = outputDir.value
@@ -691,6 +700,8 @@ async function uninstallTrc() {
           <span>{{ store.hardware?.ram_gb }} GB</span>
           <span class="k">硬件编码</span>
           <span>{{ encSummary }}</span>
+          <span class="k">硬件解码</span>
+          <span>{{ decSummary }}</span>
         </div>
       </div>
     </section>

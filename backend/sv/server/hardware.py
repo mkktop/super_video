@@ -99,6 +99,27 @@ def _has_encoder(name: str) -> bool:
         return False
 
 
+def _try_hw_device(dev: str) -> bool:
+    """试创建硬件设备验证解码加速器可用（cuda=NVIDIA 驱动；d3d11va=DXVA 运行时）。
+
+    只验驱动/运行时存在，不针对具体编码——逐文件的真解码验证在 probe_hwaccel
+    （任务页选文件时做），这里的结论仅用于批量任务等无逐文件探测场景的选项门控。
+    """
+    from ..paths import ffmpeg_bin
+
+    try:
+        out = subprocess.run(
+            [ffmpeg_bin(), "-hide_banner", "-loglevel", "error",
+             "-init_hw_device", f"{dev}=probe",
+             "-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+             "-frames:v", "1", "-f", "null", "-"],
+            capture_output=True, timeout=20, creationflags=WINDOWS_CREATE_FLAGS,
+        )
+        return out.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def hardware_info() -> dict:
     vm = psutil.virtual_memory()
     return {
@@ -110,4 +131,6 @@ def hardware_info() -> dict:
         "av1_nvenc": _try_encode("av1_nvenc"),
         "amf": _try_encode("h264_amf"),
         "svt_av1": _has_encoder("libsvtav1"),
+        "nvdec": _try_hw_device("cuda"),
+        "d3d11va": _try_hw_device("d3d11va"),
     }
