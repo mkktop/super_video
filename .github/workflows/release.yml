@@ -98,7 +98,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create models-v1 --title "模型资产" --notes "应用内模型市场全部下载源" 2>$null
+          # notes 内容以仓库 backend/sv/models/ASSETS.md 为唯一事实源（页面已在线上，
+          # 此 create 仅在 release 不存在时生效，2>$null 吞掉已存在报错）
+          gh release create models-v1 --title "模型资产" --notes-file backend/sv/models/ASSETS.md 2>$null
           $existing = gh release view models-v1 --json assets --jq '.assets[].name'
           # 注册表 url 指向 models-v1 且随仓库 bundled 的文件才需要同步；
           # CUGAN/RIFE/pth 等外部模型已上传过，仓库里没有副本，自然跳过
