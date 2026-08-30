@@ -21,7 +21,7 @@
   },
   "id": "animejanai-v3-hd-l2",
   "name": "AnimeJaNai V3 HD L2（均衡）",
-  "description": "V3 HD UltraCompact：速度画质均衡主力档",
+  "description": "新一代均衡主力档：1080p→4K 速度画质折中，V3 系日常首选",
   "files": [
     {
       "name": "2x_AnimeJaNai_HD_V3_UltraCompact.onnx",

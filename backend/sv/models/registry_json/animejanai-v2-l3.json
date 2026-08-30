@@ -21,7 +21,7 @@
   },
   "id": "animejanai-v2-l3",
   "name": "AnimeJaNai V2 L3（画质）",
-  "description": "Compact 36k：V2 画质最高档，动漫社区口碑模型（比 AnimeVideo 更锐）",
+  "description": "V2 系画质最高档，动漫社区口碑模型：线条比 AnimeVideo 更锐，不赶时间时值得选",
   "files": [
     {
       "name": "2x_AnimeJaNai_V2_Compact_36k.onnx",

@@ -13,7 +13,7 @@
   "tile_hint": 0,
   "fp16": false,
   "u8_wrap": false,
-  "description": "B 站 Real-CUGAN Pro（v3 训练 + SE 注意力）：比 latest 画质更好但更慢；仅 x2/x3，降噪只有 0/3 档；训练输入动态范围压缩（引擎自动做仿射前后处理）。与 latest 同前科：DirectML/CUDA 后端不可用，仅 TensorRT 与 CPU",
+  "description": "官方 Pro 版（x2 / x3）：画质比标准版更干净、速度更慢。仅 TensorRT / CPU 后端可用；降噪提供保守 / 不降噪 / 强降噪",
   "io": {
     "color": "rgb",
     "range": "0-1",

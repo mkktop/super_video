@@ -21,7 +21,7 @@
   },
   "id": "animejanai-v3-hd-l3",
   "name": "AnimeJaNai V3 HD L3（画质）",
-  "description": "V3 HD Compact：V3 画质最高档，1080p→4K 动漫推荐",
+  "description": "V3 系画质最高档：动漫 1080p→4K 的画质首选，速度比均衡档慢一档",
   "files": [
     {
       "name": "2x_AnimeJaNai_HD_V3_Compact.onnx",

@@ -11,7 +11,7 @@
   "speed": "balanced",
   "vram_gb": 6,
   "tile_hint": 512,
-  "description": "通用 4x 超分（RRDBNet 动态尺寸版，本仓库自官方权重导出），真人实拍表现稳定；fp16 下比固定尺寸社区版快约一个数量级",
+  "description": "真人实拍与通用内容首选：4x 超分细节自然、表现稳定；720p→4K、1080p→8K 均可（8K 需 HEVC 编码）",
   "io": { "color": "rgb", "range": "0-1", "pad": 4 },
   "files": [
     {

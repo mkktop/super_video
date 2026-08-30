@@ -12,7 +12,7 @@
   "vram_gb": 2,
   "tile_hint": 0,
   "fp16": true,
-  "description": "Ani4K v2 极速档（105K 步）：1080p→4K 实时级；任意边长免对齐；画质兜底档",
+  "description": "Ani4K v2 极速档：1080p→4K 速度实时级，批量快速出片；不挑源分辨率，任意边长直接处理",
   "io": {
     "color": "rgb",
     "range": "0-1",

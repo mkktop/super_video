@@ -11,7 +11,7 @@
   "speed": "fast",
   "vram_gb": 2,
   "tile_hint": 0,
-  "description": "动漫视频专用：x2 原生(RealESRGANv2-animevideo-xsx2)/x4 原生(v3)，1080p→4K 选 x2",
+  "description": "动漫视频专用：专为视频内容训练、成片稳定不易闪烁；1080p→4K 选 x2，480p / 720p 老动画升清用 x4",
   "io": { "color": "bgr", "range": "0-1", "batch_hint": 4 },
   "files": [
     {

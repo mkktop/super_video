@@ -18,7 +18,7 @@
   "vram_gb": 2,
   "tile_hint": 0,
   "fp16": false,
-  "description": "B 站动漫超分，降噪档位最全（不降噪/1/2/3 + 保守模式）；denoise3 对老压制片去压缩噪显著；DML 下需基础图优化",
+  "description": "B 站动漫超分，降噪档位最全（5 档）；仅 TensorRT / CPU 后端可用。denoise3 对老压制片去噪显著",
   "io": {
     "color": "rgb",
     "range": "0-1",

@@ -21,7 +21,7 @@
   },
   "id": "animejanai-v2-l2",
   "name": "AnimeJaNai V2 L2（均衡）",
-  "description": "UltraCompact 30k：速度画质均衡，1080p→4K 主力档",
+  "description": "速度画质均衡的动漫 2x 主力档：1080p→4K 日常任务的默认之选",
   "files": [
     {
       "name": "2x_AnimeJaNai_V2_UltraCompact_30k.onnx",

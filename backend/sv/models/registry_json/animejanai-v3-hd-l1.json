@@ -21,7 +21,7 @@
   },
   "id": "animejanai-v3-hd-l1",
   "name": "AnimeJaNai V3 HD L1（极速）",
-  "description": "V3 HD SuperUltraCompact：新一代极速档，1080p→4K 实时级",
+  "description": "新一代极速档：1080p→4K 速度实时级，画质优于 V2 同定位档；赶时间与批量首选",
   "files": [
     {
       "name": "2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx",
