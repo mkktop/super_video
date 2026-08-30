@@ -36,6 +36,24 @@ const outputDir = ref('') // 全局输出目录（空 = 源视频同目录）
 const savingOutDir = ref(false)
 const notifyTask = ref(true) // 任务完成/失败系统通知
 const closeToTray = ref(false) // 关闭按钮=最小化到托盘
+const queueDoneAction = ref<'none' | 'notify' | 'shutdown' | 'sleep'>('none') // 队列全部完成后
+const savedQueueDone = ref<'none' | 'notify' | 'shutdown' | 'sleep'>('none') // 回滚基准
+const queueDoneOptions = [
+  { label: '不做任何事', value: 'none' },
+  { label: '系统通知', value: 'notify' },
+  { label: '关机（60 秒可取消）', value: 'shutdown' },
+  { label: '休眠（60 秒可取消）', value: 'sleep' },
+]
+async function saveQueueDone(v: 'none' | 'notify' | 'shutdown' | 'sleep') {
+  const r = await api.saveSettings({ queue_done_action: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    queueDoneAction.value = savedQueueDone.value
+    return
+  }
+  savedQueueDone.value = v
+  message.success(v === 'none' ? '已关闭' : '已保存，当前队列跑完后生效')
+}
 const srProfiling = ref(false) // 超分性能日志（完成的任务可查看瓶颈分析日志）
 
 // ---- 对比缓存：产物不自动清理（见 sv/server/compare.py），这里手动清 ----
@@ -115,11 +133,13 @@ const updateMsg = computed(() => {
   return ''
 })
 const engineDirty = computed(() => engine.value !== savedEngine.value || precision.value !== savedPrecision.value)
-const backendLabel = computed(() => {
-  const b = store.engine?.backend
-  if (b === 'trt') return 'CUDA + TensorRT'
-  if (b === 'cuda') return 'CUDA'
-  return 'DirectML'
+/** 后端取值 → 展示名（当前生效值与运行中实况共用） */
+const backendText = (b?: string) => (b === 'trt' ? 'CUDA + TensorRT' : b === 'cuda' ? 'CUDA' : 'DirectML')
+const backendLabel = computed(() => backendText(store.engine?.backend))
+/** 任务运行中且实况后端 ≠ 设置生效值：提示并排展示两态（下一任务起切换） */
+const runningBackend = computed(() => {
+  const r = store.engine?.running
+  return r && r.backend !== store.engine?.backend ? backendText(r.backend) : ''
 })
 const backendType = computed(() =>
   store.engine?.backend === 'trt' || store.engine?.backend === 'cuda' ? 'success' : 'default',
@@ -174,6 +194,7 @@ onMounted(async () => {
     close_to_tray?: boolean
     sr_profiling?: boolean
     compare_still_count?: number
+    queue_done_action?: 'none' | 'notify' | 'shutdown' | 'sleep'
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
@@ -183,6 +204,8 @@ onMounted(async () => {
   outputDir.value = String(s.output_dir ?? '').trim()
   notifyTask.value = s.notify_task_done !== false
   closeToTray.value = s.close_to_tray === true
+  queueDoneAction.value = s.queue_done_action ?? 'none'
+  savedQueueDone.value = queueDoneAction.value
   srProfiling.value = s.sr_profiling === true
   stillCount.value = Math.min(8, Math.max(1, Math.round(Number(s.compare_still_count) || 4)))
   const p = s.download_proxy ?? ''
@@ -280,13 +303,16 @@ function doInstall() {
 async function saveEngine() {
   saving.value = true
   const r = await api.saveSettings({ engine: engine.value, precision: precision.value })
-  saving.value = false
   if (r.ok) {
     savedEngine.value = engine.value
     savedPrecision.value = precision.value
     message.success('已保存，从下一个任务起生效')
+    // 回拉含真探测（会话内首次切 CUDA/TRT 可达数秒）：loading 一直盖到标签刷新，
+    // 避免"保存完了当前后端迟迟不动"的观感
     store.engine = await api.engine()
+    saving.value = false
   } else {
+    saving.value = false
     message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
   }
 }
@@ -399,6 +425,9 @@ async function uninstallTrc() {
                 <span v-if="store.engine?.detail" class="hint-inline">{{ store.engine.detail }}</span>
               </span>
             </div>
+            <p v-if="runningBackend" class="hint">
+              当前任务仍使用 {{ runningBackend }}，下一个任务起使用 {{ backendLabel }}
+            </p>
             <div class="row stack">
               <span class="row-label">推理后端</span>
               <NRadioGroup v-model:value="engine" size="small">
@@ -653,6 +682,19 @@ async function uninstallTrc() {
                 <small>点关闭按钮或 Alt+F4 时隐藏窗口到系统托盘，任务继续处理、通知照常弹出；从托盘图标菜单可还原窗口或退出应用</small>
               </span>
               <NSwitch v-model:value="closeToTray" size="small" @update:value="saveCloseToTray" />
+            </div>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                队列全部完成后
+                <small>最后一个任务收尾后的自动动作；关机/休眠前有 60 秒反悔窗口（任务页横幅可取消），期间新入队任务会自动撤销。需保持应用运行，配合「关闭到托盘」可后台等完</small>
+              </span>
+              <NSelect
+                v-model:value="queueDoneAction"
+                :options="queueDoneOptions"
+                size="small"
+                style="width: 190px"
+                @update:value="saveQueueDone"
+              />
             </div>
           </div>
         </section>

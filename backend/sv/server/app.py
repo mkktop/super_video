@@ -41,6 +41,7 @@ from ..pipeline.trim import run_trim
 from . import compare
 from . import db
 from . import trt_component
+from . import user_presets
 from .engine_select import select_engine
 from .events import EventBus
 from .hardware import hardware_info
@@ -176,17 +177,21 @@ def perf_history() -> dict:
 
 @app.get("/api/engine")
 async def get_engine() -> dict:
-    """推理后端展示：任务进行中如实返回当前任务所用后端；
-    空闲时按设置推算下一任务将使用的后端（与 runner._run_one 同口径，
-    设置切换后立即反映）。探测首次可达分钟级，放线程池避免阻塞事件循环。"""
+    """推理后端展示：backend/detail 恒为按当前设置推算的「下一任务将使用」后端
+    （与 runner._run_one 同口径，保存后立即反映——任务运行中也不例外：用户切后端
+    的高频时机正是任务在跑时，旧口径按任务实况返回会让设置页标签长时间不动，
+    任务结束又无人回拉，只能重启才刷新）。当前任务实际所用后端另附 running 字段
+    如实透出（设置热切换下一任务生效，两者可能不同，前端并排展示）。
+    探测首次可达分钟级，放线程池避免阻塞事件循环。"""
+    engine_setting = load_settings().get("engine", "auto")
+    want = None if engine_setting == "auto" else engine_setting
+    loop = asyncio.get_running_loop()
+    e = await loop.run_in_executor(None, select_engine, want)
+    out = {"backend": e.backend, "python": e.python_exe, "detail": e.detail}
     if runner.current_id is not None and runner.engine is not None:
-        e = runner.engine
-    else:
-        engine_setting = load_settings().get("engine", "auto")
-        want = None if engine_setting == "auto" else engine_setting
-        loop = asyncio.get_running_loop()
-        e = await loop.run_in_executor(None, select_engine, want)
-    return {"backend": e.backend, "python": e.python_exe, "detail": e.detail}
+        r = runner.engine
+        out["running"] = {"backend": r.backend, "detail": r.detail}
+    return out
 
 
 @app.get("/api/trt-component")
@@ -213,12 +218,64 @@ def uninstall_trt_component() -> dict:
 
 @app.get("/api/presets")
 def get_presets() -> list[dict]:
-    return _presets()
+    """内置预设（只读）+ 用户自定义预设（user=True 标记，前端可删）。"""
+    return _presets() + user_presets.load()
+
+
+class PresetCreate(BaseModel):
+    """保存用户预设：新建任务页把当前参数快照成一条可复用配置。"""
+    name: str = Field(min_length=1, max_length=24)
+    icon: str = Field(default="⭐", max_length=8)
+    desc: str = Field(default="", max_length=80)
+    model_id: str
+    target_scale: int
+    codec: str = "h264"
+    crf: int = 18
+    container: str = "mp4"
+    audio_mode: str = "auto"
+    interp: str = "off"
+    denoise: int | None = None
+    deinterlace: bool = False
+    deband: bool = False
+
+
+@app.post("/api/presets", status_code=201)
+def create_preset(body: PresetCreate) -> dict:
+    specs = load_registry()
+    if body.model_id not in specs:
+        raise HTTPException(404, f"未知模型 {body.model_id}")
+    if body.target_scale not in specs[body.model_id].scale:
+        raise HTTPException(400, (
+            f"模型 {body.model_id} 不支持 x{body.target_scale}"
+            f"（可选 {specs[body.model_id].scale}）"))
+    if body.codec not in _CODECS:
+        raise HTTPException(400, f"codec 仅支持 {' / '.join(_CODECS)}")
+    if not (0 <= body.crf <= 51):
+        raise HTTPException(400, "crf 范围 0-51")
+    if body.container not in _CONTAINERS:
+        raise HTTPException(400, "container 仅支持 mp4 / mkv / mov")
+    if body.audio_mode not in _AUDIO_MODES:
+        raise HTTPException(400, f"audio_mode 仅支持 {' / '.join(_AUDIO_MODES)}")
+    if body.interp not in ("off", "rife2x"):
+        raise HTTPException(400, "interp 仅支持 off / rife2x")
+    if body.denoise is not None and body.denoise not in (0, 1, 2, 3):
+        raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
+    return user_presets.add(body.model_dump())
+
+
+@app.delete("/api/presets/{preset_id}")
+def delete_preset(preset_id: str) -> dict:
+    if any(p["id"] == preset_id for p in _presets()):
+        raise HTTPException(409, "内置预设不可删除")
+    if not user_presets.remove(preset_id):
+        raise HTTPException(404, f"预设不存在: {preset_id}")
+    return {"ok": True}
 
 
 class ProbeBody(BaseModel):
     path: str
     hwdecode: bool = False  # 附带硬件解码可用性（真解码 3 帧实测，+~1s；任务页门控解码器选项用）
+    recommend: bool = False  # 附带智能推荐（采样 4 帧内容分析，+~1s；任务页推荐卡用）
 
 
 @app.post("/api/probe")
@@ -254,6 +311,18 @@ def probe_media(body: ProbeBody) -> dict:
             name: probe_hwaccel(p, hw, info.video_codec)
             for name, hw in (("nvdec", "cuda"), ("d3d11va", "d3d11va"))
         }
+    if body.recommend and m0_error is None:
+        # 智能推荐：采样帧内容分析 + 规则引擎。分析失败只是少了推荐卡，
+        # 绝不影响 probe 主流程
+        try:
+            from ..pipeline.analyze import sample_frame_stats
+            from ..pipeline.recommend import build_recommendation
+
+            stats = sample_frame_stats(info)
+            if stats is not None:
+                resp["recommend"] = build_recommendation(info, stats)
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"源分析失败（跳过推荐）: {e}")
     return resp
 
 
@@ -286,9 +355,19 @@ def log_tail(n: int = 120) -> dict:
 @app.put("/api/settings")
 def put_settings(body: dict) -> dict:
     try:
-        return save_settings(body)
+        data = save_settings(body)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    # 完成动作设置变更：布防中的倒计时与新设置不符时作废（改为 none 也撤）
+    if "queue_done_action" in body:
+        runner.refresh_queue_action(str(data.get("queue_done_action", "none")))
+    return data
+
+
+@app.post("/api/queue-done/cancel")
+def cancel_queue_done() -> dict:
+    """手动取消"队列完成后关机/休眠"倒计时（无倒计时=幂等成功）。"""
+    return {"ok": runner.cancel_queue_action()}
 
 
 @app.get("/api/models")
@@ -716,6 +795,12 @@ def create_task(body: TaskCreate) -> dict:
     if interp not in ("off", "rife2x"):
         raise HTTPException(400, "interp 仅支持 off / rife2x")
     params["interp"] = interp
+    # 前置滤镜（反交错/去色带）：布尔开关，滤镜串由 worker 按 prefilter_chain 拼装
+    for k in ("deinterlace", "deband"):
+        v = params.get(k, False)
+        if not isinstance(v, bool):
+            raise HTTPException(400, f"{k} 需为布尔值")
+        params[k] = v
     if params.get("denoise") is not None:
         if int(params["denoise"]) not in (0, 1, 2, 3):
             raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
@@ -761,6 +846,7 @@ def create_task(body: TaskCreate) -> dict:
         src={"w": info.width, "h": info.height, "fps": info.fps,
              "total_frames": info.total_frames},
     )
+    runner.notify_queue_activity_threadsafe()  # 队列又有活干：撤掉挂着的完成动作倒计时
     bus.publish({"type": "task_status", "task_id": task["id"], "status": "queued"})
     return task
 
@@ -1190,6 +1276,7 @@ def resume_task(task_id: str) -> dict:
     except OSError:
         pass
     db.update_task(task_id, status="queued", error=None, progress_frames=0)
+    runner.notify_queue_activity_threadsafe()  # 续跑也是队列活动：撤掉完成动作倒计时
     bus.publish({"type": "task_status", "task_id": task_id, "status": "queued"})
     return {"ok": True}
 

@@ -79,12 +79,29 @@ def image_dir_bytes(d: Path) -> int:
     return sum(f.stat().st_size for _, f in iter_image_frames(d))
 
 
+def prefilter_chain(deinterlace: bool = False, deband: bool = False) -> str | None:
+    """解码前置滤镜链（超分前修复源画面缺陷），拼接进解码命令的 -vf。
+
+    bwdif 必须用 mode=send_frame（每帧输入产一帧输出）——帧数不变是分段
+    管线 checkpoint 语义的硬前提；默认的 send_field 会帧数翻倍，段产出
+    帧数校验全炸。顺序固定：先反交错再去色带（交错梳齿会干扰 deband 的
+    渐变检测）。两个开关都关时返回 None，解码命令完全不出现 -vf。
+    """
+    parts: list[str] = []
+    if deinterlace:
+        parts.append("bwdif=mode=send_frame")
+    if deband:
+        parts.append("deband")
+    return ",".join(parts) or None
+
+
 def decoder_cmd(
     input_path: Path,
     cfr_fps: str | None = None,
     seek_s: float | None = None,
     max_frames: int | None = None,
     hwaccel: str | None = None,
+    vf: str | None = None,
 ) -> list[str]:
     cmd = [
         ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-nostdin",
@@ -96,8 +113,13 @@ def decoder_cmd(
     if seek_s is not None:
         # 输入 seek（-ss 在 -i 前）：CFR 源帧精确；VFR 源 ±1-2 帧偏差（分段续跑可接受）
         cmd += ["-ss", f"{seek_s:.6f}"]
-    cmd += ["-i", str(input_path), "-map", "0:v:0", "-an", "-sn", "-dn",
-            "-f", "rawvideo", "-pix_fmt", "rgb24",
+    cmd += ["-i", str(input_path), "-map", "0:v:0", "-an", "-sn", "-dn"]
+    if vf:
+        # 前置滤镜在原始像素格式上跑（bwdif/deband 都为 yuv 设计），滤镜链尾部
+        # 由 ffmpeg 自动插入格式转换到 rgb24；与 -hwaccel 组合同理安全（解码帧
+        # 已在系统内存）。滤镜可用性与硬解组合由 probe_hwaccel(vf=...) 预验证
+        cmd += ["-vf", vf]
+    cmd += ["-f", "rawvideo", "-pix_fmt", "rgb24",
             "-sws_flags", "lanczos+accurate_rnd+full_chroma_int"]
     if cfr_fps:
         cmd += ["-r", cfr_fps]  # VFR 源按平均帧率 CFR 化（补/丢帧）
@@ -288,6 +310,7 @@ class StreamPipeline:
         seg_total: int | None = None,  # 分段续跑：总输出帧数覆盖（进度上报用）
         frame_start: int = 1,  # 图片序列分段：本段首帧全局帧号（000001 起编号）
         decode_hwaccel: str | None = None,  # 硬解 '-hwaccel' 值（None=软解；probe_hwaccel 预验证过）
+        decode_vf: str | None = None,  # 解码前置滤镜链（反交错/去色带；帧数不变式见 prefilter_chain）
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -308,6 +331,7 @@ class StreamPipeline:
         self.seg_total = seg_total
         self.frame_start = frame_start
         self.decode_hwaccel = decode_hwaccel
+        self.decode_vf = decode_vf
         # 分段计时（性能剖析用；SegmentedPipeline 汇总落盘，平时无人读）：
         # read=解码管道读取 infer=process() 写=编码管道写入+drain preview=预览 JPEG
         # qin_wait/qout_wait=协程等队列（饥饿时间） enc_finish=段尾编码进程收尾
@@ -332,7 +356,7 @@ class StreamPipeline:
         dec = asyncio.create_subprocess_exec(
             *decoder_cmd(info.path, cfr_fps=info.fps_str if info.vfr else None,
                          seek_s=self.seek_s, max_frames=self.max_frames,
-                         hwaccel=self.decode_hwaccel),
+                         hwaccel=self.decode_hwaccel, vf=self.decode_vf),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,

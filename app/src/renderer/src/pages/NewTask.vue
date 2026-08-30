@@ -9,6 +9,7 @@ import {
   NFormItem,
   NInput,
   NInputNumber,
+  NPopover,
   NRadio,
   NRadioButton,
   NRadioGroup,
@@ -43,6 +44,8 @@ const audioMode = ref('auto')
 const keepSubtitles = ref(false)
 const interp = ref<'off' | 'rife2x'>('off')
 const denoise = ref<number | null>(null)
+const deinterlace = ref(false) // 反交错（老 DVD/1080i 源；帧数不变，checkpoint 语义安全）
+const deband = ref(false) // 去色带（动画夜空渐变常见）
 const output = ref('')
 const outputTouched = ref(false) // 用户手动改过路径后，自动填充不再覆盖（换文件时重置）
 const submitting = ref(false)
@@ -114,6 +117,30 @@ const denoiseOptions = computed(() => {
 const hasDenoiseVariants = computed(
   () => (selectedModel.value?.denoise_levels?.length ?? 0) > 0,
 )
+// ---- 智能推荐（probe 附带；源分析失败时无此块，卡片整张不出现） ----
+const recommend = computed(() => probeInfo.value?.recommend ?? null)
+const recommendFlags = computed(() => {
+  const r = recommend.value
+  if (!r) return []
+  const flags: string[] = []
+  if (r.deinterlace) flags.push('反交错')
+  if (r.deband) flags.push('去色带')
+  return flags
+})
+function applyRecommendation() {
+  const r = recommend.value
+  if (!r) return
+  if (r.model_id) selectModel(r.model_id)
+  const spec = r.model_id ? store.models.find((m) => m.id === r.model_id) : null
+  if (r.target_scale && (!spec || spec.scale.includes(r.target_scale))) {
+    targetScale.value = r.target_scale
+  }
+  deinterlace.value = r.deinterlace
+  deband.value = r.deband
+  resMode.value = 'scale'
+  message.success(`已应用推荐配置：${r.model_name || '模型'} · x${r.target_scale}`)
+  modelSec.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
 const nvencOk = computed(() => store.hardware?.nvenc ?? false)
 const av1NvencOk = computed(() => store.hardware?.av1_nvenc ?? false)
 const amfOk = computed(() => store.hardware?.amf ?? false)
@@ -306,7 +333,7 @@ async function setInput(files: string[]) {
   container.value = byExt[files[0].slice(files[0].lastIndexOf('.')).toLowerCase()] ?? 'mp4'
   if (files.length === 1) {
     probing.value = true
-    const r = await api.probe(files[0], true)
+    const r = await api.probe(files[0], true, true)
     if (seq !== probeSeq) return // 已重选其他文件：丢弃过期响应
     probing.value = false
     if (r.ok) {
@@ -399,6 +426,8 @@ watch([() => ui.page, () => ui.pendingTaskParams], async () => {
   keepSubtitles.value = p.subtitle_mode === 'auto'
   interp.value = p.interp === 'rife2x' ? 'rife2x' : 'off'
   denoise.value = typeof p.denoise === 'number' ? p.denoise : null
+  deinterlace.value = p.deinterlace === true
+  deband.value = p.deband === true
   tileChoice.value = typeof p.tile === 'number' ? p.tile : 0
   message.info('已带入原任务参数，调整后点「加入队列」')
 })
@@ -430,17 +459,68 @@ function applyPreset(pid: string) {
   outKind.value = 'video'
   codec.value = p.codec
   crf.value = p.crf
-  container.value = 'mp4'
-  audioMode.value = 'auto'
+  container.value = p.container ?? 'mp4'
+  audioMode.value = p.audio_mode ?? 'auto'
   keepSubtitles.value = false
-  interp.value = (p as { interp?: 'off' | 'rife2x' }).interp ?? 'off'
-  denoise.value = null
+  interp.value = p.interp === 'rife2x' ? 'rife2x' : 'off'
+  denoise.value = typeof p.denoise === 'number' ? p.denoise : null
+  deinterlace.value = p.deinterlace === true
+  deband.value = p.deband === true
   autoFillOutput()
   message.success(
     `已应用「${p.name}」：${selectedModel.value?.name ?? p.model_id} · x${p.target_scale}`,
   )
   // 原弹窗点预设会跳步骤给出反馈；整页后改为滚到模型区，让选中的卡片看得见
   modelSec.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+// ---- 用户自定义预设：把当前参数快照成一条可复用配置 ----
+const savingPreset = ref(false)
+const presetName = ref('')
+const presetPopShow = ref(false)
+async function saveAsPreset() {
+  const name = presetName.value.trim()
+  if (!name) {
+    message.error('请先填写预设名称')
+    return
+  }
+  if (!modelId.value || !selectedModel.value) {
+    message.error('请先选择模型')
+    return
+  }
+  savingPreset.value = true
+  const r = await api.createPreset({
+    name,
+    model_id: modelId.value,
+    target_scale: targetScale.value,
+    codec: codec.value,
+    crf: crf.value,
+    container: container.value,
+    audio_mode: audioMode.value,
+    interp: interp.value,
+    denoise: denoise.value,
+    deinterlace: deinterlace.value,
+    deband: deband.value,
+  })
+  savingPreset.value = false
+  if (r.ok) {
+    store.presets = await api.presets()
+    presetName.value = ''
+    presetPopShow.value = false
+    message.success(`已保存预设「${name}」，下次直接点选`)
+  } else {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+  }
+}
+async function deleteUserPreset(pid: string) {
+  const p = store.presets.find((x) => x.id === pid)
+  const r = await api.deletePreset(pid)
+  if (r.ok) {
+    store.presets = await api.presets()
+    message.success(`已删除预设「${p?.name ?? pid}」`)
+  } else {
+    message.error(`删除失败: ${(await r.json()).detail ?? r.status}`)
+  }
 }
 
 // ---- 提交 ----
@@ -475,6 +555,8 @@ async function submit() {
             }),
         interp: interp.value,
         decoder: decoder.value,
+        ...(deinterlace.value ? { deinterlace: true } : {}),
+        ...(deband.value ? { deband: true } : {}),
         ...(denoise.value !== null ? { denoise: denoise.value } : {}),
         ...(tileChoice.value ? { tile: tileChoice.value } : {}),
       },
@@ -534,18 +616,42 @@ export default { name: 'NewTask' }
       </div>
     </div>
 
-    <!-- 预设条 -->
+    <!-- 预设条：内置 + 用户自定义；当前参数可存为新预设 -->
     <div class="presets">
       <span class="presets-label">一键预设</span>
       <button
         v-for="p in store.presets"
         :key="p.id"
         class="preset"
-        :title="p.desc"
+        :class="{ 'preset-user': p.user }"
+        :title="p.desc || p.name"
         @click="applyPreset(p.id)"
       >
         <span class="p-icon">{{ p.icon }}</span>{{ p.name }}
+        <span
+          v-if="p.user"
+          class="p-del"
+          title="删除此预设"
+          @click.stop="deleteUserPreset(p.id)"
+        >×</span>
       </button>
+      <NPopover v-model:show="presetPopShow" trigger="click" placement="bottom-end">
+        <template #trigger>
+          <button class="preset preset-save" :disabled="!selectedModel" title="把当前参数保存为我的预设">＋ 存为预设</button>
+        </template>
+        <div class="preset-save-form">
+          <NInput
+            v-model:value="presetName"
+            size="small"
+            placeholder="预设名称"
+            maxlength="24"
+            style="width: 200px"
+            @keyup.enter="saveAsPreset"
+          />
+          <NButton size="small" type="primary" :loading="savingPreset" @click="saveAsPreset">保存</NButton>
+        </div>
+        <div class="preset-save-hint">快照当前模型 / 倍率 / 编码画质 / 预处理选项</div>
+      </NPopover>
     </div>
 
     <!-- ① 选择视频 -->
@@ -586,6 +692,33 @@ export default { name: 'NewTask' }
           </div>
         </div>
         <div v-else class="probe-err">{{ probeInfo.error || '文件不可用' }}</div>
+      </NCard>
+      <!-- 智能推荐：源内容分析（动画/真人、隔行、老编码）→ 一键配好参数 -->
+      <NCard v-if="recommend && probeInfo?.ok" size="small" class="rec-card" :bordered="true">
+        <div class="rec-flex">
+          <span class="rec-badge">智能推荐</span>
+          <div class="rec-main">
+            <div class="rec-title">
+              <template v-if="recommend.animated !== null">
+                {{ recommend.animated ? '检测到动画内容' : '检测到真人/实拍内容' }} ·
+              </template>
+              {{ recommend.model_name || '无可用推荐模型' }} x{{ recommend.target_scale }}
+              <template v-if="recommendFlags.length">
+                · 建议开启 {{ recommendFlags.join(' + ') }}
+              </template>
+            </div>
+            <div class="rec-reasons">{{ recommend.reasons.join('；') }}</div>
+          </div>
+          <NButton
+            size="small"
+            type="primary"
+            secondary
+            :disabled="!recommend.model_id"
+            @click="applyRecommendation"
+          >
+            一键应用
+          </NButton>
+        </div>
       </NCard>
       <div v-else-if="probing" class="probe-hint">正在读取视频信息…</div>
     </section>
@@ -717,6 +850,20 @@ export default { name: 'NewTask' }
                 placeholder="默认保守模式（点此可选档位，可清空恢复默认）"
               />
             </NFormItem>
+            <NFormItem label="预处理">
+              <div class="sub-col">
+                <div class="sub-row">
+                  <NSwitch v-model:value="deinterlace" size="small" />
+                  <span class="pre-label">反交错</span>
+                  <span class="sub-hint">老 DVD / 1080i 隔行片源——交错纹路不先去掉会被超分放大成锯齿</span>
+                </div>
+                <div class="sub-row">
+                  <NSwitch v-model:value="deband" size="small" />
+                  <span class="pre-label">去色带</span>
+                  <span class="sub-hint">修复夜空/暗部渐变里的色彩断层（动画源常见）</span>
+                </div>
+              </div>
+            </NFormItem>
             <NCollapse class="adv-collapse" :default-expanded-names="[]">
               <NCollapseItem title="高级选项" name="adv">
                 <NFormItem label="分块大小" :show-feedback="false">
@@ -803,6 +950,50 @@ h1 { font-size: 20px; font-weight: 700; }
   background: #26303c;
 }
 .p-icon { font-size: 14px; }
+.p-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 2px;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  color: #9aa0a6;
+  transition: color 0.15s, background 0.15s;
+}
+.p-del:hover { color: #fff; background: #e05252; }
+.preset-user { border-style: dashed; }
+.preset-save { border-style: dashed; color: #9aa0a6; }
+.preset-save:disabled { opacity: 0.45; cursor: not-allowed; }
+.preset-save-form { display: flex; gap: 8px; align-items: center; }
+.preset-save-hint { margin-top: 6px; font-size: 12px; color: #9aa0a6; }
+
+/* 智能推荐卡 */
+.rec-card { background: linear-gradient(90deg, rgba(34, 197, 94, 0.05), rgba(79, 140, 255, 0.04)); }
+.rec-flex { display: flex; align-items: center; gap: 14px; }
+.rec-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #22c55e, #4f8cff);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.rec-main { flex: 1; min-width: 0; }
+.rec-title { font-size: 13.5px; font-weight: 600; color: #e8eaed; }
+.rec-reasons {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #9aa0a6;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.pre-label { font-size: 13px; color: #e8eaed; }
 
 .sec { display: flex; flex-direction: column; gap: 12px; }
 .sec-title {

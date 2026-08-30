@@ -41,6 +41,7 @@ class MediaInfo:
     subtitle_count: int = 0
     subtitles: list[str] = field(default_factory=list)  # 字幕流编码名（subrip/hdmv_pgs_subtitle…）
     total_frames: int = 0
+    field_order: str = "progressive"  # tt/bb/tb/bt=隔行（ffprobe 场序声明）；progressive=逐行
 
     @property
     def has_audio(self) -> bool:
@@ -136,6 +137,7 @@ def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
         audio=audio,
         subtitle_count=len(subs),
         subtitles=[s.get("codec_name", "?") for s in subs],
+        field_order=v.get("field_order", "progressive") or "progressive",
     )
 
     if vfr:
@@ -198,13 +200,16 @@ HWACCEL_CODECS: dict[str, set[str]] = {
 }
 
 
-def probe_hwaccel(input_path: Path, hwaccel: str, codec: str | None = None) -> bool:
+def probe_hwaccel(input_path: Path, hwaccel: str, codec: str | None = None,
+                  vf: str | None = None) -> bool:
     """硬件解码对真实源码流是否可用：真解码 3 帧验证。
 
     ffmpeg 的 -hwaccel 是"尽力而为"——初始化失败会静默回退软解且退出码仍为
     0，所以除退出码外还须查警告级 stderr（"hwaccel initialisation returned
     error"），两者都干净才算硬解真正建立。codec 给定时先过 HWACCEL_CODECS
     矩阵（解码器没实现该 hwaccel 时静默软解、无任何警告，退出码判不出来）。
+    vf 给定时验证命令带同一滤镜链——反交错/去色带与硬解的组合兼容性必须
+    用与真实解码完全一致的命令验证（否则分段中途滤镜崩了会破坏 checkpoint）。
 
     调用纪律：必须在分段管线开始前对整个文件验证一次。分段中途硬解初始化
     失败会被当成"帧中间截断"，段落落入 checkpoint 但内容缺失，破坏断点续跑。
@@ -216,8 +221,10 @@ def probe_hwaccel(input_path: Path, hwaccel: str, codec: str | None = None) -> b
         "-hwaccel", hwaccel,
         "-i", str(input_path),
         "-map", "0:v:0", "-an", "-sn", "-dn",
-        "-frames:v", "3", "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
     ]
+    if vf:
+        cmd += ["-vf", vf]
+    cmd += ["-frames:v", "3", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=30,
                            creationflags=WINDOWS_CREATE_FLAGS)

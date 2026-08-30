@@ -18,6 +18,7 @@ DEFAULTS = {
     "close_to_tray": False,  # 关闭按钮=最小化到系统托盘继续处理任务（托盘菜单退出应用）
     "sr_profiling": False,  # 超分性能日志：任务结束保留分段耗时明细到 DATA_ROOT/data/sr_logs，供分析速度瓶颈
     "compare_still_count": 4,  # 模型对比静帧样本数（1~8，与 compare.py MAX_STILL_COUNT 一致）：创建对比作业时快照
+    "queue_done_action": "none",  # 队列全部完成后：none 无动作 | notify 系统通知 | shutdown 关机 | sleep 休眠
 }
 
 SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
@@ -66,6 +67,8 @@ def save(updates: dict) -> dict:
                 # bool 是 int 子类，须显式排除
                 if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= 8:
                     raise ValueError(f"非法 compare_still_count 值: {v}（1~8）")
+            if k == "queue_done_action" and v not in ("none", "notify", "shutdown", "sleep"):
+                raise ValueError(f"非法 queue_done_action 值: {v}（none/notify/shutdown/sleep）")
             if k == "output_dir":
                 if not isinstance(v, str):
                     raise ValueError(f"非法 output_dir 值: {v}")

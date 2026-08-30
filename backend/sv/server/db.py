@@ -157,6 +157,15 @@ def next_queued() -> dict | None:
         return _row2dict(r)
 
 
+def has_active() -> bool:
+    """是否还有排队/运行中的任务（队列排空判定；不领取、无副作用）。"""
+    with db_conn() as c:
+        r = c.execute(
+            "SELECT 1 FROM tasks WHERE status IN ('queued','running') LIMIT 1"
+        ).fetchone()
+    return r is not None
+
+
 def reorder_queued(ids: list[str]) -> int:
     """按传入顺序重排排队任务（queue_order=1..n）；运行中/已结束/不存在的 id 跳过。"""
     n = 0

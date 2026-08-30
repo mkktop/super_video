@@ -1,9 +1,36 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { NButton, NEmpty, NPopconfirm, NSpace } from 'naive-ui'
 import TaskCard from '../components/TaskCard.vue'
 import { api, type Task } from '../api'
 import { refreshStats, refreshTasks, store, ui } from '../store'
+
+// ---- 队列完成动作倒计时横幅（关机/休眠宽限期，可撤销） ----
+const tick = ref(Date.now())
+let tickTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  tickTimer = setInterval(() => (tick.value = Date.now()), 1000)
+})
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer)
+})
+const queueBanner = computed(() => (tick.value, store.queueAction))
+const secsLeft = computed(() =>
+  queueBanner.value ? Math.max(0, Math.ceil((queueBanner.value.endsAt - tick.value) / 1000)) : 0,
+)
+const bannerText = computed(() =>
+  queueBanner.value?.action === 'sleep' ? '休眠' : '关机',
+)
+const cancelingAction = ref(false)
+async function cancelQueueAction() {
+  cancelingAction.value = true
+  try {
+    await api.cancelQueueAction()
+    store.queueAction = null // 乐观清横幅；WS 取消事件随迟到不重复伤害
+  } finally {
+    cancelingAction.value = false
+  }
+}
 
 // ---- 状态筛选 ----
 type Filter = 'all' | 'active' | 'done' | 'failed'
@@ -135,6 +162,14 @@ function retryWithParams(t: Task) {
       </NSpace>
     </div>
 
+    <!-- 完成动作倒计时：新任务入队 / 手动取消 / 改设置都会撤销 -->
+    <div v-if="queueBanner" class="queue-done-banner">
+      <span class="qd-text">
+        {{ bannerText === '关机' ? '⚠️' : '🌙' }} 任务队列已全部完成，<b class="qd-count">{{ secsLeft }}</b> 秒后{{ bannerText }}
+      </span>
+      <NButton size="small" :loading="cancelingAction" @click="cancelQueueAction">取消{{ bannerText }}</NButton>
+    </div>
+
     <div class="filter-bar">
       <button
         v-for="ft in filterTabs"
@@ -206,4 +241,22 @@ h1 { font-size: 20px; font-weight: 700; }
 .loading { margin-top: 30vh; text-align: center; color: #9aa0a6; }
 .task-dragging { opacity: 0.45; }
 .task-drag-over { box-shadow: 0 0 0 2px #4f8cff; }
+
+.queue-done-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.08);
+  font-size: 13px;
+  color: #e8eaed;
+}
+.qd-count {
+  font-size: 16px;
+  color: #fbbf24;
+  font-variant-numeric: tabular-nums;
+}
 </style>

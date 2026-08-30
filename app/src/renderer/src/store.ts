@@ -21,13 +21,21 @@ export const store = reactive({
   presets: [] as Preset[],
   downloadProgress: {} as Record<string, number>, // model_id -> 0~1
   gpuName: '',
-  engine: null as null | { backend: string; python: string; detail: string },
+  engine: null as null | {
+    backend: string
+    python: string
+    detail: string
+    /** 任务进行中才有：当前任务实际所用后端（设置热切换下一任务生效，可能与 backend 不同） */
+    running?: { backend: string; detail: string }
+  },
   trt: null as TrcStatus | null,
   perf: {
     latest: null as PerfSample | null,
     samples: [] as PerfSample[], // 最近 1 小时,与后端环形缓冲同步
   },
   settings: {} as Record<string, unknown>,
+  /** 队列完成动作进行中（关机/休眠倒计时）；null=无。endsAt 为本地时间戳 */
+  queueAction: null as null | { action: string; endsAt: number },
   update: {
     checked: false, // 启动检查是否已完成(只查一次)
     status: '' as '' | 'dev' | 'available' | 'latest' | 'busy' | 'error',
@@ -223,9 +231,31 @@ function handleWsEvent(raw: MessageEvent) {
       }
       return
     }
+    // 队列完成动作（关机/休眠倒计时）：低频、只驱动任务页横幅，直接处理
+    if (ev.type === 'queue_done') {
+      if (ev.grace_s > 0) {
+        store.queueAction = { action: ev.action, endsAt: Date.now() + ev.grace_s * 1000 }
+      } else {
+        // notify：即时系统通知（复用任务完成通道），无横幅
+        window.sv.taskEvent('done', '任务队列已全部完成')
+      }
+      return
+    }
+    if (ev.type === 'queue_done_canceled') {
+      store.queueAction = null
+      return
+    }
+    if (ev.type === 'queue_done_fired') {
+      store.queueAction = null
+      return
+    }
     // 统计只在状态切换时刷新（低频）；progress 高频事件只驱动列表刷新
     if (ev.type === 'task_status') {
       refreshStats()
+      // 任务落终态：设置页「当前任务仍使用 X」提示需退场（仅在有 running 标记时重拉）
+      if (ev.status !== 'running' && store.engine?.running) {
+        api.engine().then((e) => (store.engine = e))
+      }
       // running→终态迁移 → 系统通知+任务栏闪烁（主进程判定窗口焦点）。
       // 事件先于列表刷新到达，此时 store 里还是旧态：任务名从列表取得到。
       if (typeof ev.task_id === 'string') {

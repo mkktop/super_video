@@ -49,6 +49,7 @@ class ChunkedPipeline:
         src_preview_path: Path | None = None,
         target_size: tuple[int, int] | None = None,  # 精确目标宽高；与引擎输出不同则编码时缩放
         decode_hwaccel: str | None = None,  # 硬解 '-hwaccel' 值（None=软解；worker 预验证过）
+        decode_vf: str | None = None,  # 解码前置滤镜链（反交错/去色带；作用于整段 PNG 解码）
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -62,6 +63,7 @@ class ChunkedPipeline:
         self.src_preview_path = src_preview_path
         self.target_size = target_size
         self.decode_hwaccel = decode_hwaccel
+        self.decode_vf = decode_vf
         self.work_dir = TEMP_DIR / "chunked" / task_id
 
     def _run_ffmpeg(self, cmd: list[str]) -> None:
@@ -84,10 +86,10 @@ class ChunkedPipeline:
         cmd = [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y"]
         if self.decode_hwaccel:
             cmd += ["-hwaccel", self.decode_hwaccel]
-        self._run_ffmpeg(cmd + [
-            "-i", str(self.info.path), "-map", "0:v:0", "-an", "-sn", "-dn",
-            str(src_dir / "f%06d.png"),
-        ])
+        cmd += ["-i", str(self.info.path), "-map", "0:v:0", "-an", "-sn", "-dn"]
+        if self.decode_vf:
+            cmd += ["-vf", self.decode_vf]
+        self._run_ffmpeg(cmd + [str(src_dir / "f%06d.png")])
         n = len(list(src_dir.glob("f*.png")))
         if n == 0:
             raise PipelineError("解码没有得到任何帧")

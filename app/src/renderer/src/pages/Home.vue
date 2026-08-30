@@ -132,7 +132,7 @@ const fresh = computed(() => store.stats.total === 0)
               显存 {{ hw.gpus[0].vram_gb }} GB
             </NTag>
             <NTag size="small" :bordered="false">
-              {{ store.engine?.backend === 'cuda' ? 'CUDA 加速' : 'DirectML' }}
+              {{ store.engine?.backend === 'trt' ? 'TensorRT 加速' : store.engine?.backend === 'cuda' ? 'CUDA 加速' : 'DirectML' }}
             </NTag>
           </div>
         </div>

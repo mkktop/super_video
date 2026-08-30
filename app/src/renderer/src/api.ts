@@ -67,6 +67,26 @@ export interface Preset {
   target_scale: number
   codec: string
   crf: number
+  interp?: 'off' | 'rife2x'
+  container?: 'mp4' | 'mkv' | 'mov'
+  audio_mode?: string
+  denoise?: number | null
+  deinterlace?: boolean
+  deband?: boolean
+  /** 用户自定义预设（可删除）；内置预设无此标记 */
+  user?: boolean
+}
+
+/** 智能推荐（probe recommend=true 附带）：规则引擎产出，见后端 recommend.py */
+export interface RecommendInfo {
+  model_id: string | null
+  model_name: string
+  target_scale: number | null
+  deinterlace: boolean
+  deband: boolean
+  interp: 'off' | 'rife2x'
+  animated: boolean | null
+  reasons: string[]
 }
 
 /** 任务总量统计（首页四宫格）：不受任务列表历史上限影响的全量聚合 */
@@ -117,6 +137,8 @@ export interface ProbeInfo {
   subtitles?: string[]
   /** 按本文件实测的硬解可用性（hwdecode=true 时附带） */
   decoder?: { nvdec: boolean; d3d11va: boolean }
+  /** 智能推荐（recommend=true 时附带；源分析失败则缺省） */
+  recommend?: RecommendInfo
 }
 
 export interface Task {
@@ -224,17 +246,48 @@ export const api = {
   async hardware(): Promise<Record<string, unknown>> {
     return (await _fetch(`${baseUrl}/api/hardware`)).json()
   },
-  async engine(): Promise<{ backend: string; python: string; detail: string }> {
+  async engine(): Promise<{
+    backend: string
+    python: string
+    detail: string
+    /** 任务进行中才有：当前任务实际所用后端（设置热切换下一任务生效，可能与 backend 不同） */
+    running?: { backend: string; detail: string }
+  }> {
     return (await _fetch(`${baseUrl}/api/engine`)).json()
   },
   async presets(): Promise<Preset[]> {
     return (await _fetch(`${baseUrl}/api/presets`)).json()
   },
-  async probe(path: string, hwdecode = false): Promise<Response> {
+  /** 保存用户自定义预设（当前任务页参数的快照） */
+  async createPreset(body: {
+    name: string
+    icon?: string
+    desc?: string
+    model_id: string
+    target_scale: number
+    codec: string
+    crf: number
+    container?: string
+    audio_mode?: string
+    interp?: string
+    denoise?: number | null
+    deinterlace?: boolean
+    deband?: boolean
+  }): Promise<Response> {
+    return _fetch(`${baseUrl}/api/presets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  },
+  async deletePreset(id: string): Promise<Response> {
+    return _fetch(`${baseUrl}/api/presets/${id}`, { method: 'DELETE' })
+  },
+  async probe(path: string, hwdecode = false, recommend = false): Promise<Response> {
     return _fetch(`${baseUrl}/api/probe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path, hwdecode }),
+      body: JSON.stringify({ path, hwdecode, recommend }),
     })
   },
   async settings(): Promise<Record<string, unknown>> {
@@ -329,6 +382,10 @@ export const api = {
   },
   async cancelTrim(id: string): Promise<Response> {
     return _fetch(`${baseUrl}/api/trim/${id}/cancel`, { method: 'POST' })
+  },
+  /** 取消"队列完成后关机/休眠"倒计时（无倒计时=幂等成功） */
+  async cancelQueueAction(): Promise<{ ok: boolean }> {
+    return (await _fetch(`${baseUrl}/api/queue-done/cancel`, { method: 'POST' })).json()
   },
 
   // ---- 模型对比 ----

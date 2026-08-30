@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,6 +15,32 @@ from .engine_select import EngineChoice, select_engine
 from .events import EventBus
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+
+QUEUE_ACTIONS = ("none", "notify", "shutdown", "sleep")
+QUEUE_ACTION_GRACE_S = 60  # 关机/休眠前的反悔窗口（新任务入队/手动取消都可撤）
+
+
+def _execute_power_action(action: str) -> bool:
+    """执行关机/休眠（executor 线程）。测试 monkeypatch 本函数拦截。
+
+    关机用 OS 计时器（/t 5）而非 sleep 定时：本函数返回后 sidecar 可能
+    先被 Electron 关闭，OS 计时器不受进程退出影响。休眠没有系统级取消
+    语义，倒计时由本进程 asyncio 把守（宽限期内可撤）。
+    """
+    try:
+        if action == "shutdown":
+            subprocess.run(
+                ["shutdown", "/s", "/t", "5", "/c", "super_video：任务队列已全部完成"],
+                check=True, creationflags=WINDOWS_CREATE_FLAGS)
+        elif action == "sleep":
+            subprocess.run(
+                ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
+                check=True, creationflags=WINDOWS_CREATE_FLAGS)
+        else:
+            return False
+        return True
+    except OSError:
+        return False
 
 
 def fps_avg(frames: float, elapsed_s: float) -> float:
@@ -48,6 +75,11 @@ class Runner:
         self._loop_task: asyncio.Task | None = None
         self._engine_pick = None  # start() 的后台探测 future（首个任务消费，防赋值赛跑）
         self.engine: EngineChoice | None = None  # worker 解释器/后端（start 时决定）
+        # ---- 队列完成后动作 ----
+        self.loop: asyncio.AbstractEventLoop | None = None  # start() 记下，供线程侧回跳
+        self._queue_gen = 0  # 队列活动计数：递增使进行中的倒计时作废
+        self._queue_countdown: asyncio.Task | None = None
+        self._queue_armed_action: str | None = None
 
     # ---- 生命周期 ----
 
@@ -63,6 +95,7 @@ class Runner:
         # 后端选择（探测 CUDA，耗时最多 2 分钟）放线程里做，不阻塞事件循环；
         # 持有 future 供首个任务 await（避免与 _run_one 的赋值赛跑，/api/engine 闪旧值）
         loop = asyncio.get_running_loop()
+        self.loop = loop
         self._engine_pick = loop.run_in_executor(None, select_engine)
         self._loop_task = loop.create_task(self._loop())
 
@@ -98,6 +131,11 @@ class Runner:
 
     async def stop(self) -> None:
         self._stopping.set()
+        # 完成动作倒计时静默撤除（不发取消事件——进程都在退出了，UI 不必回应）
+        if self._queue_countdown is not None and not self._queue_countdown.done():
+            self._queue_countdown.cancel()
+        self._queue_countdown = None
+        self._queue_armed_action = None
         # 正在跑的任务按"已取消"收尾（checkpoint 保留、可续跑），而不是落成
         # failed + "worker 异常退出"的吓人报错——与用户手动取消同语义
         if self.current_id is not None:
@@ -125,6 +163,84 @@ class Runner:
                 (TEMP_DIR / "segmented" / task["id"] / "owner.pid").unlink(missing_ok=True)
                 self.current_id = None
                 self.proc = None
+                self._arm_queue_action()
+
+    # ---- 队列完成后动作 ----
+
+    def _arm_queue_action(self) -> None:
+        """刚有任务落终态：队列已空 → 按设置布防完成动作（仅事件循环线程调用）。
+
+        布防时机是"最后一个任务收尾后"，而不是周期轮询——设置读取次数与
+        任务数同阶，空闲队列零开销。失败任务同样触发：用户挂机意图是
+        "处理完就关机"，失败也是一种处理完（醒来能看到失败原因）。
+        """
+        from .settings import load as load_settings
+
+        try:
+            action = load_settings().get("queue_done_action", "none")
+        except Exception:  # noqa: BLE001 — 设置读不了按无动作，不能挡调度循环
+            action = "none"
+        if action not in QUEUE_ACTIONS or action == "none":
+            return
+        if db.has_active():
+            return  # 还有排队/运行任务（含双路收尾窗口），谈不上"队列完成"
+        self.notify_queue_activity()  # 清掉可能残留的上一轮倒计时
+        gen = self._queue_gen
+        self._queue_armed_action = action
+        self._queue_countdown = asyncio.get_running_loop().create_task(
+            self._queue_action_countdown(action, gen))
+
+    async def _queue_action_countdown(self, action: str, gen: int) -> None:
+        grace = 0 if action == "notify" else QUEUE_ACTION_GRACE_S
+        self.bus.publish({"type": "queue_done", "action": action, "grace_s": grace})
+        try:
+            await asyncio.sleep(grace)
+        except asyncio.CancelledError:
+            return  # notify_queue_activity 已发取消事件
+        # 双保险：世代号（线程侧活动通知）+ 再查一次队列（布防后塞进来的任务）
+        if gen != self._queue_gen or db.has_active():
+            return
+        ok = True
+        if action != "notify":
+            loop = asyncio.get_running_loop()
+            ok = await loop.run_in_executor(None, _execute_power_action, action)
+        self._queue_armed_action = None
+        self.bus.publish({"type": "queue_done_fired", "action": action, "ok": ok})
+
+    def notify_queue_activity(self) -> None:
+        """队列又有活动（新任务/续跑/设置变更）：作废进行中的完成动作倒计时。
+
+        仅事件循环线程调用；线程池侧（创建端点）走 notify_queue_activity_threadsafe。
+        """
+        self._queue_gen += 1
+        self._queue_armed_action = None
+        t, self._queue_countdown = self._queue_countdown, None
+        if t is not None and not t.done():
+            t.cancel()
+            self.bus.publish({"type": "queue_done_canceled"})
+
+    def notify_queue_activity_threadsafe(self) -> None:
+        """线程池端点（POST /api/tasks 是同步 def，跑在线程里）的回跳入口。"""
+        loop = self.loop
+        if loop is not None and not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(self.notify_queue_activity)
+            except RuntimeError:
+                pass  # loop 在发布前关闭（退出竞态）
+        elif loop is None:
+            self.notify_queue_activity()  # 未 start（测试直连）：无倒计时可撤，直接走
+
+    def refresh_queue_action(self, new_action: str) -> None:
+        """设置变更：布防中的动作与新设置不符时作废倒计时（含改为 none）。"""
+        if self._queue_countdown is not None and new_action != self._queue_armed_action:
+            self.notify_queue_activity_threadsafe()
+
+    def cancel_queue_action(self) -> bool:
+        """手动取消完成动作倒计时；无倒计时返回 False（幂等端点用）。"""
+        if self._queue_countdown is None:
+            return False
+        self.notify_queue_activity_threadsafe()
+        return True
 
     async def _run_one(self, task: dict) -> None:
         task_id = task["id"]
