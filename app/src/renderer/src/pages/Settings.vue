@@ -116,7 +116,7 @@ const srProfiling = ref(false) // 超分性能日志（完成的任务可查看�
 // ---- 对比缓存：产物不自动清理（见 sv/server/compare.py），这里手动清 ----
 const cacheStats = ref<{ jobs: number; bytes: number } | null>(null)
 const clearingCache = ref(false)
-// 对比静帧样本数（1~8）：创建作业时后端快照，改完对下一次「开始对比」生效
+// 对比静帧样本数（1~8）：模型对比创建作业时快照；任务对比页打开时按当前值即时构建
 const stillCount = ref(4)
 const savingStillCount = ref(false)
 async function saveStillCount() {
@@ -702,13 +702,13 @@ async function uninstallTrc() {
         <section class="card">
           <header class="card-head">
             <div class="card-title">对比</div>
-            <div class="card-sub">静帧样本数设置，以及切片/成片产物的缓存管理（产物保留在本地且不会自动清理）</div>
+            <div class="card-sub">静帧样本数设置，以及模型对比切片/成片与任务对比静帧产物的缓存管理（保留在本地且不会自动清理）</div>
           </header>
           <div class="card-body">
             <div class="row switch-row">
               <span class="row-text">
                 静帧样本数
-                <small>每次对比的静帧模式取几张样本帧（片段均匀分布、自动避开黑场）；越多样本越全，产物占用也越大。对已经开始的对比无影响</small>
+                <small>静帧对比取几张样本帧（均匀分布、自动避开黑场）；模型对比与任务对比页共用，越多样本越全、产物占用也越大。对已开始的模型对比无影响，任务对比页下次打开时按新数重建</small>
               </span>
               <NSpace :size="8" :wrap="false" align="center">
                 <NInputNumber

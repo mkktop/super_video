@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NEmpty, NModal, NRadioButton, NRadioGroup, NTag, useMessage } from 'naive-ui'
 import { api } from '../api'
+import type { TaskStills } from '../api'
 import { store, ui } from '../store'
 import { useFullscreen } from '../utils'
 import CompareSlider from '../components/CompareSlider.vue'
@@ -22,6 +23,46 @@ const canVideo = computed(
 )
 const mode = ref<'frames' | 'video'>('frames')
 const busy = computed(() => task.value?.status === 'running' || task.value?.status === 'queued')
+
+// ---- 多帧静帧：完成态任务懒构建（源/输出同时间戳成对抽帧），轮询到 ready ----
+const stills = ref<TaskStills | null>(null)
+const stillIdx = ref(0)
+let stillsTimer: ReturnType<typeof setTimeout> | null = null
+const stillsReady = computed(
+  () => !!task.value && stills.value?.status === 'ready' && stills.value.count > 1)
+const stillCount = computed(() => (stillsReady.value ? stills.value!.count : 1))
+const stillsBuilding = computed(() => !!task.value && stills.value?.status === 'building')
+
+async function pollStills(tries = 0) {
+  const t = task.value
+  if (!t || t.status !== 'done') return
+  try {
+    stills.value = await api.taskStills(t.id)
+    stillIdx.value = Math.min(stillIdx.value, Math.max(0, (stills.value.count || 1) - 1))
+  } catch {
+    stills.value = null // 状态拿不到：回落单帧预览，不打断页面
+    return
+  }
+  if (stills.value.status === 'building' && tries < 150) {
+    stillsTimer = setTimeout(() => pollStills(tries + 1), 700)
+  }
+}
+
+// 对比画面源：静帧就绪用样本对（built_at 做缓存版本号），否则单帧预览对
+const sliderSrc = computed(() => {
+  const t = task.value
+  if (!t) return ''
+  return stillsReady.value
+    ? api.taskStillUrl(t.id, stillIdx.value, true, stills.value!.built_at ?? 0)
+    : api.previewUrl(t.id, t.updated_at, true)
+})
+const sliderOut = computed(() => {
+  const t = task.value
+  if (!t) return ''
+  return stillsReady.value
+    ? api.taskStillUrl(t.id, stillIdx.value, false, stills.value!.built_at ?? 0)
+    : api.previewUrl(t.id, t.updated_at)
+})
 
 const fileName = computed(() => task.value?.input_path.split(/[\\/]/).pop() ?? '')
 const outName = computed(() => task.value?.output_path.split(/[\\/]/).pop() ?? '')
@@ -68,9 +109,25 @@ function onKey(e: KeyboardEvent) {
     if (pageFull.value) return
     back()
   }
+  // [ ] 切换静帧样本（与模型对比页同键位；只在静帧视图）
+  if ((e.key === '[' || e.key === ']') && mode.value === 'frames' && stillCount.value > 1) {
+    stillIdx.value = e.key === '['
+      ? Math.max(0, stillIdx.value - 1)
+      : Math.min(stillCount.value - 1, stillIdx.value + 1)
+  }
 }
-onMounted(() => window.addEventListener('keydown', onKey))
-onUnmounted(() => window.removeEventListener('keydown', onKey))
+// 任务在页面上跑完（完成前几秒出首对预览，随后静帧可抽）→ 补一次轮询
+watch(() => task.value?.status, (st, old) => {
+  if (st === 'done' && st !== old) pollStills()
+})
+onMounted(() => {
+  pollStills()
+  window.addEventListener('keydown', onKey)
+})
+onUnmounted(() => {
+  if (stillsTimer) clearTimeout(stillsTimer)
+  window.removeEventListener('keydown', onKey)
+})
 </script>
 
 <template>
@@ -108,9 +165,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         :out-path="task!.output_path"
       />
       <CompareSlider
-        v-else-if="canCompare"
-        :src-url="api.previewUrl(task!.id, task!.updated_at, true)"
-        :out-url="api.previewUrl(task!.id, task!.updated_at)"
+        v-else-if="canCompare || stillsReady"
+        :src-url="sliderSrc"
+        :out-url="sliderOut"
       />
       <NEmpty
         v-else
@@ -121,6 +178,24 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           <NButton size="small" @click="back">返回</NButton>
         </template>
       </NEmpty>
+    </div>
+
+    <!-- 静帧样本条：缩略图取源帧，点选/[ ] 切换（与模型对比页同款交互） -->
+    <div v-if="mode === 'frames' && (stillsReady || stillsBuilding)" class="frame-strip">
+      <template v-if="stillsReady">
+        <button
+          v-for="i in stillCount"
+          :key="i"
+          class="f-thumb"
+          :class="{ on: stillIdx === i - 1 }"
+          :title="`样本帧 ${i}/${stillCount}（[ ] 键切换）`"
+          @click="stillIdx = i - 1"
+        >
+          <img :src="api.taskStillUrl(task!.id, i - 1, true, stills!.built_at ?? 0)" alt="" loading="lazy" />
+          <span class="f-idx">{{ i }}</span>
+        </button>
+      </template>
+      <span v-else class="strip-note">正在抽取样本帧…</span>
     </div>
 
     <!-- 分享卡片预览：长图/动图 + 打开产物位置 -->
@@ -187,6 +262,48 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   background: #0d0e10;
 }
 .empty { margin: auto; }
+/* 静帧样本条（样式与 CompareModels 同款，两页独立演化各自维护） */
+.frame-strip {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  align-items: center;
+  min-height: 58px;
+}
+.f-thumb {
+  position: relative;
+  width: 104px;
+  height: 58px;
+  padding: 0;
+  border: 2px solid #2a2d31;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #0d0e10;
+  flex-shrink: 0;
+}
+.f-thumb:hover { border-color: #4a4f55; }
+.f-thumb.on { border-color: #4f8cff; }
+.f-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.f-idx {
+  position: absolute;
+  left: 4px;
+  bottom: 3px;
+  min-width: 14px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 14px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #c8cdd4;
+}
+.f-thumb.on .f-idx { background: rgba(79, 140, 255, 0.85); color: #fff; }
+.strip-note { font-size: 12px; color: #9aa0a6; }
 
 .share-modal {
   display: flex;

@@ -41,6 +41,7 @@ from ..pipeline.probe import (
 from ..pipeline.trim import run_trim
 from . import compare
 from . import db
+from . import task_stills
 from . import trt_component
 from . import user_presets
 from .engine_select import select_engine
@@ -121,6 +122,7 @@ async def lifespan(app: FastAPI):
     await loop.run_in_executor(None, migrate_legacy_data)
     db.init_db()
     await loop.run_in_executor(None, sweep_orphan_workdirs)
+    await loop.run_in_executor(None, task_stills.sweep_orphans)
     await loop.run_in_executor(None, gc_sr_logs)
     _start_trim_worker()
     compare.start(bus)
@@ -962,9 +964,10 @@ async def remove_task(task_id: str) -> dict:
 
 
 def purge_task_files(task_id: str) -> None:
-    """删除任务专属临时产物：分段/分块工作目录 + 预览图 + 性能日志。"""
+    """删除任务专属临时产物：分段/分块工作目录 + 预览图 + 对比静帧缓存 + 性能日志。"""
     for d in (TEMP_DIR / "segmented" / task_id, TEMP_DIR / "chunked" / task_id):
         shutil.rmtree(d, ignore_errors=True)
+    task_stills.clear(task_id)
     pv = TEMP_DIR / "previews"
     if pv.is_dir():
         for p in pv.glob(f"{task_id}*.jpg"):
@@ -1245,16 +1248,20 @@ def _compare_view(job: dict) -> dict:
 
 @app.get("/api/compare/cache")
 def compare_cache_stats() -> dict:
-    """对比产物占用统计（设置页展示）。注意必须注册在 /{job_id} 之前，
-    否则 "cache" 会被当作 job_id 吞掉。"""
-    return compare.cache_stats()
+    """对比产物占用统计（设置页展示）：模型对比作业 + 任务静帧缓存合并口径。
+    注意必须注册在 /{job_id} 之前，否则 "cache" 会被当作 job_id 吞掉。"""
+    a, b = compare.cache_stats(), task_stills.cache_stats()
+    return {"jobs": a["jobs"] + b["jobs"], "bytes": a["bytes"] + b["bytes"]}
 
 
 @app.delete("/api/compare/cache")
 def clear_compare_cache() -> dict:
-    """清理全部对比产物并清空记录；有排队/运行中的作业时拒绝。"""
+    """清理全部对比产物（模型对比作业目录 + 任务静帧缓存）；有正在写的拒绝。"""
     try:
-        return compare.clear_cache()
+        r1 = compare.clear_cache()
+        r2 = task_stills.clear_all()
+        return {"removed_jobs": r1["removed_jobs"] + r2["removed_jobs"],
+                "freed_bytes": r1["freed_bytes"] + r2["freed_bytes"]}
     except ValueError as e:
         raise HTTPException(409, str(e)) from e
 
@@ -1325,6 +1332,28 @@ def task_preview(task_id: str, src: int = 0):
     if not p or not Path(p).exists():
         raise HTTPException(404, "暂无预览")
     return FileResponse(p, media_type="image/jpeg")
+
+
+@app.get("/api/tasks/{task_id}/stills")
+def task_stills_status(task_id: str) -> dict:
+    """任务对比页多帧静帧状态：ready 给样本数与版本号，未建则后台起构建
+    （前端轮询本接口到 ready）；unsupported=无多帧概念，回落单对预览图。"""
+    t = db.get_task(task_id)
+    if t is None:
+        raise HTTPException(404)
+    return task_stills.status(t)
+
+
+@app.get("/api/tasks/{task_id}/stills/{i}")
+def task_still_file(task_id: str, i: int, src: int = 0):
+    """任务静帧样本文件（PNG 无损）；未就绪/越界 404。"""
+    t = db.get_task(task_id)
+    if t is None:
+        raise HTTPException(404)
+    p = task_stills.asset_path(task_id, i, bool(src))
+    if p is None:
+        raise HTTPException(404)
+    return FileResponse(p, media_type="image/png")
 
 
 # ---- 对比分享卡片（晒图长图 / 滑块动图）----

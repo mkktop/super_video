@@ -170,6 +170,14 @@ export interface Task {
   has_sr_log?: boolean
 }
 
+/** 任务对比页多帧静帧状态（详见后端 sv/server/task_stills.py） */
+export interface TaskStills {
+  status: 'ready' | 'building' | 'failed' | 'unsupported'
+  count: number
+  built_at: number | null
+  error: string | null
+}
+
 /** 模型对比作业（详见后端 sv/server/compare.py） */
 export interface CompareEntry {
   model_id: string
@@ -381,6 +389,16 @@ export const api = {
   },
   previewUrl(id: string, updatedAt: number, src = false): string {
     return withToken(`${baseUrl}/api/tasks/${id}/preview?t=${updatedAt}${src ? '&src=1' : ''}`)
+  },
+  /** 任务对比页多帧静帧：状态（未构建时后端自动起线程，轮询到 ready） */
+  async taskStills(id: string): Promise<TaskStills> {
+    const r = await _fetch(`${baseUrl}/api/tasks/${id}/stills`)
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
+    return r.json()
+  },
+  /** 任务静帧样本资源地址（v=built_at：重建后强制刷新缩略图） */
+  taskStillUrl(id: string, i: number, src: boolean, v: number | string): string {
+    return withToken(`${baseUrl}/api/tasks/${id}/stills/${i}?v=${v}${src ? '&src=1' : ''}`)
   },
   /** 生成对比分享卡片（长图/滑块动图）；返回产物路径与可展示的 URL */
   async createShareCard(id: string, kind: 'image' | 'gif'): Promise<{ path: string; kind: string; url: string }> {

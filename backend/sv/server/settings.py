@@ -17,7 +17,7 @@ DEFAULTS = {
     "notify_task_done": True,  # 任务完成/失败时系统通知+闪任务栏（renderer 读；窗口聚焦时不打扰）
     "close_to_tray": False,  # 关闭按钮=最小化到系统托盘继续处理任务（托盘菜单退出应用）
     "sr_profiling": False,  # 超分性能日志：任务结束保留分段耗时明细到 DATA_ROOT/data/sr_logs，供分析速度瓶颈
-    "compare_still_count": 4,  # 模型对比静帧样本数（1~8，与 compare.py MAX_STILL_COUNT 一致）：创建对比作业时快照
+    "compare_still_count": 4,  # 对比静帧样本数（1~8，与 compare.py MAX_STILL_COUNT 一致）：模型对比创建作业时快照；任务对比页（task_stills.py）打开时按当前值构建
     "queue_done_action": "none",  # 队列全部完成后：none 无动作 | notify 系统通知 | shutdown 关机 | sleep 休眠
     "queue_schedule": "always",  # 处理时机：always 立即 | window 指定时段 | idle 电脑空闲（只拦新任务，不打断进行中）
     "schedule_start": "22:00",  # window 起始时刻（HH:MM；起>止=跨午夜，如 22:00~08:00；起=止视为全天）

@@ -80,6 +80,7 @@ sv/
 │  ├─ settings.py      应用设置持久化与校验（含默认输出目录）
 │  ├─ hardware.py      GPU/CPU 硬件检测
 │  ├─ compare.py       模型对比作业（独立线程：切段/静帧 × 多模型，不占任务队列）
+│  ├─ task_stills.py   任务对比页多帧静帧（懒构建缓存：源/输出同时间戳成对抽帧）
 │  ├─ engine_select.py 解释器/后端选择（CUDA/TRT/DML 探测）
 │  ├─ trt_component.py TRT 组件安装/卸载/状态
 │  ├─ perf.py          性能采样（CPU/GPU/任务资源）
@@ -92,7 +93,7 @@ sv/
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
 scripts/               calibrate_color.py（IO 校准）、convert_fp16.py / export_onnx_x4plus.py、build_trt_component.py、bench_*.py（基准）
-tests/                 41 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归）
+tests/                 42 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归）
 ```
 
 ## HTTP API 一览
@@ -135,6 +136,6 @@ sidecar 仅监听 localhost（本地 token 鉴权），完整定义见 `server/a
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 292 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归；从 backend 目录跑）
+$py -m pytest tests/ -q          # 306 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归；从 backend 目录跑）
 $py scripts/bench.py             # 速度与内存基准表
 ```
