@@ -1,0 +1,30 @@
+{
+  "id": "animejanai-v31-hd-balanced",
+  "name": "AnimeJaNai V3.1 HD Balanced（均衡）",
+  "vendor": "the-database",
+  "license": "上游发布包自由分发（mpv-AnimeJaNai）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [2],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": false,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 1
+  },
+  "description": "新一代均衡档（2026 SPAN 架构，fp16 原生）：速度与 V3 均衡档相当、画质反超上一代画质档；1080p→4K 主力之选",
+  "files": [
+    {
+      "name": "2x_AnimeJaNai_HD_V3.1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3.1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx",
+      "sha256": "b308e93c3dda3c4f9f968295b2b7b8d1c0583a711bca53a08d51134d9d1cbd5c",
+      "size": 1971970,
+      "source": "mpv-AnimeJaNai 仓库 3.6.0 官方 ONNX（fp16 原生导出）"
+    }
+  ]
+}

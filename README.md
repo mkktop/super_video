@@ -105,6 +105,7 @@ super_video 是一款面向 Windows 的 AI 视频超分辨率桌面软件：通�
 |---|---|---|---|
 | AnimeVideo v3 / xs x2 | x2 / x4 | 动漫 | 内置，开箱即用，速度最快 |
 | AnimeJaNai V2 / V3 HD | x2 | 动漫 | L1 极速 ~ L3 画质三档可选 |
+| AnimeJaNai V3.1 HD | x2 | 动漫 | 2026 新一代（SPAN 架构），极速/均衡 × 标准/锐利 |
 | Real-CUGAN | x2 / x3 / x4 | 动漫 | 降噪档位：不降噪 / 1 / 2 / 3+保守；仅 TensorRT / CPU 后端 |
 | Real-CUGAN Pro | x2 / x3 | 动漫 | 画质优先（比标准版更慢）；仅 TensorRT / CPU 后端 |
 | Ani4K v2 | x2 | 动漫 | 2025 新模型，画质 / 极速两档；按原作者 CC BY-NC 4.0 条款非商业提供 |

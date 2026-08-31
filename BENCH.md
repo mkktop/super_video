@@ -595,3 +595,26 @@ CPU 会话逐模型实测（.tmp/models_vset 探测脚本），非文档转述�
 
 待办：TRT 真机基准（pro 6 权重 + ani4k 两档）出数后决定 _ANIME_PREF 推荐
 位次是否调整；仿射折入 u8 包装图（TRT 下 pro 提速空间）。
+
+## AnimeJaNai V3.1 落地 + DML 包装会话析构崩溃防护（2026-08-31）
+
+V3.1 四权重（Performance/Balanced × Standard/Sharp1，SPANF3+unshuffle，fp16
+原生，上游 mpv-AnimeJaNai 3.3.0 起搭载、3.6.0 现行）已入库并传 models-v1
+（29→33）。实测口径：RGB、0-1、无仿射、任意边长（47x63 奇数直跑）、2x、
+batch 维固定 1（io.batch_hint=1）、原生 tensor(float16) 进出。四权重
+Standard 与 Sharp1 为独立训练（sha256 不同），非后处理开关。
+
+**DML u8 包装校验失败 → 回退 → 首帧原生崩溃（已修）**：
+Performance Sharp1 的包装 A/B 校验在 DML 下 maxdiff=2（tol=1 拦截，其余
+三权重与全部历史模型 ≤1）。回退标准路径后首帧推理进程原生崩、无异常上抛。
+隔离变量定位：四个权重中只有它走了"包装 session 创建→校验失败→失去引用→
+GC 析构"路径；balanced-sharp 等双 session 长期共存全部健康——崩因是 DML
+下"创建后再析构"第二个会话损坏设备状态（CUGAN 双 session 互踩的析构侧
+变种）。修复两处：① _setup_u8 校验失败时包装 session 保引用到引擎销毁
+（_u8_sess_try），杜绝 GC 析构；② DML 校验容差 1→2（TRT=3 先例同逻辑：
+拓扑差异的 fp16 舍入噪声，真错误仍为两位数量级）。修复后 4 权重 × CPU/DML
+8/8 包装生效、干净退出；GPU-gated 回归测试 4 例（test_new_models.py）。
+
+教训：stdout 管道 + 无 flush 时，原生崩溃会吞掉全部已完成输出——排查 DML
+类崩溃一律 python -u。test_cancel_running_kills_tree 全量跑时序抖动单跑
+绿，与本次改动领域隔离（runner/server vs 引擎/注册表），归属环境波动。

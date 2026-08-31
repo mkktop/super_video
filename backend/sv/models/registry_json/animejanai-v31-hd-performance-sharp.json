@@ -1,0 +1,30 @@
+{
+  "id": "animejanai-v31-hd-performance-sharp",
+  "name": "AnimeJaNai V3.1 HD Performance Sharp（极速·锐利）",
+  "vendor": "the-database",
+  "license": "上游发布包自由分发（mpv-AnimeJaNai）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [2],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "fastest",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": false,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 1
+  },
+  "description": "极速档的锐利风格变体（同架构独立训练权重，非后处理）：输出线条更锐，适合线条密集的番剧；速度与标准版完全相同",
+  "files": [
+    {
+      "name": "2x_AnimeJaNai_HD_V3.1Sharp1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3.1Sharp1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx",
+      "sha256": "72246eded3aab52f8d1a71613c0a1d900734b358d1820b62eb36f1ed376e1cf4",
+      "size": 740318,
+      "source": "mpv-AnimeJaNai 仓库 3.6.0 官方 ONNX（fp16 原生导出）"
+    }
+  ]
+}

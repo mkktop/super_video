@@ -1,0 +1,30 @@
+{
+  "id": "animejanai-v31-hd-balanced-sharp",
+  "name": "AnimeJaNai V3.1 HD Balanced Sharp（均衡·锐利）",
+  "vendor": "the-database",
+  "license": "上游发布包自由分发（mpv-AnimeJaNai）",
+  "engine": "onnx",
+  "kind": "sr",
+  "scale": [2],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": false,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "batch_hint": 1
+  },
+  "description": "均衡档的锐利风格变体（同架构独立训练权重，非后处理）：画质档级的观感加锐利线条；速度与标准版完全相同",
+  "files": [
+    {
+      "name": "2x_AnimeJaNai_HD_V3.1Sharp1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3.1Sharp1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx",
+      "sha256": "dde763c8202cfebac5ec030ea6644f3ee339ea35bbda8a76e257405399552f0f",
+      "size": 1971970,
+      "source": "mpv-AnimeJaNai 仓库 3.6.0 官方 ONNX（fp16 原生导出）"
+    }
+  ]
+}

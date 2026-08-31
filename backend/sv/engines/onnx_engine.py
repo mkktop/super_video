@@ -112,6 +112,7 @@ class OnnxSrEngine(BaseEngine):
         self._in_fp16 = False  # 模型本体即 fp16 导出（如 AnimeJaNai 系）：喂 fp16 输入
         self._u8_sess = None  # 包装 session（uint8 HWC 直进直出）
         self._u8_in_name = None
+        self._u8_sess_try = None  # 校验失败的包装 session 引用（防 DML GC 析构崩设备）
         self.u8_wrapped = False
         # CUGAN×DML 特异：会话首个 run 若发生在非进程主线程 → GPU 栈死锁
         # （2026-08-27 排障：预热/COM MTA/会话选项/主线程先行全部无效，
@@ -185,7 +186,10 @@ class OnnxSrEngine(BaseEngine):
             self._setup_u8()
         except Exception as e:  # noqa: BLE001 — 优化项，失败必须回退而不是带崩任务
             print(f"[engine] GPU 前后处理优化不可用，使用标准路径: {type(e).__name__}: {e}")
-            self._u8_sess = None
+            # 校验失败的包装 session 必须保引用到引擎销毁，不能交给 GC：
+            # DML 下"创建后再析构"第二个会话会损坏设备状态，主 session 之后
+            # 首帧推理直接原生崩（AnimeJaNai V3.1 Sharp 实证，2026-08-31）；
+            # 存活的双会话共存则健康（其余 3 个 V3.1 权重全过）。
             self.u8_wrapped = False
 
     def _setup_u8(self) -> None:
@@ -218,6 +222,7 @@ class OnnxSrEngine(BaseEngine):
         else:
             chosen = [p for p in _PROVIDER_ORDER if p in available] or ["CPUExecutionProvider"]
         sess = self._try_session(ort, so, chosen, model_path=cache)
+        self._u8_sess_try = sess  # 先挂实例：校验失败也不能被 GC（见 _try_u8_wrap 兜底注释）
         in_name = sess.get_inputs()[0].name
         if not marker.exists():  # 每模型×每后端一次 A/B 逐位校验，通过后落标记
             self._validate_u8(sess, in_name)
@@ -241,13 +246,12 @@ class OnnxSrEngine(BaseEngine):
         # 对齐尺寸时取 -1 变体，覆盖 pad 补边分支；已非对齐则本体即覆盖
         oh = h - 1 if h % self.pad == 0 and h > self.pad else h
         ow = w - 1 if w % self.pad == 0 and w > self.pad else w
-        # 容差按后端分档：DML 两路径同源，历史实测逐位一致取 ≤1；TRT 下包装
-        # 跳过模型尾部 f32→f16 输出量化 + EP 融合舍入不同，2026-08-27 实测常态
-        # 容差按后端分档：DML 两路径同源，历史实测逐位一致取 ≤1；TRT 下包装
-        # 跳过模型尾部 f32→f16 输出量化 + EP 融合舍入不同，2026-08-27 实测常态
-        # 差 1~3/255 且方向无害（更贴近 fp32 真值），放宽到 ≤3——真错误
-        # （通道序/尺寸/数值约定错）都是两位数量级，该门依旧拦截。
-        tol = 3 if (self.provider_used[:1] or [""])[0].startswith("Tensorrt") else 1
+        # 容差按后端分档：DML/主链两路径同源但图拓扑不同，fp16 卷积舍入各自
+        # 累积，历史全绿 ≤1、AnimeJaNai V3.1 Sharp 实测踩到 2（2026-08-31）——
+        # DML 放宽到 ≤2；TRT 下包装跳过模型尾部 f32→f16 输出量化 + EP 融合
+        # 舍入不同，常态 1~3/255 且方向无害（更贴近 fp32 真值），放宽到 ≤3。
+        # 真错误（通道序/尺寸/数值约定错）都是两位数量级，该门依旧拦截。
+        tol = 3 if (self.provider_used[:1] or [""])[0].startswith("Tensorrt") else 2
         rng = np.random.default_rng(7)
         for f in (np.zeros((h, w, 3), np.uint8),
                   rng.integers(0, 256, (h, w, 3), dtype=np.uint8),

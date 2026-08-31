@@ -22,6 +22,17 @@ sha256 校验，正常使用**无需手动下载**；如需手动获取，保持
 | 2x_AnimeJaNai_HD_V3_UltraCompact.onnx | V3 HD 均衡档 |
 | 2x_AnimeJaNai_HD_V3_Compact.onnx | V3 HD 画质档 |
 
+#### V3.1（2026 新一代，SPAN 架构，fp16 原生）
+Performance ≈ V3 极速档速度、画质反超上一代极速/均衡；Balanced ≈ V3 均衡档
+速度、画质反超上一代画质档。Sharp1 为同架构独立训练的锐利风格权重（非后处理）。
+
+| 文件 | 定位 |
+|---|---|
+| 2x_AnimeJaNai_HD_V3.1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx | 极速档 |
+| 2x_AnimeJaNai_HD_V3.1Sharp1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx | 极速档·锐利 |
+| 2x_AnimeJaNai_HD_V3.1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx | 均衡档 |
+| 2x_AnimeJaNai_HD_V3.1Sharp1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx | 均衡档·锐利 |
+
 ### Ani4K v2（2x，Sirosky）
 **许可：CC BY-NC 4.0（署名-非商业）**。原作者 [Sirosky / Upscale-Hub](
 https://github.com/Sirosky/Upscale-Hub)，此处为原文件未修改再分发，仅限非商业
