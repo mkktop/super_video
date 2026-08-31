@@ -474,9 +474,9 @@ async function uninstallTrc() {
       <h1>设置</h1>
     </div>
 
-    <!-- 固定两列各排各的（高低卡搭配），宽窗口卡片变宽而不是多挤出几列窄条 -->
+    <!-- 固定两列按语义分组、按高度配平（左≈右），宽窗口卡片变宽而不是多挤出几列窄条 -->
     <div class="settings-cols">
-      <!-- 左列：内容最长的三张 -->
+      <!-- 左列：处理与队列——引擎 / TensorRT / 队列自动化（通知·关机）/ 领取时机 -->
       <div class="col">
         <!-- 处理引擎 -->
         <section class="card">
@@ -580,33 +580,82 @@ async function uninstallTrc() {
           </div>
         </section>
 
-        <!-- 模型下载 -->
+        <!-- 通知与窗口 -->
         <section class="card">
           <header class="card-head">
-            <div class="card-title">模型下载</div>
-            <div class="card-sub">模型从 GitHub Releases 获取时的网络通道</div>
+            <div class="card-title">通知与窗口</div>
+            <div class="card-sub">任务完成提醒与关闭按钮的行为</div>
           </header>
           <div class="card-body">
-            <p class="hint">
-              若「跟随系统代理」模式下下载缓慢，可能是代理规则未覆盖 GitHub CDN 域名，
-              可切换为「自定义代理」并填写本地代理地址（如 http://127.0.0.1:7890）。
-            </p>
-            <div class="row inline-wrap">
-              <NSelect v-model:value="proxyMode" :options="proxyOptions" size="small" style="width: 170px" />
-              <NInput
-                v-if="proxyMode === 'custom'"
-                v-model:value="proxyAddr"
+            <div class="row switch-row">
+              <span class="row-text">
+                任务完成系统通知
+                <small>任务完成/失败时弹系统通知并闪烁任务栏图标（仅窗口未聚焦时打扰）；任务栏图标上的进度显示不受此开关影响</small>
+              </span>
+              <NSwitch v-model:value="notifyTask" size="small" @update:value="saveNotifyTask" />
+            </div>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                关闭时最小化到托盘
+                <small>点关闭按钮或 Alt+F4 时隐藏窗口到系统托盘，任务继续处理、通知照常弹出；从托盘图标菜单可还原窗口或退出应用</small>
+              </span>
+              <NSwitch v-model:value="closeToTray" size="small" @update:value="saveCloseToTray" />
+            </div>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                队列全部完成后
+                <small>最后一个任务收尾后的自动动作；关机/休眠前有 60 秒反悔窗口（任务页横幅可取消），期间新入队任务会自动撤销。需保持应用运行，配合「关闭到托盘」可后台等完</small>
+              </span>
+              <NSelect
+                v-model:value="queueDoneAction"
+                :options="queueDoneOptions"
                 size="small"
-                placeholder="http://127.0.0.1:7890"
-                style="width: 230px"
+                style="width: 190px"
+                @update:value="saveQueueDone"
               />
-              <NButton size="small" type="primary" :loading="savingProxy" @click="saveProxy">保存</NButton>
+            </div>
+          </div>
+        </section>
+
+        <!-- 处理时机 -->
+        <section class="card">
+          <header class="card-head">
+            <div class="card-title">处理时机</div>
+            <div class="card-sub">队列什么时候开始处理下一个任务——白天不抢机器，夜间/空闲自动跑</div>
+          </header>
+          <div class="card-body">
+            <div class="row stack">
+              <span class="row-label">领取时机</span>
+              <NRadioGroup v-model:value="queueSchedule" size="small">
+                <NRadioButton value="always">立即处理</NRadioButton>
+                <NRadioButton value="window">指定时段</NRadioButton>
+                <NRadioButton value="idle">电脑空闲时</NRadioButton>
+              </NRadioGroup>
+            </div>
+            <div v-if="queueSchedule === 'window'" class="row inline-wrap">
+              <span class="row-text">时段</span>
+              <NInput v-model:value="scheduleStart" size="small" style="width: 90px" placeholder="22:00" />
+              <span class="row-text">至</span>
+              <NInput v-model:value="scheduleEnd" size="small" style="width: 90px" placeholder="08:00" />
+              <span class="hint-inline">起止跨午夜即夜间段（如 22:00 ~ 08:00）；只在时段内开始新任务</span>
+            </div>
+            <div v-if="queueSchedule === 'idle'" class="row inline-wrap">
+              <span class="row-text">键鼠静置</span>
+              <NInputNumber v-model:value="idleMinutes" size="small" :min="1" :max="240" style="width: 110px" />
+              <span class="row-text">分钟后开始</span>
+            </div>
+            <p class="hint">
+              只拦截「开始下一个任务」，不会打断进行中的任务（跑完当前任务即停，断点续跑安全）；
+              挂起期间任务页会显示等待原因。设置立即生效，无需重启。
+            </p>
+            <div class="save-row">
+              <NButton type="primary" size="small" :loading="savingSchedule" @click="saveSchedule">保存</NButton>
             </div>
           </div>
         </section>
       </div>
 
-      <!-- 右列：短小配置项 -->
+      <!-- 右列：输出与应用——输出位置 / 对比 / 性能采样 / 更新 / 模型下载网络 -->
       <div class="col">
         <!-- 输出位置 -->
         <section class="card">
@@ -626,26 +675,26 @@ async function uninstallTrc() {
               <NButton size="small" type="primary" :loading="savingOutDir" @click="pickOutDir">浏览…</NButton>
               <NButton v-if="outputDir" size="small" quaternary :disabled="savingOutDir" @click="clearOutDir">恢复默认</NButton>
             </div>
-          <p class="hint">
-            目录不存在时会自动创建。输出文件在目录内没有同名时直接沿用原文件名；
-            已有同名（含源文件本身）时自动改用「原名_倍率」后缀，不覆盖任何现有文件。
-          </p>
-          <div class="row switch-row bordered-top">
-            <span class="row-text">
-              输出命名模板
-              <small>留空沿用原文件名；变量：{name} 原名 · {model} 模型 · {scale} 倍率 · {res} 输出分辨率 · {date} 日期。如 {name}_{model}_{scale}；同名冲突仍自动加后缀不覆盖</small>
-            </span>
-            <NSpace :size="8" :wrap="false" align="center">
-              <NInput
-                v-model:value="nameTemplate"
-                size="small"
-                placeholder="{name}_{model}_{scale}"
-                style="width: 260px"
-                @keyup.enter="saveNameTemplate"
-              />
-              <NButton size="small" :loading="savingNameTpl" @click="saveNameTemplate">保存</NButton>
-            </NSpace>
-          </div>
+            <p class="hint">
+              目录不存在时会自动创建。输出文件在目录内没有同名时直接沿用原文件名；
+              已有同名（含源文件本身）时自动改用「原名_倍率」后缀，不覆盖任何现有文件。
+            </p>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                输出命名模板
+                <small>留空沿用原文件名；变量：{name} 原名 · {model} 模型 · {scale} 倍率 · {res} 输出分辨率 · {date} 日期。如 {name}_{model}_{scale}；同名冲突仍自动加后缀不覆盖</small>
+              </span>
+              <NSpace :size="8" :wrap="false" align="center">
+                <NInput
+                  v-model:value="nameTemplate"
+                  size="small"
+                  placeholder="{name}_{model}_{scale}"
+                  style="width: 260px"
+                  @keyup.enter="saveNameTemplate"
+                />
+                <NButton size="small" :loading="savingNameTpl" @click="saveNameTemplate">保存</NButton>
+              </NSpace>
+            </div>
           </div>
         </section>
 
@@ -745,80 +794,6 @@ async function uninstallTrc() {
           </div>
         </section>
 
-        <!-- 通知与窗口 -->
-        <section class="card">
-          <header class="card-head">
-            <div class="card-title">通知与窗口</div>
-            <div class="card-sub">任务完成提醒与关闭按钮的行为</div>
-          </header>
-          <div class="card-body">
-            <div class="row switch-row">
-              <span class="row-text">
-                任务完成系统通知
-                <small>任务完成/失败时弹系统通知并闪烁任务栏图标（仅窗口未聚焦时打扰）；任务栏图标上的进度显示不受此开关影响</small>
-              </span>
-              <NSwitch v-model:value="notifyTask" size="small" @update:value="saveNotifyTask" />
-            </div>
-            <div class="row switch-row bordered-top">
-              <span class="row-text">
-                关闭时最小化到托盘
-                <small>点关闭按钮或 Alt+F4 时隐藏窗口到系统托盘，任务继续处理、通知照常弹出；从托盘图标菜单可还原窗口或退出应用</small>
-              </span>
-              <NSwitch v-model:value="closeToTray" size="small" @update:value="saveCloseToTray" />
-            </div>
-            <div class="row switch-row bordered-top">
-              <span class="row-text">
-                队列全部完成后
-                <small>最后一个任务收尾后的自动动作；关机/休眠前有 60 秒反悔窗口（任务页横幅可取消），期间新入队任务会自动撤销。需保持应用运行，配合「关闭到托盘」可后台等完</small>
-              </span>
-              <NSelect
-                v-model:value="queueDoneAction"
-                :options="queueDoneOptions"
-                size="small"
-                style="width: 190px"
-                @update:value="saveQueueDone"
-              />
-            </div>
-          </div>
-        </section>
-
-        <!-- 处理时机 -->
-        <section class="card">
-          <header class="card-head">
-            <div class="card-title">处理时机</div>
-            <div class="card-sub">队列什么时候开始处理下一个任务——白天不抢机器，夜间/空闲自动跑</div>
-          </header>
-          <div class="card-body">
-            <div class="row stack">
-              <span class="row-label">领取时机</span>
-              <NRadioGroup v-model:value="queueSchedule" size="small">
-                <NRadioButton value="always">立即处理</NRadioButton>
-                <NRadioButton value="window">指定时段</NRadioButton>
-                <NRadioButton value="idle">电脑空闲时</NRadioButton>
-              </NRadioGroup>
-            </div>
-            <div v-if="queueSchedule === 'window'" class="row inline-wrap">
-              <span class="row-text">时段</span>
-              <NInput v-model:value="scheduleStart" size="small" style="width: 90px" placeholder="22:00" />
-              <span class="row-text">至</span>
-              <NInput v-model:value="scheduleEnd" size="small" style="width: 90px" placeholder="08:00" />
-              <span class="hint-inline">起止跨午夜即夜间段（如 22:00 ~ 08:00）；只在时段内开始新任务</span>
-            </div>
-            <div v-if="queueSchedule === 'idle'" class="row inline-wrap">
-              <span class="row-text">键鼠静置</span>
-              <NInputNumber v-model:value="idleMinutes" size="small" :min="1" :max="240" style="width: 110px" />
-              <span class="row-text">分钟后开始</span>
-            </div>
-            <p class="hint">
-              只拦截「开始下一个任务」，不会打断进行中的任务（跑完当前任务即停，断点续跑安全）；
-              挂起期间任务页会显示等待原因。设置立即生效，无需重启。
-            </p>
-            <div class="save-row">
-              <NButton type="primary" size="small" :loading="savingSchedule" @click="saveSchedule">保存</NButton>
-            </div>
-          </div>
-        </section>
-
         <!-- 性能监控 -->
         <section class="card">
           <header class="card-head">
@@ -841,6 +816,31 @@ async function uninstallTrc() {
               <NSwitch v-model:value="srProfiling" size="small" @update:value="saveSrProfiling" />
             </div>
             <p class="hint">性能采样历史保留最近 1 小时，应用重启后清零；性能日志按任务保留最近 200 份。</p>
+          </div>
+        </section>
+
+        <!-- 模型下载 -->
+        <section class="card">
+          <header class="card-head">
+            <div class="card-title">模型下载</div>
+            <div class="card-sub">模型从 GitHub Releases 获取时的网络通道</div>
+          </header>
+          <div class="card-body">
+            <p class="hint">
+              若「跟随系统代理」模式下下载缓慢，可能是代理规则未覆盖 GitHub CDN 域名，
+              可切换为「自定义代理」并填写本地代理地址（如 http://127.0.0.1:7890）。
+            </p>
+            <div class="row inline-wrap">
+              <NSelect v-model:value="proxyMode" :options="proxyOptions" size="small" style="width: 170px" />
+              <NInput
+                v-if="proxyMode === 'custom'"
+                v-model:value="proxyAddr"
+                size="small"
+                placeholder="http://127.0.0.1:7890"
+                style="width: 230px"
+              />
+              <NButton size="small" type="primary" :loading="savingProxy" @click="saveProxy">保存</NButton>
+            </div>
           </div>
         </section>
       </div>
@@ -880,8 +880,8 @@ async function uninstallTrc() {
 }
 h1 { font-size: 20px; font-weight: 700; }
 
-/* 两列手动配平（左=高卡 右=短卡）：宽屏只把卡片撑宽,永远不挤第三列；
-   窄窗口 auto-fit 回落单列,两列各自整列下移,结构仍稳定 */
+/* 两列按语义分组 + 高度配平（左≈右，全屏下底部对齐）：
+   宽屏只把卡片撑宽,永远不挤第三列；窄窗口 auto-fit 回落单列,两列各自整列下移 */
 .settings-cols {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
@@ -937,7 +937,7 @@ h1 { font-size: 20px; font-weight: 700; }
   font-size: 12px;
   color: #9aa0a6;
   margin-top: 3px;
-  max-width: 420px;
+  max-width: 540px; /* 超宽卡片上限宽换行,避免 12px 文字拉满整行难读 */
 }
 .backend-status {
   display: flex;
@@ -945,7 +945,7 @@ h1 { font-size: 20px; font-weight: 700; }
   gap: 8px;
   flex-wrap: wrap;
 }
-.hint { color: #9aa0a6; font-size: 12px; margin: 2px 0 6px; line-height: 1.55; }
+.hint { color: #9aa0a6; font-size: 12px; margin: 2px 0 6px; line-height: 1.55; max-width: 780px; }
 .hint-inline { color: #9aa0a6; font-size: 12px; }
 .save-row {
   display: flex;
