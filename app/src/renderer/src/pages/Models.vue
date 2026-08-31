@@ -16,18 +16,52 @@ import {
   NTag,
   useMessage,
 } from 'naive-ui'
-import { api } from '../api'
+import { api, type ModelInfo } from '../api'
 import { refreshModels, store } from '../store'
 
 const message = useMessage()
-const tab = ref<'all' | 'anime' | 'general'>('all')
-
-const models = computed(() =>
-  store.models.filter((m) => tab.value === 'all' || m.content.includes(tab.value)),
-)
+const tab = ref<'all' | 'installed' | 'anime' | 'general'>('all')
 
 const speedLabel = { fast: '⚡ 快速', balanced: '⚖ 均衡', slow: '🐢 高质量慢速' }
-const contentLabel = { anime: '动漫', general: '真人/通用' }
+// 'real' 与 'general' 是注册表两代写入口径，展示与筛选统一按「真人/通用」
+const contentLabel = { anime: '动漫', general: '真人/通用', real: '真人/通用' }
+
+/** 家族分节（纯展示层，按 id 前缀派生）：模型上量后一个家族十几张变体卡平铺
+ *  难扫，按家族分节、家族顺序手工定推荐位；注册表新增未匹配的家族落「其他」，
+ *  不改前端也不丢展示 */
+const FAMILIES: Array<{ key: string; name: string; note?: string }> = [
+  { key: 'animejanai-v31', name: 'AnimeJaNai V3.1 HD', note: '新一代 SPAN 架构 · 当前推荐' },
+  { key: 'animejanai-v3', name: 'AnimeJaNai V3 HD', note: '上一代架构' },
+  { key: 'real-cugan', name: 'Real-CUGAN', note: '动漫高画质' },
+  { key: 'ani4k-v2', name: 'Ani4K v2' },
+  { key: 'realesrgan', name: 'Real-ESRGAN', note: '真人/通用' },
+  { key: 'realesr-animevideov3', name: 'AnimeVideo', note: '动漫 · 随软件内置' },
+  { key: 'animejanai-v2', name: 'AnimeJaNai V2', note: '旧代' },
+  { key: 'rife', name: 'RIFE 补帧', note: '插帧（帧率翻倍），功能不同于超分' },
+]
+const inFamily = (id: string, key: string) => id === key || id.startsWith(`${key}-`)
+
+const groups = computed<Array<{ key: string; name: string; note?: string; models: ModelInfo[] }>>(() => {
+  const list = store.models
+    .filter((m) => {
+      if (tab.value === 'all') return true
+      if (tab.value === 'installed') return m.installed || m.bundled
+      if (tab.value === 'anime') return m.content.includes('anime')
+      return m.content.includes('general') || m.content.includes('real')
+    })
+    // 组内已下载在前（稳定排序保持注册表顺序），扫一眼就知道哪些已就绪
+    .sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled))
+  const out = FAMILIES.map((f) => ({
+    key: f.key, name: f.name, note: f.note,
+    models: list.filter((m) => inFamily(m.id, f.key)),
+  })).filter((g) => g.models.length > 0)
+  const known = new Set(out.flatMap((g) => g.models.map((m) => m.id)))
+  const other = list.filter((m) => !known.has(m.id))
+  if (other.length) out.push({ key: '__other', name: '其他模型', note: undefined, models: other })
+  return out
+})
+
+const totalShown = computed(() => groups.value.reduce((n, g) => n + g.models.length, 0))
 
 async function onDownload(id: string) {
   const r = await api.downloadModel(id)
@@ -98,57 +132,65 @@ async function doImport() {
       </div>
       <NSpace>
         <NButton size="small" @click="showImport = true">导入自定义模型</NButton>
+        <NButton size="small" :type="tab === 'all' ? 'primary' : 'default'" @click="tab = 'all'">全部</NButton>
+        <NButton size="small" :type="tab === 'installed' ? 'primary' : 'default'" @click="tab = 'installed'">已下载</NButton>
         <NButton size="small" :type="tab === 'anime' ? 'primary' : 'default'" @click="tab = 'anime'">动漫</NButton>
         <NButton size="small" :type="tab === 'general' ? 'primary' : 'default'" @click="tab = 'general'">真人/通用</NButton>
-        <NButton size="small" :type="tab === 'all' ? 'primary' : 'default'" @click="tab = 'all'">全部</NButton>
       </NSpace>
     </div>
 
-    <NEmpty v-if="!models.length" description="该分类暂无模型" style="margin-top: 12vh" />
+    <NEmpty v-if="!totalShown" description="该分类暂无模型" style="margin-top: 12vh" />
 
-    <div class="model-grid">
-      <div v-for="m in models" :key="m.id" class="card mcard">
-        <div class="m-head">
-          <span class="name">{{ m.name }}</span>
-          <NTag v-if="m.bundled" size="small" type="success" :bordered="false">内置</NTag>
-          <NTag v-else-if="m.installed" size="small" type="success" :bordered="false">已安装</NTag>
-          <NTag v-if="!m.vram_ok" size="small" type="warning" :bordered="false">显存不足</NTag>
-        </div>
-        <div class="desc">{{ m.description }}</div>
-        <div class="tags">
-          <NTag size="small" :bordered="false">{{ speedLabel[m.speed as 'fast'] }}</NTag>
-          <NTag size="small" :bordered="false" v-for="c in m.content" :key="c">
-            {{ contentLabel[c as 'anime'] ?? c }}
-          </NTag>
-          <NTag size="small" :bordered="false">原生 x{{ m.scale.join(' / x') }}</NTag>
-          <NTag size="small" :bordered="false">≈{{ m.vram_gb }}GB 显存</NTag>
-          <NTag size="small" :bordered="false">{{ m.size_mb }}MB</NTag>
-        </div>
-        <div v-if="m.vram_note" class="warn">{{ m.vram_note }}</div>
-        <div class="m-foot">
-          <template v-if="m.bundled">
-            <span class="bundled-note">✓ 随软件分发</span>
-          </template>
-          <template v-else-if="store.downloadProgress[m.id] !== undefined">
-            <div class="dl">
-              <NProgress
-                type="line"
-                :percentage="Math.round(store.downloadProgress[m.id] * 100)"
-                :show-indicator="false"
-                :height="8"
-              />
-              <span class="dl-pct">{{ Math.round(store.downloadProgress[m.id] * 100) }}%</span>
-            </div>
-          </template>
-          <template v-else-if="m.installed">
-            <NButton size="small" quaternary type="error" @click="onDelete(m.id)">删除权重</NButton>
-          </template>
-          <template v-else>
-            <NButton size="small" type="primary" ghost @click="onDownload(m.id)">下载 ({{ m.size_mb }}MB)</NButton>
-          </template>
+    <section v-for="g in groups" :key="g.key" class="family">
+      <div class="fam-head">
+        <span class="fam-name">{{ g.name }}</span>
+        <span class="fam-count">{{ g.models.length }}</span>
+        <span v-if="g.note" class="fam-note">{{ g.note }}</span>
+      </div>
+      <div class="model-grid">
+        <div v-for="m in g.models" :key="m.id" class="card mcard">
+          <div class="m-head">
+            <span class="name">{{ m.name }}</span>
+            <NTag v-if="m.bundled" size="small" type="success" :bordered="false">内置</NTag>
+            <NTag v-else-if="m.installed" size="small" type="success" :bordered="false">已安装</NTag>
+            <NTag v-if="!m.vram_ok" size="small" type="warning" :bordered="false">显存不足</NTag>
+          </div>
+          <div class="desc">{{ m.description }}</div>
+          <div class="tags">
+            <NTag size="small" :bordered="false">{{ speedLabel[m.speed as 'fast'] }}</NTag>
+            <NTag size="small" :bordered="false" v-for="c in m.content" :key="c">
+              {{ contentLabel[c as 'anime'] ?? c }}
+            </NTag>
+            <NTag size="small" :bordered="false">原生 x{{ m.scale.join(' / x') }}</NTag>
+            <NTag size="small" :bordered="false">≈{{ m.vram_gb }}GB 显存</NTag>
+            <NTag size="small" :bordered="false">{{ m.size_mb }}MB</NTag>
+          </div>
+          <div v-if="m.vram_note" class="warn">{{ m.vram_note }}</div>
+          <div class="m-foot">
+            <template v-if="m.bundled">
+              <span class="bundled-note">✓ 随软件分发</span>
+            </template>
+            <template v-else-if="store.downloadProgress[m.id] !== undefined">
+              <div class="dl">
+                <NProgress
+                  type="line"
+                  :percentage="Math.round(store.downloadProgress[m.id] * 100)"
+                  :show-indicator="false"
+                  :height="8"
+                />
+                <span class="dl-pct">{{ Math.round(store.downloadProgress[m.id] * 100) }}%</span>
+              </div>
+            </template>
+            <template v-else-if="m.installed">
+              <NButton size="small" quaternary type="error" @click="onDelete(m.id)">删除权重</NButton>
+            </template>
+            <template v-else>
+              <NButton size="small" type="primary" ghost @click="onDownload(m.id)">下载 ({{ m.size_mb }}MB)</NButton>
+            </template>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
 
     <NModal
       v-model:show="showImport"
@@ -207,6 +249,20 @@ async function doImport() {
 .page-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
 h1 { font-size: 20px; font-weight: 700; }
 .sub { font-size: 12.5px; color: #9aa0a6; margin-top: 4px; }
+
+/* 家族分节：组头一行（名称+数量+定位），组内仍是响应式网格 */
+.family { display: flex; flex-direction: column; gap: 10px; }
+.fam-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 2px 2px 0;
+}
+.fam-name { font-size: 14.5px; font-weight: 700; }
+.fam-count {
+  font-size: 11.5px; color: #7c838c;
+  padding: 0 8px; border: 1px solid #2e3237; border-radius: 9px;
+  line-height: 17px;
+}
+.fam-note { font-size: 12px; color: #9aa0a6; }
 
 /* 响应式网格:宽窗多列、窄窗自动落单列 */
 .model-grid {

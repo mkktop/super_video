@@ -94,7 +94,12 @@ async function autoFillOutput() {
 }
 
 // ---- 模型 ----
-const srModels = computed(() => store.models.filter((m) => m.kind !== 'interp'))
+// 已下载（含内置）排最前（与图片超分/模型对比页同款）：模型多了以后，
+// 最常点的就是已装的那几个；稳定排序，组内保持注册表顺序
+const srModels = computed(() =>
+  store.models
+    .filter((m) => m.kind !== 'interp')
+    .sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled)))
 const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
 const scaleOptions = computed(() =>
   (selectedModel.value?.scale ?? []).map((s) => ({ label: `x${s}`, value: s })),
@@ -197,7 +202,7 @@ const audioHint = computed(() => {
 })
 
 const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
-const contentLabel = { anime: '动漫', general: '真人/通用' } as Record<string, string>
+const contentLabel = { anime: '动漫', general: '真人/通用', real: '真人/通用' } as Record<string, string>
 
 /** 选模型：新模型支持当前倍率则保留，否则回落到最小倍率 */
 function selectModel(id: string) {

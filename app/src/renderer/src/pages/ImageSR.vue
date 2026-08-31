@@ -46,7 +46,7 @@ const srModels = computed(() => {
   const all = store.models.filter((m) => m.kind !== 'interp')
   return all.sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled))
 })
-const contentLabel = { anime: '动漫', general: '真人/通用' } as Record<string, string>
+const contentLabel = { anime: '动漫', general: '真人/通用', real: '真人/通用' } as Record<string, string>
 const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
 const scaleOptions = computed(
   () => (selectedModel.value?.scale ?? []).map((s) => ({ label: `x${s}`, value: s })),
