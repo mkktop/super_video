@@ -1,0 +1,31 @@
+{
+  "id": "artcnn-r8f64",
+  "name": "ArtCNN R8F64（画质）",
+  "vendor": "Artoriuz",
+  "license": "MIT",
+  "engine": "onnx",
+  "family": "artcnn",
+  "scale": [2],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "balanced",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "y",
+    "range": "0-1",
+    "pad": 1,
+    "batch_hint": 1
+  },
+  "description": "ArtCNN 家族的画质档（92 万参数）：社区实测超越紧凑版 Real-CUGAN、接近全量档，速度却快得多；动漫 2x 画质与速度兼得的新选择",
+  "files": [
+    {
+      "name": "ArtCNN_R8F64.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/ArtCNN_R8F64.onnx",
+      "sha256": "e446f67ce1c36e281d4fccf3082956656d605c101450406fbec0ad372f44722c",
+      "size": 3714817,
+      "source": "Artoriuz/ArtCNN 仓库 ONNX/ 目录官方导出（v1.6.2）"
+    }
+  ]
+}

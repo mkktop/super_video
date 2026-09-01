@@ -1,0 +1,31 @@
+{
+  "id": "dis-2x-fast",
+  "name": "DIS 2x Fast（真人 · 极速）",
+  "vendor": "Kim2091",
+  "license": "Apache-2.0",
+  "engine": "onnx",
+  "family": "dis",
+  "scale": [2],
+  "content": ["general"],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 1,
+  "tile_hint": 0,
+  "fp16": false,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 1,
+    "batch_hint": 1
+  },
+  "description": "真人/通用内容的 2x 极速档（原生 fp16）：体积与算量都极小，长视频快速过一遍的首选；画质弱于 Balanced 档",
+  "files": [
+    {
+      "name": "2x-DIS_Fast_Pretrain_fp16.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x-DIS_Fast_Pretrain_fp16.onnx",
+      "sha256": "c3e42f92a602d260365fc6915ce4dc60d371e651e1b25fbcd177ea2f89944941",
+      "size": 399645,
+      "source": "Kim2091/DIS 官方 pretrained_models release（fp16 导出）"
+    }
+  ]
+}

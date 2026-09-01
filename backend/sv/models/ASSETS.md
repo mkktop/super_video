@@ -64,6 +64,17 @@ https://github.com/Sirosky/Upscale-Hub)，此处为原文件未修改再分发�
 
 （2x 档 RealESRGANv2-animevideo-xsx2 随应用安装包分发，不在此页。）
 
+### ArtCNN 系（2x，Artoriuz，MIT）
+单通道亮度 doubler：应用自动做 RGB↔YCbCr 变换（BT.601 全域）并双三次放大
+色度，用户无感。全卷积任意边长免对齐。上游 [Artoriuz/ArtCNN](
+https://github.com/Artoriuz/ArtCNN) 仓库 ONNX/ 目录官方导出（v1.6.2）。
+
+| 文件 | 定位 |
+|---|---|
+| ArtCNN_C4F16.onnx | 极速档（权重仅 50KB，老显卡可用） |
+| ArtCNN_C4F16_DN.onnx | 极速档 · 降噪（压制源/噪点源） |
+| ArtCNN_R8F64.onnx | 画质档（社区实测超紧凑版 CUGAN） |
+
 ## 真人 / 通用超分
 
 ### Real-ESRGAN x4plus（xinntao / TencentARC，BSD-3-Clause）
@@ -72,6 +83,16 @@ https://github.com/Sirosky/Upscale-Hub)，此处为原文件未修改再分发�
 |---|---|
 | RealESRGAN_x4plus_dyn.onnx | 动态尺寸 ONNX（本仓库自官方权重导出，任意分辨率直跑） |
 | RealESRGAN_x4plus.pth | 官方 PyTorch 权重（torch 引擎直跑，需独立 CUDA 环境） |
+
+### DIS 系（2x，Kim2091，Apache-2.0）
+超轻量放大+修复架构，原生 fp16 导出。补真人/通用内容的 2x 空档
+（720p→1440p、840p→4K 无需硬上 4x）。上游 [Kim2091/DIS](
+https://github.com/Kim2091/DIS) 官方 release。
+
+| 文件 | 定位 |
+|---|---|
+| 2x-DIS_Balanced_Pretrain_fp16.onnx | 均衡档 |
+| 2x-DIS_Fast_Pretrain_fp16.onnx | 极速档 |
 
 ## 补帧
 

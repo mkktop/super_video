@@ -1,0 +1,31 @@
+{
+  "id": "artcnn-c4f16-dn",
+  "name": "ArtCNN C4F16 DN（极速 · 降噪）",
+  "vendor": "Artoriuz",
+  "license": "MIT",
+  "engine": "onnx",
+  "family": "artcnn",
+  "scale": [2],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 1,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "y",
+    "range": "0-1",
+    "pad": 1,
+    "batch_hint": 1
+  },
+  "description": "极速档的降噪变体（DN=降噪+柔和输出）：老动画压制源、噪点明显的网络视频用它在超分的同时压噪",
+  "files": [
+    {
+      "name": "ArtCNN_C4F16_DN.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/ArtCNN_C4F16_DN.onnx",
+      "sha256": "c05055bec4149988cdaeadc9a67d4d7a1382f22f512302ba15510a5a7cca2b0e",
+      "size": 51562,
+      "source": "Artoriuz/ArtCNN 仓库 ONNX/ 目录官方导出（v1.6.2）"
+    }
+  ]
+}

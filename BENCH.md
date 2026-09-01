@@ -618,3 +618,40 @@ GC 析构"路径；balanced-sharp 等双 session 长期共存全部健康——�
 教训：stdout 管道 + 无 flush 时，原生崩溃会吞掉全部已完成输出——排查 DML
 类崩溃一律 python -u。test_cancel_running_kills_tree 全量跑时序抖动单跑
 绿，与本次改动领域隔离（runner/server vs 引擎/注册表），归属环境波动。
+
+## ArtCNN / DIS 落地：单通道 Y doubler 引擎语义 + 真人 2x 空档（2026-09-01）
+
+调研修正一个认知：ArtCNN 主力线（C4F16/C4F32/R8F64 + DN/DS 变体）全部是
+**单通道 Y 的 2x luma doubler**（ONNX 图实证 [1,1,H,W]→[1,1,2H,2W]），不是
+4x 也不是 RGB——"C4"是 Compact v4 之意。调研阶段的"填动漫 4x 空档"判断
+作废，落地价值重定位为：动漫 2x 的轻量高速新家族（MIT，商业化无顾虑，
+反超 VSET——它在 VSET 里是注释掉的）。
+
+**引擎新增 io.color="y"**（onnx_engine._infer_y）：RGB uint8 → YCbCr
+（BT.601 全域，与 PIL convert("YCbCr") 同口径，实测矩阵对 PIL 差 ≤0.004
+为 PIL 整数舍入）→ Y 平面 [1,1,H,W] float 0-1 过模型 → Cb/Cr 以 PIL
+mode "F" float 面板 BICUBIC 放大（免 uint8 量化损失）→ 合并回 RGB。
+u8 包装与批处理对 "y" 显式关闭（三通道图手术语义不适用；ArtCNN 导出
+batch 维固定 1）。输入域上游 Inferencer 实证 /255（中灰 0.5→0.5，喂 128
+全饱和 100%——判别式测试）；pad=1 免对齐（47x63 奇数直跑）。
+
+**实测矩阵（CPU + DML 双后端，全部通过）**：
+- 3 ArtCNN 权重 DML vs CPU maxdiff ≤1/255；DML 30 帧压力无崩溃；
+- fp16 惰性转换 3.7MB→1.86MB，fp16 vs fp32 ≤1，DML 健康（manifest
+  fp16: true 兑现）；
+- 端到端真任务（320x180→640x360 testsrc2 片，72 帧）：artcnn-r8f64
+  DML 102.7fps、dis-2x-balanced DML+u8 包装 215.8fps（链路验证口径，
+  非基准——未开双路/无硬编，勿引用为性能头条）。
+
+**DIS（Kim2091，Apache-2.0）**：三通道 0-1 原生 fp16 2x（ir8/opset17，
+动态 batch 动态尺寸，输出高度符号名 height_out 实跑严格 2x）。填真人/
+通用 x2 空档（此前真人线只有 x4plus 的 x4）。原生 fp16 → manifest
+fp16: false（同 AnimeJaNai 惯例不再二次转换）；u8 包装在 CPU/DML 双
+后端自动启用并通过内建 A/B 校验。DIS 官方 inference.py 语义实证：PIL
+RGB→CHW→[0,1]（_preprocess /255、_postprocess clamp(0,1)*255）。
+
+资产 5 个已传 models-v1（33→38，digest 逐一比对注册表 sha256）。
+市场页 FAMILIES 新增 ArtCNN（列在 Real-CUGAN 后）与 DIS（列在
+Real-ESRGAN 后）两节。测试 +16（test_artcnn_dis.py：manifest 语义 3 +
+Y 探针数学 3 + 真权重 CPU 5 + GPU-gated DML 5）；全量 324 passed +
+1 skipped；vue-tsc node/web 双绿 + pnpm build 绿。

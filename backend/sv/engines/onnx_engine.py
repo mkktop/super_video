@@ -1,7 +1,8 @@
 """ONNX 超分引擎（Real-ESRGAN / animevideov3 等模型族）。
 
 输入约定由 manifest 的 io 字段描述：
-  color: "bgr" | "rgb"（模型训练时的通道序）
+  color: "bgr" | "rgb"（模型训练时的通道序）| "y"（单通道亮度 doubler——
+    ArtCNN 系：RGB→Y(BT.601 全域)过模型，Cb/Cr 双三次放大后合并回 RGB）
   range: "0-255"（float32，不归一化——Real-ESRGAN 系约定）
 pad: 输入边长需对齐的最小倍数（pixelshuffle 需要，通常 = scale）；
   可按倍率分档 {"2":2,"3":4}（CUGAN 系 up3x 需 4 的倍数而非 3）
@@ -99,8 +100,9 @@ class OnnxSrEngine(BaseEngine):
         self._spec_allow_wrap = manifest_allow_wrap or device == "trt"
         self.u8_wrap_enabled = u8_wrap and self._spec_allow_wrap
         # 包装图只内嵌 color/range 前后处理，不含仿射——affine 模型跳过包装
-        #（cugan-pro 系本就 manifest 禁包装，此处兜底未来带仿射的新模型）
-        if self.affine:
+        #（cugan-pro 系本就 manifest 禁包装，此处兜底未来带仿射的新模型）；
+        # "y" 模型的包装图手术是三通道语义，同样不适用
+        if self.affine or self.color == "y":
             self.u8_wrap_enabled = False
         self.validate_hw = validate_hw
         self.session = None
@@ -315,6 +317,8 @@ class OnnxSrEngine(BaseEngine):
                 chosen = ["CPUExecutionProvider"]
 
     def _infer(self, frame: np.ndarray) -> np.ndarray:
+        if self.color == "y":
+            return self._infer_y(frame)
         h, w = frame.shape[:2]
         if self.fixed_hw is not None:
             fh, fw = self.fixed_hw
@@ -357,6 +361,49 @@ class OnnxSrEngine(BaseEngine):
             y = y[: h * self.scale, : w * self.scale]
         return np.ascontiguousarray(y)
 
+    # ---- 单通道亮度 doubler（ArtCNN 系）：Y 过模型、色度插值放大 ----
+
+    def _infer_y(self, frame: np.ndarray) -> np.ndarray:
+        """RGB uint8 → YCbCr（BT.601 全域，与 PIL convert("YCbCr") 同口径），
+        Y 平面 [1,1,H,W] float 0-1 过模型，Cb/Cr 双三次放大到 scale 倍后
+        合并回 RGB。上游 ArtCNN Inferencer 实证：/255 归一化、L 单通道。
+        """
+        from PIL import Image
+
+        h, w = frame.shape[:2]
+        ph = (self.pad - h % self.pad) % self.pad
+        pw = (self.pad - w % self.pad) % self.pad
+        x = frame
+        if ph or pw:
+            x = np.pad(x, ((0, ph), (0, pw), (0, 0)), mode="edge")
+        r = x[..., 0].astype(np.float32) / 255.0
+        g = x[..., 1].astype(np.float32) / 255.0
+        b = x[..., 2].astype(np.float32) / 255.0
+        y = 0.299 * r + 0.587 * g + 0.114 * b
+        cb = 0.5 - 0.168736 * r - 0.331264 * g + 0.5 * b
+        cr = 0.5 + 0.5 * r - 0.418688 * g - 0.081312 * b
+        xin = y[None, None]
+        if self._in_fp16:
+            xin = xin.astype(np.float16)
+
+        y2 = self.session.run(self._out_names, {self._in_name: xin})[0]
+        y2 = y2[0, 0].astype(np.float32)  # H*s, W*s
+        hs, ws = y2.shape
+        # mode "F" 单通道 float 直接送 PIL（免 uint8 量化损失），BICUBIC 与
+        # mpv/vs-mlrt 的 luma-doubler 色度处理惯例一致
+        cb2 = np.asarray(
+            Image.fromarray(cb).resize((ws, hs), Image.BICUBIC), dtype=np.float32)
+        cr2 = np.asarray(
+            Image.fromarray(cr).resize((ws, hs), Image.BICUBIC), dtype=np.float32)
+        r2 = y2 + 1.402 * (cr2 - 0.5)
+        g2 = y2 - 0.344136 * (cb2 - 0.5) - 0.714136 * (cr2 - 0.5)
+        b2 = y2 + 1.772 * (cb2 - 0.5)
+        out = np.stack([r2, g2, b2], axis=-1) * 255.0
+        out = np.clip(out, 0, 255).astype(np.uint8)
+        if ph or pw:
+            out = out[: h * self.scale, : w * self.scale]
+        return np.ascontiguousarray(out)
+
     def process_batch(self, frames: np.ndarray) -> np.ndarray:
         """[N,H,W,3] -> [N,H*s,W*s,3]，动态尺寸模型单次 run 批量推理。"""
         if (
@@ -364,6 +411,7 @@ class OnnxSrEngine(BaseEngine):
             or self.session is None
             or self.fixed_hw is not None
             or self.tile
+            or self.color == "y"  # 单通道 doubler 只有逐帧路径（无批图导出）
         ):
             return super().process_batch(frames)
         n, h, w, _ = frames.shape

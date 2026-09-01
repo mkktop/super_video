@@ -1,0 +1,31 @@
+{
+  "id": "dis-2x-balanced",
+  "name": "DIS 2x Balanced（真人 · 均衡）",
+  "vendor": "Kim2091",
+  "license": "Apache-2.0",
+  "engine": "onnx",
+  "family": "dis",
+  "scale": [2],
+  "content": ["general"],
+  "temporal": false,
+  "speed": "balanced",
+  "vram_gb": 1,
+  "tile_hint": 0,
+  "fp16": false,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 1,
+    "batch_hint": 1
+  },
+  "description": "真人/通用内容的 2x 均衡档（原生 fp16）：补上 x4plus 之外的 2x 空档，720p→1440p、840p→4K 这类目标不用再硬上 4x；带轻度修复倾向，压制源观感干净",
+  "files": [
+    {
+      "name": "2x-DIS_Balanced_Pretrain_fp16.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x-DIS_Balanced_Pretrain_fp16.onnx",
+      "sha256": "f10f128c0eedfe383227f665a06df9cb273660e932daa8b19f6f104ae7bee627",
+      "size": 550442,
+      "source": "Kim2091/DIS 官方 pretrained_models release（fp16 导出）"
+    }
+  ]
+}

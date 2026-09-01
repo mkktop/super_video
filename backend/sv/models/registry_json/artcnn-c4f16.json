@@ -1,0 +1,31 @@
+{
+  "id": "artcnn-c4f16",
+  "name": "ArtCNN C4F16（极速）",
+  "vendor": "Artoriuz",
+  "license": "MIT",
+  "engine": "onnx",
+  "family": "artcnn",
+  "scale": [2],
+  "content": ["anime"],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 1,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "y",
+    "range": "0-1",
+    "pad": 1,
+    "batch_hint": 1
+  },
+  "description": "超轻量动漫 2x（权重仅 50KB）：老显卡/核显也能跑的极速档，全卷积任意边长免对齐；画质弱于 R8F64，速度优先时选它",
+  "files": [
+    {
+      "name": "ArtCNN_C4F16.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/ArtCNN_C4F16.onnx",
+      "sha256": "7a6436299b8c757dbb7084ac39a25c310db1941133e73d1ee3e74c8b3bddc1ca",
+      "size": 51559,
+      "source": "Artoriuz/ArtCNN 仓库 ONNX/ 目录官方导出（v1.6.2）"
+    }
+  ]
+}

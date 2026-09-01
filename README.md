@@ -26,7 +26,7 @@ super_video 是一款面向 Windows 的 AI 视频超分辨率桌面软件：通�
 - **严格串行任务队列**：一次处理一个视频，排队任务可拖拽调整顺序，资源占用可预期
 - **断点续跑**：取消、崩溃或重启后点击"继续"，从上次位置接着跑（分段 checkpoint），已完成的帧不会重写
 - **自定义输出分辨率**：原生超分后 lanczos 精确缩放到目标宽高（只缩不放、自动取偶），向导自动选择覆盖目标的最小原生倍率
-- **多模型支持**：动漫（AnimeVideo / AnimeJaNai / Real-CUGAN 及 Pro 版 / Ani4K v2）、真人（Real-ESRGAN x4plus）、补帧（RIFE），并支持导入自定义 ONNX 模型（含 fp16）
+- **多模型支持**：动漫（AnimeVideo / AnimeJaNai / Real-CUGAN 及 Pro 版 / Ani4K v2 / ArtCNN）、真人（Real-ESRGAN x4plus / DIS）、补帧（RIFE），并支持导入自定义 ONNX 模型（含 fp16）
 - **多后端推理**：DirectML 默认（全显卡兼容）、CUDA、TensorRT（引擎缓存 + 自动回退）、PyTorch；FP16 默认精度（提速 1.36~2.05x）
 - **双路并行**：两个进程分段同时处理，配合硬件编码器吞吐最高提升约 84%
 - **视频剪切**：智能（起点帧精确）/ 快速无损（关键帧吸附，秒级）/ 精确转码三种方式，剪完一键进入超分向导，也可「拿这段去对比模型」
@@ -109,7 +109,9 @@ super_video 是一款面向 Windows 的 AI 视频超分辨率桌面软件：通�
 | Real-CUGAN | x2 / x3 / x4 | 动漫 | 降噪档位：不降噪 / 1 / 2 / 3+保守；仅 TensorRT / CPU 后端 |
 | Real-CUGAN Pro | x2 / x3 | 动漫 | 画质优先（比标准版更慢）；仅 TensorRT / CPU 后端 |
 | Ani4K v2 | x2 | 动漫 | 2025 新模型，画质 / 极速两档；按原作者 CC BY-NC 4.0 条款非商业提供 |
+| ArtCNN | x2 | 动漫 | MIT 新模型：极速 / 极速降噪 / 画质三档，画质档速度远快于同级 CUGAN |
 | Real-ESRGAN x4plus | x4 | 真人 / 通用 | ONNX 与 PyTorch 双版本（PyTorch 版支持分块断点续跑） |
+| DIS | x2 | 真人 / 通用 | Apache-2.0 超轻量修复系：均衡 / 极速两档，补 2x 空档（720p→1440p） |
 | RIFE v4.26 | 补帧 x2 | 通用 | 帧率倍增，提升画面流畅度 |
 | 自定义 ONNX | 任意 | 通用 | 导入自有模型，支持 fp16 本体 |
 
