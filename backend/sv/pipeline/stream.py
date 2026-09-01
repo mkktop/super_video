@@ -17,7 +17,7 @@ from .probe import MediaInfo
 _MP4_AUDIO_COPY_OK = {"aac", "mp3", "ac3", "eac3", "alac"}
 
 # 文本字幕（可转 mov_text 进 mp4）；图形字幕（PGS/DVB 等）只能进 mkv 原样保留
-_TEXT_SUBS = {
+TEXT_SUBS = {
     "subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "sami",
     "microdvd", "subviewer", "vplayer", "realtext", "stl", "pjs", "jacosub",
     "mpl2", "subviewer1",
@@ -219,7 +219,7 @@ def subtitle_args(enc: EncodeOpts, sub_codecs: list[str]) -> list[str]:
     if enc.subtitle_mode != "auto" or not sub_codecs:
         return []
     if enc.mp4_family:
-        if all(c in _TEXT_SUBS for c in sub_codecs):
+        if all(c in TEXT_SUBS for c in sub_codecs):
             return ["-map", "1:s?", "-c:s", "mov_text"]
         return []
     return ["-map", "1:s?", "-c:s", "copy", "-map", "1:t?"]

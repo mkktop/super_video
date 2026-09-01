@@ -41,7 +41,9 @@ const decoder = ref<'sw' | 'nvdec' | 'd3d11va'>('sw')
 const crf = ref(18)
 const container = ref<'mp4' | 'mkv' | 'mov'>('mp4')
 const audioMode = ref('auto')
-const keepSubtitles = ref(false)
+// 字幕默认保留（与音轨 auto 对齐）：批量模式不逐文件探测，开关根本不显示，
+// 默认关会让 MKV→MKV 任务静默丢字幕（实测 BDRemux 双 PGS 轨全丢）
+const keepSubtitles = ref(true)
 const interp = ref<'off' | 'rife2x'>('off')
 const denoise = ref<number | null>(null)
 const deinterlace = ref(false) // 反交错（老 DVD/1080i 源；帧数不变，checkpoint 语义安全）
@@ -466,7 +468,10 @@ function applyPreset(pid: string) {
   crf.value = p.crf
   container.value = p.container ?? 'mp4'
   audioMode.value = p.audio_mode ?? 'auto'
-  keepSubtitles.value = false
+  // 旧预设不含字幕偏好：保持用户当前选择，不静默重置为关
+  if (p.subtitle_mode === 'auto' || p.subtitle_mode === 'none') {
+    keepSubtitles.value = p.subtitle_mode === 'auto'
+  }
   interp.value = p.interp === 'rife2x' ? 'rife2x' : 'off'
   denoise.value = typeof p.denoise === 'number' ? p.denoise : null
   deinterlace.value = p.deinterlace === true
@@ -502,6 +507,7 @@ async function saveAsPreset() {
     crf: crf.value,
     container: container.value,
     audio_mode: audioMode.value,
+    subtitle_mode: keepSubtitles.value ? 'auto' : 'none',
     interp: interp.value,
     denoise: denoise.value,
     deinterlace: deinterlace.value,

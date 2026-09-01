@@ -185,6 +185,38 @@ def _create_ok(clip, params):
     return t
 
 
+def test_subtitle_mode_defaults_to_keep(clip):
+    """字幕默认保留（与音轨 auto 对齐）：不传 subtitle_mode 的任务按 auto 落库。
+
+    根因是真实工单：MKV→MKV 任务字幕全丢，DB 里 subtitle_mode=none——开关
+    默认关 + 批量模式不探测（开关不显示）+ 预设回填强制重置为关，三路合围
+    让"保留字幕"永远不生效。默认值翻转后 API/前端两条路都不再依赖用户记得开开关。
+    """
+    t = _create_ok(clip, {})
+    assert t["params"]["subtitle_mode"] == "auto"
+    t = _create_ok(clip, {"container": "mp4"})
+    assert t["params"]["subtitle_mode"] == "auto"
+    # 显式关闭仍被尊重（不想保留的用户不受影响）
+    t = _create_ok(clip, {"subtitle_mode": "none"})
+    assert t["params"]["subtitle_mode"] == "none"
+
+
+def test_preset_carries_subtitle_mode(clip, monkeypatch, tmp_path):
+    """用户预设携带字幕偏好：非法值 400，默认 auto（旧预设无此字段按 auto 补齐）。"""
+    from sv.server import user_presets
+    from sv.server.app import PresetCreate, create_preset
+
+    monkeypatch.setattr(user_presets, "PRESETS_PATH", tmp_path / "up.json")
+    with pytest.raises(HTTPException) as e:
+        create_preset(PresetCreate(name="t", model_id="realesr-animevideov3",
+                                   target_scale=2, subtitle_mode="always"))
+    assert e.value.status_code == 400
+    ok = create_preset(PresetCreate(name="t", model_id="realesr-animevideov3",
+                                    target_scale=2))
+    assert ok["subtitle_mode"] == "auto"
+    assert user_presets.load()[0]["subtitle_mode"] == "auto"
+
+
 def test_validation_new_params(clip):
     for bad in ({"container": "avi"}, {"audio_mode": "mp3"}, {"subtitle_mode": "always"},
                 {"audio_mode": "flac"},  # FLAC 只允许 mkv

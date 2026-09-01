@@ -70,6 +70,7 @@ export interface Preset {
   interp?: 'off' | 'rife2x'
   container?: 'mp4' | 'mkv' | 'mov'
   audio_mode?: string
+  subtitle_mode?: string
   denoise?: number | null
   deinterlace?: boolean
   deband?: boolean
@@ -279,6 +280,7 @@ export const api = {
     crf: number
     container?: string
     audio_mode?: string
+    subtitle_mode?: string
     interp?: string
     denoise?: number | null
     deinterlace?: boolean

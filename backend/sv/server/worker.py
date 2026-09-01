@@ -37,7 +37,14 @@ from sv.pipeline.probe import (
     validate_m0,
 )
 from sv.pipeline.segmented import SegmentedPipeline, read_eof_marker
-from sv.pipeline.stream import EncodeOpts, PipelineError, RunStats, TaskCanceled, prefilter_chain
+from sv.pipeline.stream import (
+    TEXT_SUBS,
+    EncodeOpts,
+    PipelineError,
+    RunStats,
+    TaskCanceled,
+    prefilter_chain,
+)
 from sv.server import db, settings
 
 
@@ -48,7 +55,7 @@ def _encode_opts(params: dict, out_kind: str) -> EncodeOpts:
         crf=int(params.get("crf", 18)),
         preset=params.get("preset", "medium"),
         audio_mode=params.get("audio_mode", "auto"),
-        subtitle_mode=params.get("subtitle_mode", "none"),
+        subtitle_mode=params.get("subtitle_mode", "auto"),
         container=params.get("container", "mp4"),
         out_kind=out_kind,
     )
@@ -530,6 +537,15 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     if out_kind not in ("video", "png", "jpg"):
         emit({"type": "failed", "error": f"未知输出类型 {out_kind}"})
         return 1
+    # 字幕保留但容器装不下图形字幕（PGS/DVB 只能进 mkv）：明确告知丢弃，
+    # 不静默——用户看到"字幕开关开着"却找不到轨，会以为功能坏了
+    if (out_kind == "video" and params.get("subtitle_mode", "auto") == "auto"
+            and info.subtitles
+            and params.get("container", "mp4") in ("mp4", "mov")
+            and not all(c in TEXT_SUBS for c in info.subtitles)):
+        emit({"type": "log", "line":
+              "源含图形字幕（PGS/DVB 等），MP4/MOV 容器无法封装，本次不保留字幕；"
+              "如需保留请将封装容器改为 MKV"})
     denoise = params.get("denoise")  # real-cugan 降噪档：0/1/2/3 → 对应变体权重
     variant = f"denoise{int(denoise)}" if denoise is not None else None
 

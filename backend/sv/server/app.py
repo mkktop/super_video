@@ -236,6 +236,7 @@ class PresetCreate(BaseModel):
     crf: int = 18
     container: str = "mp4"
     audio_mode: str = "auto"
+    subtitle_mode: str = "auto"
     interp: str = "off"
     denoise: int | None = None
     deinterlace: bool = False
@@ -259,6 +260,8 @@ def create_preset(body: PresetCreate) -> dict:
         raise HTTPException(400, "container 仅支持 mp4 / mkv / mov")
     if body.audio_mode not in _AUDIO_MODES:
         raise HTTPException(400, f"audio_mode 仅支持 {' / '.join(_AUDIO_MODES)}")
+    if body.subtitle_mode not in ("none", "auto"):
+        raise HTTPException(400, "subtitle_mode 仅支持 none / auto")
     if body.interp not in ("off", "rife2x"):
         raise HTTPException(400, "interp 仅支持 off / rife2x")
     if body.denoise is not None and body.denoise not in (0, 1, 2, 3):
@@ -818,7 +821,9 @@ def create_task(body: TaskCreate) -> dict:
     if audio_mode == "flac" and container != "mkv":
         raise HTTPException(400, "FLAC 音轨仅支持 mkv 容器（mp4 请选 aac）")
     params["audio_mode"] = audio_mode
-    subtitle_mode = params.get("subtitle_mode", "none")
+    # 默认 auto（保留）：与音轨 auto 对齐——mkv 原样 copy 无损、mp4 文本转
+    # mov_text；图形字幕进不了 mp4 由 worker 落日志说明，不再静默丢轨
+    subtitle_mode = params.get("subtitle_mode", "auto")
     if subtitle_mode not in ("none", "auto"):
         raise HTTPException(400, "subtitle_mode 仅支持 none / auto")
     params["subtitle_mode"] = subtitle_mode
