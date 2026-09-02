@@ -12,6 +12,7 @@ DEFAULTS = {
     "download_proxy": "",  # 模型下载代理："" = 跟随系统代理 | direct = 直连 | http://host:port = 自定义
     "perf_sampling": True,  # 性能监控后台采样（CPU/GPU/内存，2s 一拍）
     "auto_update_check": True,  # 启动时自动检查 GitHub Releases 更新
+    "update_channel": "stable",  # 更新通道：stable 只看正式版 Release | preview 额外可收到 -preview.N 预览版（主进程读，经 IPC 同步）
     "parallel_streams": False,  # 双路并行：两进程分段同时推理（实测 +17~21%，显存翻倍）
     "output_dir": "",  # 默认输出目录：空 = 与源视频同目录；超分任务/剪切未显式指定输出时写到这里（不存在则自动建）
     "notify_task_done": True,  # 任务完成/失败时系统通知+闪任务栏（renderer 读；窗口聚焦时不打扰）
@@ -68,6 +69,8 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 perf_sampling 值: {v}")
             if k == "auto_update_check" and not isinstance(v, bool):
                 raise ValueError(f"非法 auto_update_check 值: {v}")
+            if k == "update_channel" and v not in ("stable", "preview"):
+                raise ValueError(f"非法 update_channel 值: {v}（stable/preview）")
             if k == "parallel_streams" and not isinstance(v, bool):
                 raise ValueError(f"非法 parallel_streams 值: {v}")
             if k == "notify_task_done" and not isinstance(v, bool):

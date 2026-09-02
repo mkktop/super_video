@@ -356,6 +356,8 @@ export async function initStore() {
     }
     // 「关闭到托盘」行为由主进程执行：读到设置后同步过去（托盘随之建立）
     window.sv.win.setCloseToTray(store.settings.close_to_tray === true)
+    // 更新通道同样由主进程消费：须在下方启动自动检查之前同步，否则首查用错通道
+    window.sv.setUpdateChannel(store.settings.update_channel === 'preview' ? 'preview' : 'stable')
     await Promise.all([refreshTasks(), refreshStats(), refreshPerf(), refreshTrt()])
     // renderer 中途重启：把已 running 的任务补进通知追踪集合
     for (const t of store.tasks) if (t.status === 'running') runningIds.add(t.id)

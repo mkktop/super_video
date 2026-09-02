@@ -15,6 +15,8 @@ declare global {
       downloadUpdate: () => Promise<{ ok: boolean; error?: string }>
       installUpdate: () => Promise<void>
       updateState: () => Promise<{ ready: string; downloading: boolean }>
+      /** 更新通道同步给主进程（下次检查更新生效） */
+      setUpdateChannel: (channel: 'stable' | 'preview') => void
       onUpdateProgress: (cb: (percent: number) => void) => () => void
       onUpdateReady: (cb: (version: string) => void) => () => void
       pickVideo: () => Promise<string[]>

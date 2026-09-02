@@ -453,6 +453,9 @@ let updaterBusy = false
 let downloadBusy = false
 // 已下载待安装的版本：事件只广播一次，renderer 重载后靠 app:update-state 查询恢复
 let readyVersion = ''
+// 更新通道：renderer 读取设置后经 IPC 同步（照 close_to_tray 模式）。默认稳定——
+// 存量用户与未同步前（启动自动检查竞态）都只看正式版 Release，宁保守不尝鲜
+let updateChannel: 'stable' | 'preview' = 'stable'
 
 /** electron-updater 懒加载。打包后动态 import 的 CJS 互操作可能拿到
  * undefined（v0.1.1 实测手动检查报 TypeError），require 直取最稳。 */
@@ -482,12 +485,41 @@ function sliceNotes(notes: string, version: string): string {
   return section.slice(`v${version}`.length).trim()
 }
 
-/** 语义化版本比较：a > b（远端更旧时不得提示"可更新"，否则成了降级安装） */
+/** 语义化版本比较：a > b（远端更旧时不得提示"可更新"，否则成了降级安装）。
+ * 支持预发布段（0.4.0-preview.1）：预发布 < 同号正式版（0.3.9 < 0.4.0-preview.1 < 0.4.0），
+ * 预发布之间按段比较（纯数字段数值比，否则字典序，数字段 < 字母段——semver 规则）。 */
+function parseSemver(v: string): { base: number[]; pre: string[] } {
+  const s = v.replace(/^v/, '')
+  const dash = s.indexOf('-')
+  return {
+    base: (dash === -1 ? s : s.slice(0, dash)).split('.').map((x) => parseInt(x, 10) || 0),
+    pre: dash === -1 || dash === s.length - 1 ? [] : s.slice(dash + 1).split('.'),
+  }
+}
+
+function cmpPreIds(a: string, b: string): number {
+  const na = /^\d+$/.test(a) ? parseInt(a, 10) : null
+  const nb = /^\d+$/.test(b) ? parseInt(b, 10) : null
+  if (na !== null && nb !== null) return na - nb
+  if (na !== null) return -1
+  if (nb !== null) return 1
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
 function newerVersion(a: string, b: string): boolean {
-  const pa = a.replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0)
-  const pb = b.replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0)
+  const pa = parseSemver(a)
+  const pb = parseSemver(b)
   for (let i = 0; i < 3; i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    const d = (pa.base[i] ?? 0) - (pb.base[i] ?? 0)
+    if (d !== 0) return d > 0
+  }
+  const n = Math.max(pa.pre.length, pb.pre.length)
+  for (let i = 0; i < n; i++) {
+    const x = pa.pre[i]
+    const y = pb.pre[i]
+    if (x === undefined) return pa.pre.length === 0 // a 是正式版则更大；pre 段更少则更小
+    if (y === undefined) return pb.pre.length > 0
+    const d = cmpPreIds(x, y)
     if (d !== 0) return d > 0
   }
   return false
@@ -523,7 +555,7 @@ function cleanNotes(raw: unknown, version: string): string {
     const lines = htmlToText(notes).split('\n')
     while (
       lines.length &&
-      (!lines[0] || lines[0] === '更新说明' || /^v?\d+\.\d+\.\d+$/.test(lines[0]))
+      (!lines[0] || lines[0] === '更新说明' || /^v?\d+\.\d+\.\d+(-[\w.]+)?$/.test(lines[0]))
     ) {
       lines.shift()
     }
@@ -571,7 +603,12 @@ async function checkUpdateManually(): Promise<{
   if (updaterBusy) return { status: 'busy', current }
   updaterBusy = true
   try {
-    const r = await getAutoUpdater().checkForUpdates()
+    const autoUpdater = getAutoUpdater()
+    // 稳定通道必须显式 false：electron-updater 的默认值是"装机版本带预发布段即
+    // true"，预览版装机切回稳定通道时若不覆盖仍会收到预览推送。channel 保持不设，
+    // 由其按发现的 tag 版本自动推导 channel 文件（正式 latest.yml / 预发布 preview.yml）
+    autoUpdater.allowPrerelease = updateChannel === 'preview'
+    const r = await autoUpdater.checkForUpdates()
     const newVersion = r?.updateInfo?.version
     if (newVersion && newerVersion(newVersion, current)) {
       return {
@@ -656,6 +693,11 @@ ipcMain.handle('app:download-update', () => downloadUpdate())
 ipcMain.handle('app:install-update', () => installUpdate())
 
 ipcMain.handle('app:update-state', () => ({ ready: readyVersion, downloading: downloadBusy }))
+
+// 更新通道同步：Settings 切换与 store 启动加载都会发；下次检查更新即生效
+ipcMain.on('app:set-update-channel', (_e, v: unknown) => {
+  updateChannel = v === 'preview' ? 'preview' : 'stable'
+})
 
 // ---- 自绘标题栏的窗口控制 ----
 ipcMain.on('win:minimize', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())

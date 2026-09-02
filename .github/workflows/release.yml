@@ -80,14 +80,20 @@ jobs:
         working-directory: app
         run: npx electron-builder --win nsis --publish never
 
+      # 预览版（tag 含 -preview.N）：Release 标记 prerelease——稳定通道客户端走
+      # GitHub releases/latest 端点（天然排除 prerelease），靠这个标记才看不到预览版。
+      # channel 文件名说明：electron-builder 对 GitHub publish 不按版本号切换
+      # （预览版也产 latest.yml）；预览通道客户端先请求 preview.yml，404 后自动
+      # 回退 latest.yml（electron-updater 内建 fallback），通配 *.yml 两头兼容
       - name: 上传到 GitHub Release（正文取自仓库根 RELEASE_NOTES.md）
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-preview.') }}
           body_path: RELEASE_NOTES.md
           files: |
             dist-app/*.exe
-            dist-app/latest.yml
+            dist-app/*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -30,6 +30,7 @@ const proxyAddr = ref('')
 const savingProxy = ref(false)
 const perfSampling = ref(true)
 const autoCheck = ref(true)
+const updateChannel = ref<'stable' | 'preview'>('stable') // 更新通道：预览版可收到 -preview.N 预发布推送
 const trcBusy = ref(false)
 const parallelStreams = ref(false)
 const outputDir = ref('') // 全局输出目录（空 = 源视频同目录）
@@ -245,6 +246,7 @@ onMounted(async () => {
     download_proxy?: string
     perf_sampling?: boolean
     auto_update_check?: boolean
+    update_channel?: 'stable' | 'preview'
     output_dir?: string
     parallel_streams?: boolean
     notify_task_done?: boolean
@@ -263,6 +265,7 @@ onMounted(async () => {
   parallelStreams.value = s.parallel_streams === true
   perfSampling.value = s.perf_sampling !== false
   autoCheck.value = s.auto_update_check !== false
+  updateChannel.value = s.update_channel === 'preview' ? 'preview' : 'stable'
   outputDir.value = String(s.output_dir ?? '').trim()
   notifyTask.value = s.notify_task_done !== false
   closeToTray.value = s.close_to_tray === true
@@ -318,6 +321,19 @@ async function saveAutoCheck(v: boolean) {
     message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
     autoCheck.value = !v
   }
+}
+
+async function saveUpdateChannel(v: 'stable' | 'preview') {
+  const r = await api.saveSettings({ update_channel: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    updateChannel.value = v === 'preview' ? 'stable' : 'preview'
+    return
+  }
+  store.settings = { ...store.settings, update_channel: v }
+  // 通道由主进程在检查时消费：先同步过去，再立即重查一次让用户看到新通道结果
+  window.sv.setUpdateChannel(v)
+  void checkUpdate()
 }
 
 async function saveNotifyTask(v: boolean) {
@@ -787,6 +803,16 @@ async function uninstallTrc() {
             </div>
             <NProgress v-if="downloading" :percentage="downloadPercent" :height="6" style="margin-top: 10px" />
             <p v-if="updateMsg" class="hint" style="margin-top: 8px">{{ updateMsg }}</p>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                更新通道
+                <small>预览版更早获得新功能，成熟度可能不如稳定版；切换后立即按新通道检查</small>
+              </span>
+              <NRadioGroup v-model:value="updateChannel" size="small" @update:value="saveUpdateChannel">
+                <NRadioButton value="stable">稳定版</NRadioButton>
+                <NRadioButton value="preview">预览版</NRadioButton>
+              </NRadioGroup>
+            </div>
             <div class="row switch-row bordered-top">
               <span class="row-text">启动时自动检查更新<small>有新版本时在顶栏版本号旁提示</small></span>
               <NSwitch v-model:value="autoCheck" size="small" @update:value="saveAutoCheck" />
