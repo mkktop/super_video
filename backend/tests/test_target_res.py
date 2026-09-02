@@ -19,7 +19,12 @@ from sv.pipeline.segmented import SegmentedPipeline
 from sv.pipeline.stream import EncodeOpts, StreamPipeline
 from sv.utils.process import WINDOWS_CREATE_FLAGS
 
-BUNDLED_X4 = Path(__file__).parent.parent / "sv" / "models" / "bundled" / "RealESR-AnimeVideo-v3_x4.onnx"
+# 内置权重（AnimeJaNai V3.1，原生 fp16、RGB、x2）
+BUNDLED_V31 = (
+    Path(__file__).parent.parent / "sv" / "models" / "bundled"
+    / "2x_AnimeJaNai_HD_V3.1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx"
+)
+IO_V31 = {"color": "rgb", "range": "0-1", "batch_hint": 1}
 
 
 class Nearest2x:
@@ -89,32 +94,32 @@ def test_engine_dml_init_failure_falls_back_to_cpu(monkeypatch):
         return real_init(path, so, providers=["CPUExecutionProvider"], **kw)
 
     monkeypatch.setattr(ort, "InferenceSession", fake_init)
-    eng = OnnxSrEngine(BUNDLED_X4, scale=4)
+    eng = OnnxSrEngine(BUNDLED_V31, scale=2, io=IO_V31)
     eng.load()
     assert eng.provider_used == ["CPUExecutionProvider"]
     out = eng.process(np.zeros((32, 32, 3), dtype=np.uint8))
-    assert out.shape == (128, 128, 3)
+    assert out.shape == (64, 64, 3)
 
 
 def test_engine_device_cpu():
     """device='cpu' 显式走 CPU EP（无独显机器的实际执行路径）。"""
-    eng = OnnxSrEngine(BUNDLED_X4, scale=4, device="cpu")
+    eng = OnnxSrEngine(BUNDLED_V31, scale=2, io=IO_V31, device="cpu")
     eng.load()
     assert eng.provider_used == ["CPUExecutionProvider"]
     out = eng.process(np.zeros((32, 32, 3), dtype=np.uint8))
-    assert out.shape == (128, 128, 3)
+    assert out.shape == (64, 64, 3)
 
 
 def test_cpu_e2e_pipeline():
     """CPU EP 全管线端到端：慢但能出片，音轨保留（无独显机器可用性）。"""
     small = TEMP_DIR / "targetres_cpu_in.mp4"
     make_video(small, w=160, h=90, duration=1)
-    eng = OnnxSrEngine(BUNDLED_X4, scale=4, device="cpu")
+    eng = OnnxSrEngine(BUNDLED_V31, scale=2, io=IO_V31, device="cpu")
     eng.load()
     info = probe(small)
     out = TEMP_DIR / "targetres_cpu_e2e.mp4"
     stats = asyncio.run(StreamPipeline(info, out, eng, EncodeOpts()).run())
     o = probe(out)
     assert stats.frames == info.total_frames
-    assert (o.width, o.height) == (info.width * 4, info.height * 4)
+    assert (o.width, o.height) == (info.width * 2, info.height * 2)
     assert o.has_audio

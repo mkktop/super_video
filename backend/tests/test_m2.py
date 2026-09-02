@@ -114,7 +114,7 @@ def test_download_opener_modes():
 
 def test_models_adaptability(client):
     models = {m["id"]: m for m in client.get("/api/models").json()}
-    m = models["realesr-animevideov3"]
+    m = models["animejanai-v31-hd-balanced"]  # 内置权重（V3.1 四件随包）
     assert m["bundled"] is True and m["installed"] is True
     assert isinstance(m["vram_ok"], bool) and "size_mb" in m
 

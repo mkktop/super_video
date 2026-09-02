@@ -8,6 +8,7 @@
 import asyncio
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,7 +22,11 @@ from sv.pipeline.segmented import SegmentedPipeline
 from sv.pipeline.stream import EncodeOpts, encoder_cmd
 from sv.utils.process import WINDOWS_CREATE_FLAGS
 
-BUNDLED_X4 = Path(__file__).parent.parent / "sv" / "models" / "bundled" / "RealESR-AnimeVideo-v3_x4.onnx"
+# 内置权重（AnimeJaNai V3.1，原生 fp16、RGB、x2）
+BUNDLED_V31 = (
+    Path(__file__).parent.parent / "sv" / "models" / "bundled"
+    / "2x_AnimeJaNai_HD_V3.1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx"
+)
 
 
 def make_video(path: Path, w=160, h=90, duration=1, fps=24) -> None:
@@ -43,7 +48,11 @@ def sample():
 
 
 def _engine():
-    eng = OnnxSrEngine(BUNDLED_X4, scale=4, device="cpu")
+    eng = OnnxSrEngine(
+        BUNDLED_V31, scale=2,
+        io={"color": "rgb", "range": "0-1", "batch_hint": 1},
+        device="cpu",
+    )
     eng.load()
     return eng
 
@@ -80,6 +89,10 @@ def test_segmented_png_e2e(sample):
     eng = _engine()
     info = probe(sample)
     out = TEMP_DIR / "imgout_frames"
+    # cleanup=False 的产物给 resume 测试复用，跨轮残留的旧 checkpoint 会让
+    # 本轮直接跳过推理（曾因换内置模型改变输出尺寸而误读旧帧图）——先清场
+    shutil.rmtree(out, ignore_errors=True)
+    shutil.rmtree(TEMP_DIR / "segmented" / "t_imgout", ignore_errors=True)
     stats = asyncio.run(SegmentedPipeline(
         info, out, eng, EncodeOpts(out_kind="png"),
         task_id="t_imgout", seg_frames=12, cleanup=False,
@@ -88,7 +101,7 @@ def test_segmented_png_e2e(sample):
     assert stats.frames == info.total_frames
     assert stats.out_bytes > 0
     with Image.open(out / "000001.png") as im:
-        assert im.size == (info.width * 4, info.height * 4)
+        assert im.size == (info.width * 2, info.height * 2)
         assert im.mode == "RGB"
 
 
@@ -137,4 +150,4 @@ def test_segmented_jpg(sample):
     assert _names(out, "jpg", info.total_frames)
     with Image.open(out / "000001.jpg") as im:
         assert im.format == "JPEG"
-        assert im.size == (info.width * 4, info.height * 4)
+        assert im.size == (info.width * 2, info.height * 2)

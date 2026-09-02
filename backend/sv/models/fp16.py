@@ -3,8 +3,8 @@
 约定：fp16 权重与 fp32 原件同名，加 `_fp16` 后缀放在同一目录。
   RealESR-AnimeVideo-v3_x4.onnx -> RealESR-AnimeVideo-v3_x4_fp16.onnx
 
-bundled 模型的 fp16 变体随仓库分发；下载模型在服务端下载完成后自动转换缓存。
-质量基准见 BENCH.md：两 bundled 模型 fp16 相对 fp32 PSNR 74~75dB（数值级一致），
+内置权重是 AnimeJaNai V3.1（原生 fp16，无需转换）；下载模型在服务端下载完成后
+自动转换缓存。质量基准见 BENCH.md：fp16 相对 fp32 PSNR 74~75dB（数值级一致），
 DML 提速 1.36~1.73x。
 """
 from __future__ import annotations

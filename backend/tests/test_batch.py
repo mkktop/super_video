@@ -1,4 +1,9 @@
-"""批处理正确性：批量推理与逐帧推理输出一致（允许浮点归约级别的微小差异）。"""
+"""批处理正确性：批量推理与逐帧推理输出一致（允许浮点归约级别的微小差异）。
+
+专测 RealESR AnimeVideo 系（导出时 batch 轴动态）。该系列已改为下载模型
+（内置换成 AnimeJaNai V3.1，batch 轴固定 1 测不了批量路径），权重从
+models_store 解析——本地下载过 realesr-animevideov3 才有条件跑，否则跳过。
+"""
 import sys
 from pathlib import Path
 
@@ -8,21 +13,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sv.engines.onnx_engine import OnnxSrEngine
-from sv.models.registry import BUNDLED_DIR
+from sv.models.registry import model_dir
 
-MODEL = BUNDLED_DIR / "RealESR-AnimeVideo-v3_x4.onnx"
+_NAMES = {2: "RealESRGANv2-animevideo-xsx2.onnx", 4: "RealESR-AnimeVideo-v3_x4.onnx"}
 IO = {"color": "bgr", "range": "0-1"}
 
 
-@pytest.mark.skipif(not MODEL.exists(), reason="bundled 模型缺失")
+def _weight(scale: int) -> Path:
+    return model_dir("realesr-animevideov3") / _NAMES[scale]
+
+
 @pytest.mark.parametrize("scale", [2, 4])
 def test_batch_matches_single(scale):
-    model = BUNDLED_DIR / (
-        "RealESRGANv2-animevideo-xsx2.onnx" if scale == 2
-        else "RealESR-AnimeVideo-v3_x4.onnx"
-    )
+    model = _weight(scale)
     if not model.exists():
-        pytest.skip("缺少该倍率模型")
+        pytest.skip(f"models_store 缺 {_NAMES[scale]}（下载 realesr-animevideov3 后可跑）")
     single = OnnxSrEngine(model, scale, io=IO, batch=1)
     single.load()
     batched = OnnxSrEngine(model, scale, io=IO, batch=4)

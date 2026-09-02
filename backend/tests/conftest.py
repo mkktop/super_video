@@ -56,10 +56,11 @@ def dml_available() -> bool:
 
             s = ort.InferenceSession(
                 str(Path(__file__).parent.parent / "sv" / "models" / "bundled"
-                    / "RealESR-AnimeVideo-v3_x4.onnx"),
+                    / "2x_AnimeJaNai_HD_V3.1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx"),
                 providers=["DmlExecutionProvider"],
             )
-            s.run(None, {"input": np.zeros((1, 3, 64, 64), np.float32)})
+            # V3.1 原生 fp16 模型（tensor(float16) 进出），探测帧须用 float16
+            s.run(None, {"input": np.zeros((1, 3, 64, 64), np.float16)})
             _DML_CACHE = "DmlExecutionProvider" in s.get_providers()
         except Exception:  # noqa: BLE001 — 任何失败都视为无 DML
             _DML_CACHE = False

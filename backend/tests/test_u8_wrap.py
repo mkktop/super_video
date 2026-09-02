@@ -2,6 +2,9 @@
 
 背景（BENCH.md 2026-08-25）：前后处理 GPU 化后推理 3.8x，输出与原路径逐位一致。
 引擎 load() 内部已有 A/B 校验（不过则自动回退），此处独立复验并覆盖矩阵。
+真实权重用内置 AnimeJaNai V3.1（原生 fp16-IO）；「fp32-IO + 内部 fp16 + 末端
+Cast」路径（转换模型变体）用玩具模型经 convert_file 离线构造，不再依赖
+已改为下载分发的前 RealESR 权重。
 """
 from pathlib import Path
 
@@ -13,9 +16,8 @@ from sv.engines.u8_wrap import wrap_u8
 from sv.paths import TEMP_DIR
 
 BUNDLED = Path(__file__).parent.parent / "sv" / "models" / "bundled"
-V3 = BUNDLED / "RealESR-AnimeVideo-v3_x4.onnx"
-V3_FP16 = BUNDLED / "RealESR-AnimeVideo-v3_x4_fp16.onnx"
-IO_V3 = {"color": "bgr", "range": "0-1"}  # animevideov3 约定（BENCH.md 实测校准）
+V31 = BUNDLED / "2x_AnimeJaNai_HD_V3.1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx"
+IO_V31 = {"color": "rgb", "range": "0-1", "batch_hint": 1}
 
 
 def _frames():
@@ -27,7 +29,7 @@ def _frames():
     ]
 
 
-def _assert_close(a: np.ndarray, b: np.ndarray, tol: int = 1) -> None:
+def _assert_close(a: np.ndarray, b: np.ndarray, tol: int = 2) -> None:
     assert a.shape == b.shape and a.dtype == b.dtype == np.uint8
     diff = int(np.abs(a.astype(np.int16) - b.astype(np.int16)).max())
     assert diff <= tol, f"输出不一致 maxdiff={diff}"
@@ -64,8 +66,8 @@ def test_wrap_file_generates(tmp_path):
     import onnx
     import onnxruntime as ort
 
-    dst = tmp_path / "v3_u8.onnx"
-    wrap_u8(V3, dst, color="bgr", range_01=True)
+    dst = tmp_path / "v31_u8.onnx"
+    wrap_u8(V31, dst, color="rgb", range_01=True)
     assert dst.exists()
     onnx.checker.check_model(onnx.load(str(dst)))
     sess = ort.InferenceSession(str(dst), providers=["CPUExecutionProvider"])
@@ -73,22 +75,30 @@ def test_wrap_file_generates(tmp_path):
     assert sess.get_outputs()[0].type == "tensor(uint8)"
 
 
-def test_engine_ab_fp32():
-    """真实模型（bgr/0-1）：包装开/关输出一致；load 内建校验保证 u8_wrapped=True。"""
-    plain = OnnxSrEngine(V3, 4, io=IO_V3, u8_wrap=False)
+def test_engine_ab_real_model():
+    """内置 V3.1（原生 fp16、rgb/0-1）：包装开/关输出一致；包装必须生效。"""
+    plain = OnnxSrEngine(V31, 2, io=IO_V31, u8_wrap=False)
     plain.load()
-    wrapped = OnnxSrEngine(V3, 4, io=IO_V3, u8_wrap=True)
+    wrapped = OnnxSrEngine(V31, 2, io=IO_V31, u8_wrap=True)
     wrapped.load()
     assert wrapped.u8_wrapped is True, "满足条件时包装必须生效（否则校验失败被静默回退）"
     for f in _frames():
         _assert_close(plain.process(f), wrapped.process(f))
 
 
-def test_engine_ab_fp16_terminal_cast():
-    """fp16 转换模型（末端 fp32→fp16 Cast）：绕末端 Cast 路径输出一致。"""
-    plain = OnnxSrEngine(V3_FP16, 4, io=IO_V3, u8_wrap=False)
+def test_engine_ab_fp16_terminal_cast(tmp_path):
+    """fp16 转换模型（IO 保 fp32、末端 fp32→fp16 Cast）：绕末端 Cast 路径输出一致。"""
+    pytest.importorskip("onnx")
+    from sv.models.fp16 import convert_file, fp16_path
+
+    tiny = tmp_path / "tiny.onnx"
+    _build_tiny_model(tiny)
+    tiny16 = fp16_path(tiny)
+    convert_file(tiny, tiny16)
+    io = {"color": "rgb", "range": "0-1"}
+    plain = OnnxSrEngine(tiny16, 2, io=io, u8_wrap=False)
     plain.load()
-    wrapped = OnnxSrEngine(V3_FP16, 4, io=IO_V3, u8_wrap=True)
+    wrapped = OnnxSrEngine(tiny16, 2, io=io, u8_wrap=True)
     wrapped.load()
     assert wrapped.u8_wrapped is True
     for f in _frames():
@@ -116,16 +126,14 @@ def test_io_convention_matrix(tmp_path, color, range_):
 def test_wrap_marker_rebuild_and_uint8_io():
     """清标记强制走完整校验链：包装 session 必须 uint8 直进（防回归：曾误把包装
     session 建到原始 float 模型文件上，marker 存在时静默潜伏到首帧才炸）。"""
-    from sv.paths import TEMP_DIR
-
-    for f in (TEMP_DIR / "u8_wrap").glob(f"{V3.stem}_u8.ok.*"):
+    for f in (TEMP_DIR / "u8_wrap").glob(f"{V31.stem}_u8.ok.*"):
         f.unlink()
-    wrapped = OnnxSrEngine(V3, 4, io=IO_V3, u8_wrap=True)
+    wrapped = OnnxSrEngine(V31, 2, io=IO_V31, u8_wrap=True)
     wrapped.load()
     assert wrapped.u8_wrapped is True
     assert wrapped._u8_sess.get_inputs()[0].type == "tensor(uint8)"
     out = wrapped.process(np.zeros((96, 128, 3), np.uint8))
-    assert out.shape == (384, 512, 3) and out.dtype == np.uint8
+    assert out.shape == (192, 256, 3) and out.dtype == np.uint8
 
 
 def test_wrap_failure_falls_back(tmp_path, monkeypatch):
@@ -150,11 +158,20 @@ def test_wrap_failure_falls_back(tmp_path, monkeypatch):
     _assert_close(plain.process(f), fb.process(f))
 
 
-def test_batch_engine_not_wrapped():
-    """batch>1 引擎不包装（走原 session 路径，避免线程池批量死锁前科）。"""
-    plain = OnnxSrEngine(V3, 4, io=IO_V3, batch=4, u8_wrap=False)
+def test_batch_engine_not_wrapped(tmp_path):
+    """batch>1 引擎不包装（走原 session 路径，避免线程池批量死锁前科）。
+
+    需 batch 轴动态的模型：合成 tiny（"n" 动态维）；内置 V3.1 batch 固定 1
+    会被钳单帧，测不出批量路径。
+    """
+    pytest.importorskip("onnx")
+    tiny = tmp_path / "tiny_b.onnx"
+    _build_tiny_model(tiny)
+    io = {"color": "rgb", "range": "0-1"}
+    plain = OnnxSrEngine(tiny, 2, io=io, batch=4, u8_wrap=False)
     plain.load()
-    wrapped = OnnxSrEngine(V3, 4, io=IO_V3, batch=4, u8_wrap=True)
+    assert plain.batch == 4, "合成模型 batch 轴动态，应保持批量"
+    wrapped = OnnxSrEngine(tiny, 2, io=io, batch=4, u8_wrap=True)
     wrapped.load()
     assert wrapped.u8_wrapped is False
     rng = np.random.default_rng(6)

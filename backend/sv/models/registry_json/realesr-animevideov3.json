@@ -33,9 +33,10 @@
     {
       "name": "RealESRGANv2-animevideo-xsx2.onnx",
       "scale": 2,
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/RealESRGANv2-animevideo-xsx2.onnx",
       "size": 2407691,
       "sha256": "6fad590f96df553a5cc348a9c5129e7874504a7dcd414e4a15fb0b281fca7e0c",
-      "source": "vs-mlrt v15.16 (AmusementClub)，随仓库 bundled 分发"
+      "source": "vs-mlrt v15.16 (AmusementClub)"
     }
   ],
   "scenes": [
