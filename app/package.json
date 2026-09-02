@@ -16,6 +16,9 @@
     "directories": {
       "output": "../dist-app"
     },
+    "releaseInfo": {
+      "releaseNotesFile": "../RELEASE_NOTES.md"
+    },
     "publish": {
       "provider": "github",
       "owner": "mkktop",

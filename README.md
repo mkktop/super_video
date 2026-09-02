@@ -178,6 +178,14 @@ cd app && pnpm dist
 - **稳定版** `v0.4.0`：与上述流程一致，正式 Release，所有用户可见。
 - **预览版** `v0.4.0-preview.1`：三方版本号（tag / `app/package.json` / `backend/sv/__init__.py`）带 `-preview.N` 后缀，`RELEASE_NOTES.md` 写对应 `## v0.4.0-preview.1` 节。CI 识别 tag 后缀自动把 Release 标记为 prerelease——稳定通道客户端查的是 GitHub `releases/latest`（该端点不返回 prerelease），因此存量用户看不到预览版；预览通道客户端可正常发现并升级，转正后发同号正式版（`v0.4.0` > `v0.4.0-preview.1`）即可把预览用户接回稳定序列。
 
+### R2 备用下载源（v0.4.0 起）
+
+GitHub 对国内网络连通性不稳定，客户端内置 R2 镜像（Cloudflare R2 桶 `super-video`，自定义域 `https://super-video.kaikun.top/`）作为备用源：**检查更新**先走 GitHub，连通失败自动切 R2 重查；**下载**从最近成功检查的源发起，网络错误自动切另一源重试一次。GitHub 仍是事实源（通道判定/更新说明），网络恢复后自动回主源。R2 上只有「最新正式版」：`latest.yml` 逐版覆盖 + 安装包按原名平铺。
+
+- 配置：仓库 Actions secrets 加 `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`（Cloudflare 控制台建 R2 编辑权限的 API Token）。未配置时 release.yml 对应步骤自动跳过，不影响发版。
+- 上传：release.yml 在 tag 发版时用 wrangler 把同一次构建的 `latest.yml` + 安装包传 R2（与 GitHub Release 同产物，sha512 跨源一致）。
+- 发版后核验：`curl https://super-video.kaikun.top/latest.yml` 的 version/sha512 应与 GitHub Release 配套。
+
 ## 架构
 
 ```

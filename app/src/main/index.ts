@@ -457,6 +457,33 @@ let readyVersion = ''
 // 存量用户与未同步前（启动自动检查竞态）都只看正式版 Release，宁保守不尝鲜
 let updateChannel: 'stable' | 'preview' = 'stable'
 
+// ---- 备用下载源（R2 镜像，v0.5 起）----
+// 动机：国内网络对 GitHub 连通性时好时坏（本机裸连实测 GitHub Release 0/2、
+// R2 自定义域 5/5 全成）。GitHub 连不上时自动切 R2 兜底；GitHub 仍是事实源
+// （通道判定/更新说明/预发布语义都在 Release 上），每次检查先走 GitHub，
+// 网络恢复即自动回主源。R2 布局：安装包按原名平铺 + latest.yml（正式版覆盖
+// 上传）；channel 保持不设——GenericProvider 固定读 latest.yml，预览用户在
+// 兜底路径看到最新正式版属合理降级（版本比较仍由 newerVersion 防降级）。
+const R2_UPDATE_URL = 'https://super-video.kaikun.top/'
+const GITHUB_FEED = { provider: 'github', owner: 'mkktop', repo: 'super_video' } as const
+// 最近一次成功检查所用的源：下载从该源发起，失败再切另一源重试
+let checkSource: 'github' | 'r2' = 'github'
+
+/** 连通性错误判定：HTTP 层到达过（有 statusCode）不算——那是"没有新版/仓库问题"，
+ * 切镜像无益，只对连不上/超时/断流这类网络错误回退 */
+function isNetworkError(e: unknown): boolean {
+  const err = e as { statusCode?: number; code?: string; message?: string }
+  if (!e || err.statusCode) return false
+  const msg = String(err.message ?? '').toLowerCase()
+  if (err.code && /^(econn|enotfound|etimedout|eai_again|epipe|err_)/i.test(err.code)) return true
+  return /fetch failed|socket|timed ?out|tunnel|network|getaddrinfo|abort/i.test(msg)
+}
+
+function useUpdateSource(u: import('electron-updater').AppUpdater, src: 'github' | 'r2'): void {
+  // string = generic provider（R2）；对象 = GitHub provider。channel 均不设
+  u.setFeedURL(src === 'r2' ? R2_UPDATE_URL : GITHUB_FEED)
+}
+
 /** electron-updater 懒加载。打包后动态 import 的 CJS 互操作可能拿到
  * undefined（v0.1.1 实测手动检查报 TypeError），require 直取最稳。 */
 function getAutoUpdater(): import('electron-updater').AppUpdater {
@@ -603,12 +630,19 @@ async function checkUpdateManually(): Promise<{
   if (updaterBusy) return { status: 'busy', current }
   updaterBusy = true
   try {
-    const autoUpdater = getAutoUpdater()
-    // 稳定通道必须显式 false：electron-updater 的默认值是"装机版本带预发布段即
-    // true"，预览版装机切回稳定通道时若不覆盖仍会收到预览推送。channel 保持不设，
-    // 由其按发现的 tag 版本自动推导 channel 文件（正式 latest.yml / 预发布 preview.yml）
-    autoUpdater.allowPrerelease = updateChannel === 'preview'
-    const r = await autoUpdater.checkForUpdates()
+    // 主源优先：GitHub 连通失败才切 R2 重查一次；记录成功源供下载阶段使用
+    let src: 'github' | 'r2' = 'github'
+    let outcome = await checkAtSource(src)
+    if (outcome.err && isNetworkError(outcome.err)) {
+      console.warn('[updater] GitHub 检查失败，切换备用源 R2 重试:', outcome.err)
+      src = 'r2'
+      outcome = await checkAtSource(src)
+    }
+    if (outcome.err) {
+      return { status: 'error', current, error: String(outcome.err) }
+    }
+    checkSource = src
+    const r = outcome.result
     const newVersion = r?.updateInfo?.version
     if (newVersion && newerVersion(newVersion, current)) {
       return {
@@ -626,15 +660,50 @@ async function checkUpdateManually(): Promise<{
   }
 }
 
+/** 在指定源上做一次检查（返回裸结果/错误，不抛）。downloadUpdate 也用它刷新
+ * provider 快照——electron-updater 下载用的是检查时缓存的 updateInfoAndProvider */
+async function checkAtSource(
+  src: 'github' | 'r2',
+): Promise<{ result: import('electron-updater').UpdateCheckResult | null; err?: unknown }> {
+  const autoUpdater = getAutoUpdater()
+  useUpdateSource(autoUpdater, src)
+  // 稳定通道必须显式 false：electron-updater 的默认值是"装机版本带预发布段即
+  // true"，预览版装机切回稳定通道时若不覆盖仍会收到预览推送
+  autoUpdater.allowPrerelease = updateChannel === 'preview'
+  try {
+    return { result: await autoUpdater.checkForUpdates() }
+  } catch (err) {
+    return { result: null, err }
+  }
+}
+
 async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
   if (downloadBusy) return { ok: false, error: '下载已在进行' }
   downloadBusy = true
   readyVersion = '' // 重新下载覆盖旧包，状态回到下载中
   try {
-    await getAutoUpdater().downloadUpdate()
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: String(e) }
+    // 从最近一次成功检查的源发起；网络错误则切另一源重试一次
+    // （国内常见"检查通、下载域不通"：github.com 可达但下载 CDN 连不上）
+    const sources: ('github' | 'r2')[] =
+      checkSource === 'github' ? ['github', 'r2'] : ['r2', 'github']
+    let lastErr: unknown = null
+    for (const src of sources) {
+      const outcome = await checkAtSource(src)
+      if (outcome.err) {
+        lastErr = outcome.err
+        if (isNetworkError(lastErr)) continue
+        return { ok: false, error: String(lastErr) }
+      }
+      try {
+        await getAutoUpdater().downloadUpdate()
+        return { ok: true }
+      } catch (err) {
+        lastErr = err
+        if (!isNetworkError(err)) return { ok: false, error: String(err) }
+        console.warn(`[updater] ${src} 下载失败，切换备用源重试:`, err)
+      }
+    }
+    return { ok: false, error: String(lastErr ?? '下载失败') }
   } finally {
     downloadBusy = false
   }

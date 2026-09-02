@@ -98,6 +98,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 上传到 R2 备用源（GitHub 连通失败时客户端自动回退下载）
+        # secrets 缺失（未配置备用源）时跳过，不阻塞发版；配置了 CLOUDFLARE_API_TOKEN
+        # + CLOUDFLARE_ACCOUNT_ID 即生效。latest.yml 逐版覆盖（R2 上只有"最新正式版"），
+        # 安装包按原名平铺不重名；与 GitHub Release 同步同一次构建产物，sha512 跨源一致
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if (-not $env:CF_TOKEN -or -not $env:CF_ACCOUNT) {
+            Write-Host "R2 secrets 未配置（CLOUDFLARE_API_TOKEN/CLOUDFLARE_ACCOUNT_ID），跳过备用源上传"
+            exit 0
+          }
+          $ver = (Get-Content app/package.json -Raw | ConvertFrom-Json).version
+          $env:CLOUDFLARE_API_TOKEN = $env:CF_TOKEN
+          $env:CLOUDFLARE_ACCOUNT_ID = $env:CF_ACCOUNT
+          npx --yes wrangler@4 r2 object put super-video/latest.yml --file dist-app/latest.yml --remote
+          npx --yes wrangler@4 r2 object put "super-video/super_video_${ver}_setup.exe" --file "dist-app/super_video_${ver}_setup.exe" --remote
+          Write-Host "R2 备用源已更新 latest.yml + super_video_${ver}_setup.exe"
+
       - name: 模型资产同步到 models-v1 Release（注册表驱动，缺什么补什么）
         # 仅 tag 发版时执行：workflow_dispatch 的 commit 上移动 models-v1 tag 是意外行为
         if: startsWith(github.ref, 'refs/tags/')
