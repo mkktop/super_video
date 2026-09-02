@@ -31,5 +31,9 @@
       "size": 851846
     }
   ],
-  "u8_wrap": false
+  "u8_wrap": false,
+  "scenes": [
+    "manga",
+    "image"
+  ]
 }

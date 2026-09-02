@@ -5,14 +5,22 @@
   "license": "BSD-3-Clause",
   "engine": "onnx",
   "family": "realesrgan",
-  "scale": [4],
-  "content": ["general"],
+  "scale": [
+    4
+  ],
+  "content": [
+    "general"
+  ],
   "temporal": false,
   "speed": "balanced",
   "vram_gb": 6,
   "tile_hint": 512,
   "description": "真人实拍与通用内容首选：4x 超分细节自然、表现稳定；720p→4K、1080p→8K 均可（8K 需 HEVC 编码）",
-  "io": { "color": "rgb", "range": "0-1", "pad": 4 },
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 4
+  },
   "files": [
     {
       "name": "RealESRGAN_x4plus_dyn.onnx",
@@ -20,5 +28,9 @@
       "size": 67063454,
       "sha256": "6ea6125934bebe44ba3dfb737dc4f969dc79a5549b11b9fb548a6a66f4776e75"
     }
+  ],
+  "scenes": [
+    "video",
+    "image"
   ]
 }

@@ -24,7 +24,11 @@
     "range": "0-1",
     "graph_opt": "basic",
     "batch_hint": 4,
-    "pad": {"2": 2, "3": 4, "4": 4}
+    "pad": {
+      "2": 2,
+      "3": 4,
+      "4": 4
+    }
   },
   "files": [
     {
@@ -116,5 +120,9 @@
       "size": 5638021
     }
   ],
-  "u8_wrap": false
+  "u8_wrap": false,
+  "scenes": [
+    "video",
+    "image"
+  ]
 }

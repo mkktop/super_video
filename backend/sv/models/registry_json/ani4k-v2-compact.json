@@ -5,8 +5,12 @@
   "license": "CC BY-NC 4.0（非商业使用，再分发需署名原作者）",
   "engine": "onnx",
   "kind": "sr",
-  "scale": [2],
-  "content": ["anime"],
+  "scale": [
+    2
+  ],
+  "content": [
+    "anime"
+  ],
   "temporal": false,
   "speed": "fast",
   "vram_gb": 2,
@@ -26,5 +30,9 @@
       "size": 2413474,
       "source": "Sirosky/Upscale-Hub Ani4K-v2 release 官方 ONNX（fp32 导出）"
     }
+  ],
+  "scenes": [
+    "video",
+    "image"
   ]
 }

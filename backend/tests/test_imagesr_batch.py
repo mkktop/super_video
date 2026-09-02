@@ -97,6 +97,28 @@ def test_illustrationjanai_semantics():
     assert h["illustrationjanai-4x"] != h["illustrationjanai-4x-dat2"]
 
 
+# ---- 场景标签（scenes：video/manga/image，卡片角标+筛选）----
+
+def test_scenes_semantics():
+    """全注册表 scenes 合法；漫画系=manga+image；HAT 等图片向=image；RIFE=video。"""
+    specs = load_registry()
+    allowed = {"video", "manga", "image"}
+    for mid, spec in specs.items():
+        assert spec.scenes and set(spec.scenes) <= allowed, mid
+        if spec.kind == "interp":
+            continue  # rife 补帧：video 专属
+        assert "image" in spec.scenes, f"{mid} 超分模型必须可用图片场景"
+    assert specs["mangajanai"].scenes == ["manga", "image"]
+    assert specs["illustrationjanai-4x-dat2"].scenes == ["manga", "image"]
+    for mid in ("hat-real-x4", "swinir-real-x4", "seemore-b", "ultrasharp-4x",
+                "realesrgan-x4plus-anime"):
+        assert specs[mid].scenes == ["image"], mid
+    assert specs["rife-v4.26"].scenes == ["video"]
+    for mid in ("animejanai-v31-hd-balanced", "real-cugan", "realesrgan-x4plus",
+                "realesr-animevideov3"):
+        assert specs[mid].scenes == ["video", "image"], mid
+
+
 # ---- auto_variant（按源高度选权重，无权重依赖）----
 
 def test_auto_variant_picks_nearest_height():

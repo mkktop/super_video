@@ -29,5 +29,9 @@
       "sha256": "b9e0c4bb78a1e621d52f9801a63fff079709e8a561fe7661a5b720746aef6db0",
       "size": 1206372
     }
+  ],
+  "scenes": [
+    "video",
+    "image"
   ]
 }

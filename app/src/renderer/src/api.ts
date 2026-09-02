@@ -46,6 +46,7 @@ export interface ModelInfo {
   kind?: 'sr' | 'interp'
   content: string[]
   speed: string
+  scenes?: string[]
   vram_gb: number
   description: string
   engine?: 'onnx' | 'torch'

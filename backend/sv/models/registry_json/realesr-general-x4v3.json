@@ -30,5 +30,8 @@
       "size": 4866417
     }
   ],
-  "u8_wrap": true
+  "u8_wrap": true,
+  "scenes": [
+    "image"
+  ]
 }

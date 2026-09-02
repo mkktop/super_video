@@ -5,8 +5,12 @@
   "license": "Apache-2.0",
   "engine": "onnx",
   "family": "dis",
-  "scale": [2],
-  "content": ["general"],
+  "scale": [
+    2
+  ],
+  "content": [
+    "general"
+  ],
   "temporal": false,
   "speed": "balanced",
   "vram_gb": 1,
@@ -27,5 +31,9 @@
       "size": 550442,
       "source": "Kim2091/DIS 官方 pretrained_models release（fp16 导出）"
     }
+  ],
+  "scenes": [
+    "video",
+    "image"
   ]
 }

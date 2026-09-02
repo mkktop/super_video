@@ -142,5 +142,9 @@
       "variant": "2048p"
     }
   ],
-  "u8_wrap": true
+  "u8_wrap": true,
+  "scenes": [
+    "manga",
+    "image"
+  ]
 }

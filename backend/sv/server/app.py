@@ -399,6 +399,7 @@ def get_models() -> list[dict]:
             "id": spec.id, "name": spec.name, "scale": spec.scale,
             "kind": spec.kind,
             "content": spec.content, "speed": spec.speed,
+            "scenes": spec.scenes,  # 适用场景标签：video/manga/image（前端卡片角标+筛选）
             "vram_gb": spec.vram_gb, "description": spec.description,
             "tile_hint": spec.tile_hint,
             "installed": manager.is_downloaded(spec),

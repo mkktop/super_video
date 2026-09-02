@@ -5,8 +5,12 @@
   "license": "MIT",
   "engine": "onnx",
   "family": "artcnn",
-  "scale": [2],
-  "content": ["anime"],
+  "scale": [
+    2
+  ],
+  "content": [
+    "anime"
+  ],
   "temporal": false,
   "speed": "fast",
   "vram_gb": 1,
@@ -27,5 +31,9 @@
       "size": 51562,
       "source": "Artoriuz/ArtCNN 仓库 ONNX/ 目录官方导出（v1.6.2）"
     }
+  ],
+  "scenes": [
+    "video",
+    "image"
   ]
 }

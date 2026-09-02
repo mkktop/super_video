@@ -213,6 +213,10 @@ export default { name: 'ImageSR' }
             <span class="m-name">{{ m.name }}</span>
             <NTag v-if="!m.installed && !m.bundled" size="tiny" :bordered="false" type="warning">需下载 {{ m.size_mb }}MB</NTag>
             <NTag v-if="!m.vram_ok" size="tiny" :bordered="false" type="error">显存不足</NTag>
+            <span v-if="(m.scenes ?? ['video', 'image']).some((s) => s !== 'image')" class="m-scenes">
+              <NTag v-for="s in (m.scenes ?? []).filter((k) => k !== 'image')" :key="s"
+                    size="tiny" type="info" :bordered="false">{{ s === 'manga' ? '漫画' : '视频' }}</NTag>
+            </span>
           </div>
           <div class="m-desc">{{ m.description }}</div>
           <div class="m-tags">
@@ -392,6 +396,7 @@ h1 { font-size: 20px; font-weight: 700; }
   justify-content: center;
 }
 .m-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-scenes { margin-left: auto; display: inline-flex; gap: 4px; }
 .m-name { font-weight: 600; font-size: 14px; }
 .m-desc {
   color: #9aa0a6;

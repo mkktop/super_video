@@ -47,5 +47,8 @@
       "scale": 4
     }
   ],
-  "u8_wrap": false
+  "u8_wrap": false,
+  "scenes": [
+    "image"
+  ]
 }

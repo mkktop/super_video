@@ -5,8 +5,12 @@
   "license": "上游发布包自由分发（mpv-AnimeJaNai）",
   "engine": "onnx",
   "kind": "sr",
-  "scale": [2],
-  "content": ["anime"],
+  "scale": [
+    2
+  ],
+  "content": [
+    "anime"
+  ],
   "temporal": false,
   "speed": "fastest",
   "vram_gb": 2,
@@ -26,5 +30,9 @@
       "size": 740318,
       "source": "mpv-AnimeJaNai 仓库 3.6.0 官方 ONNX（fp16 原生导出）"
     }
+  ],
+  "scenes": [
+    "video",
+    "image"
   ]
 }

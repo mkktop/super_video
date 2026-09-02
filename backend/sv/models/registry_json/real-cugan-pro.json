@@ -5,8 +5,13 @@
   "license": "Apache-2.0",
   "engine": "onnx",
   "kind": "sr",
-  "scale": [2, 3],
-  "content": ["anime"],
+  "scale": [
+    2,
+    3
+  ],
+  "content": [
+    "anime"
+  ],
   "temporal": false,
   "speed": "balanced",
   "vram_gb": 2,
@@ -19,8 +24,14 @@
     "range": "0-1",
     "graph_opt": "basic",
     "batch_hint": 4,
-    "affine": [0.7, 0.15],
-    "pad": {"2": 2, "3": 4}
+    "affine": [
+      0.7,
+      0.15
+    ],
+    "pad": {
+      "2": 2,
+      "3": 4
+    }
   },
   "files": [
     {
@@ -77,5 +88,9 @@
       "size": 5155609,
       "source": "同上"
     }
+  ],
+  "scenes": [
+    "video",
+    "image"
   ]
 }

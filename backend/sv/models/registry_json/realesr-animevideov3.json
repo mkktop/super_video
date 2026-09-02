@@ -5,14 +5,23 @@
   "license": "BSD-3-Clause",
   "engine": "onnx",
   "family": "realesrgan",
-  "scale": [2, 4],
-  "content": ["anime"],
+  "scale": [
+    2,
+    4
+  ],
+  "content": [
+    "anime"
+  ],
   "temporal": false,
   "speed": "fast",
   "vram_gb": 2,
   "tile_hint": 0,
   "description": "动漫视频专用：专为视频内容训练、成片稳定不易闪烁；1080p→4K 选 x2，480p / 720p 老动画升清用 x4",
-  "io": { "color": "bgr", "range": "0-1", "batch_hint": 4 },
+  "io": {
+    "color": "bgr",
+    "range": "0-1",
+    "batch_hint": 4
+  },
   "files": [
     {
       "name": "RealESR-AnimeVideo-v3_x4.onnx",
@@ -28,5 +37,9 @@
       "sha256": "6fad590f96df553a5cc348a9c5129e7874504a7dcd414e4a15fb0b281fca7e0c",
       "source": "vs-mlrt v15.16 (AmusementClub)，随仓库 bundled 分发"
     }
+  ],
+  "scenes": [
+    "video",
+    "image"
   ]
 }

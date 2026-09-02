@@ -19,7 +19,7 @@ import {
   NTag,
   useMessage,
 } from 'naive-ui'
-import { api, mediaSrc, type ProbeInfo } from '../api'
+import { api, mediaSrc, type ModelInfo, type ProbeInfo } from '../api'
 import { refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
@@ -98,9 +98,15 @@ async function autoFillOutput() {
 // ---- 模型 ----
 // 已下载（含内置）排最前（与图片超分/模型对比页同款）：模型多了以后，
 // 最常点的就是已装的那几个；稳定排序，组内保持注册表顺序
+// 场景筛选（视频任务默认「全部」；漫画/图片向模型选了也能跑，只是不快）
+const scene = ref<'all' | 'video' | 'manga' | 'image'>('all')
+const SCENES = ['video', 'manga', 'image'] as const
+const sceneLabel: Record<string, string> = { video: '视频', manga: '漫画', image: '图片' }
+const hasScene = (m: ModelInfo, s: string) => (m.scenes ?? ['video', 'image']).includes(s)
 const srModels = computed(() =>
   store.models
     .filter((m) => m.kind !== 'interp')
+    .filter((m) => scene.value === 'all' || hasScene(m, scene.value))
     .sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled)))
 const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
 const scaleOptions = computed(() =>
@@ -742,6 +748,13 @@ export default { name: 'NewTask' }
           {{ selectedModel ? `已选 ${selectedModel.name} · x${targetScale}` : '点击卡片选择' }}
         </span>
       </h2>
+      <div class="scene-bar">
+        <span class="scene-lbl">场景</span>
+        <NButton v-for="s in ['all', ...SCENES]" :key="s" size="tiny" secondary
+                 :type="scene === s ? 'primary' : 'default'" @click="scene = s as 'all'">
+          {{ s === 'all' ? '全部' : sceneLabel[s] }}
+        </NButton>
+      </div>
       <div class="model-grid">
         <div
           v-for="m in srModels"
@@ -755,6 +768,10 @@ export default { name: 'NewTask' }
             <span class="m-name">{{ m.name }}</span>
             <NTag v-if="!m.installed && !m.bundled" size="tiny" :bordered="false" type="warning">需下载 {{ m.size_mb }}MB</NTag>
             <NTag v-if="!m.vram_ok" size="tiny" :bordered="false" type="error">显存不足</NTag>
+            <span class="m-scenes">
+              <NTag v-for="s in SCENES.filter((k) => hasScene(m, k))" :key="s"
+                    size="tiny" type="info" :bordered="false">{{ sceneLabel[s] }}</NTag>
+            </span>
           </div>
           <div class="m-desc">{{ m.description }}</div>
           <div class="m-tags">
@@ -1123,6 +1140,9 @@ h1 { font-size: 20px; font-weight: 700; }
   justify-content: center;
 }
 .m-head { display: flex; align-items: center; gap: 8px; }
+.m-scenes { margin-left: auto; display: inline-flex; gap: 4px; }
+.scene-bar { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.scene-lbl { font-size: 12px; color: #9aa0a6; }
 .m-name { font-weight: 600; font-size: 14px; }
 .m-desc { color: #9aa0a6; font-size: 12px; margin: 6px 0; }
 .m-tags { display: flex; gap: 10px; font-size: 12px; color: #7c838c; flex-wrap: wrap; }

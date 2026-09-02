@@ -21,6 +21,11 @@ import { refreshModels, store } from '../store'
 
 const message = useMessage()
 const tab = ref<'all' | 'installed' | 'anime' | 'comic' | 'general'>('all')
+// 场景标签筛选（与上方状态/内容 tab 取交集）：一个模型可属多个场景
+const scene = ref<'all' | 'video' | 'manga' | 'image'>('all')
+const sceneLabel: Record<string, string> = { video: '视频', manga: '漫画', image: '图片' }
+const SCENES = ['video', 'manga', 'image'] as const
+const hasScene = (m: ModelInfo, s: string) => (m.scenes ?? ['video', 'image']).includes(s)
 
 const speedLabel = { fast: '⚡ 快速', balanced: '⚖ 均衡', slow: '🐢 高质量慢速' }
 // 'real' 与 'general' 是注册表两代写入口径，展示与筛选统一按「真人/通用」
@@ -59,6 +64,7 @@ const groups = computed<Array<{ key: string; name: string; note?: string; models
       if (tab.value === 'comic') return m.content.includes('comic')
       return m.content.includes('general') || m.content.includes('real')
     })
+    .filter((m) => scene.value === 'all' || hasScene(m, scene.value))
     // 组内已下载在前（稳定排序保持注册表顺序），扫一眼就知道哪些已就绪
     .sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled))
   const out = FAMILIES.map((f) => ({
@@ -149,6 +155,14 @@ async function doImport() {
         <NButton size="small" :type="tab === 'general' ? 'primary' : 'default'" @click="tab = 'general'">真人/通用</NButton>
       </NSpace>
     </div>
+    <div class="scene-bar">
+      <span class="scene-lbl">场景</span>
+      <NButton size="tiny" :type="scene === 'all' ? 'primary' : 'default'" secondary @click="scene = 'all'">全部</NButton>
+      <NButton v-for="s in SCENES" :key="s" size="tiny"
+               :type="scene === s ? 'primary' : 'default'" secondary @click="scene = s">
+        {{ sceneLabel[s] }}
+      </NButton>
+    </div>
 
     <NEmpty v-if="!totalShown" description="该分类暂无模型" style="margin-top: 12vh" />
 
@@ -165,6 +179,10 @@ async function doImport() {
             <NTag v-if="m.bundled" size="small" type="success" :bordered="false">内置</NTag>
             <NTag v-else-if="m.installed" size="small" type="success" :bordered="false">已安装</NTag>
             <NTag v-if="!m.vram_ok" size="small" type="warning" :bordered="false">显存不足</NTag>
+            <span class="m-scenes">
+              <NTag v-for="s in SCENES.filter((k) => hasScene(m, k))" :key="s"
+                    size="small" type="info" :bordered="false">{{ sceneLabel[s] }}</NTag>
+            </span>
           </div>
           <div class="desc">{{ m.description }}</div>
           <div class="tags">
@@ -261,6 +279,10 @@ async function doImport() {
 h1 { font-size: 20px; font-weight: 700; }
 .sub { font-size: 12.5px; color: #9aa0a6; margin-top: 4px; }
 
+/* 场景标签筛选行：与上方状态/内容 tab 取交集 */
+.scene-bar { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
+.scene-lbl { font-size: 12px; color: #9aa0a6; }
+
 /* 家族分节：组头一行（名称+数量+定位），组内仍是响应式网格 */
 .family { display: flex; flex-direction: column; gap: 10px; }
 .fam-head {
@@ -289,6 +311,7 @@ h1 { font-size: 20px; font-weight: 700; }
 }
 .mcard { padding: 16px 18px 14px; display: flex; flex-direction: column; gap: 9px; }
 .m-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-scenes { margin-left: auto; display: inline-flex; gap: 4px; }
 .name { font-size: 15px; font-weight: 600; }
 .desc {
   color: #9aa0a6;
