@@ -25,10 +25,13 @@
   "files": [
     {
       "name": "2x_AnimeJaNai_HD_V3.1Sharp1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3.1Sharp1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/2x_AnimeJaNai_HD_V3.1Sharp1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx",
       "sha256": "72246eded3aab52f8d1a71613c0a1d900734b358d1820b62eb36f1ed376e1cf4",
       "size": 740318,
-      "source": "mpv-AnimeJaNai 仓库 3.6.0 官方 ONNX（fp16 原生导出）"
+      "source": "mpv-AnimeJaNai 仓库 3.6.0 官方 ONNX（fp16 原生导出）",
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3.1Sharp1_Performance_SPANF3_b5f48_unshuffle_fp16.onnx"
+      ]
     }
   ],
   "scenes": [

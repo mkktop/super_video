@@ -25,10 +25,13 @@
   "files": [
     {
       "name": "2x_Ani4Kv2_G6i2_UltraCompact_105K_fp32.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_Ani4Kv2_G6i2_UltraCompact_105K_fp32.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/2x_Ani4Kv2_G6i2_UltraCompact_105K_fp32.onnx",
       "sha256": "7bcc365d2c3a474402eecdd0f98c861e4dcbe5b08cdb7300e53283b7bdf61b5a",
       "size": 1224535,
-      "source": "Sirosky/Upscale-Hub Ani4K-v2 release 官方 ONNX（fp32 导出）"
+      "source": "Sirosky/Upscale-Hub Ani4K-v2 release 官方 ONNX（fp32 导出）",
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/2x_Ani4Kv2_G6i2_UltraCompact_105K_fp32.onnx"
+      ]
     }
   ],
   "scenes": [

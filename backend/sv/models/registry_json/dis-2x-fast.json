@@ -26,10 +26,13 @@
   "files": [
     {
       "name": "2x-DIS_Fast_Pretrain_fp16.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x-DIS_Fast_Pretrain_fp16.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/2x-DIS_Fast_Pretrain_fp16.onnx",
       "sha256": "c3e42f92a602d260365fc6915ce4dc60d371e651e1b25fbcd177ea2f89944941",
       "size": 399645,
-      "source": "Kim2091/DIS 官方 pretrained_models release（fp16 导出）"
+      "source": "Kim2091/DIS 官方 pretrained_models release（fp16 导出）",
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/2x-DIS_Fast_Pretrain_fp16.onnx"
+      ]
     }
   ],
   "scenes": [

@@ -1,0 +1,27 @@
+name: sync-modelscope
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: sync-modelscope
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      # 注册表 → ModelScope 镜像全量对账：远端缺什么补什么（幂等可重跑）。
+      # 首次铺底 / 远端损坏修复时手动触发；常规增量由 release.yml 发版步覆盖
+      - name: 同步模型资产到 ModelScope 镜像
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+        run: |
+          pip install modelscope
+          python .github/scripts/sync_modelscope.py --readme

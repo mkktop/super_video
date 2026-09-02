@@ -27,24 +27,33 @@
   "files": [
     {
       "name": "SeemoRe_B_X2.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/SeemoRe_B_X2.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/SeemoRe_B_X2.onnx",
       "sha256": "c4753f3068d43e72bf0460b581b06ec476033caf0c8ce2636786c4360e1df006",
       "size": 2357852,
-      "scale": 2
+      "scale": 2,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/SeemoRe_B_X2.onnx"
+      ]
     },
     {
       "name": "SeemoRe_B_X3.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/SeemoRe_B_X3.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/SeemoRe_B_X3.onnx",
       "sha256": "4a88acc80dc1162f2c5f7806a354774d4aa08d8b64715a9dc4e32e5ad30b96a3",
       "size": 2375657,
-      "scale": 3
+      "scale": 3,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/SeemoRe_B_X3.onnx"
+      ]
     },
     {
       "name": "SeemoRe_B_X4.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/SeemoRe_B_X4.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/SeemoRe_B_X4.onnx",
       "sha256": "2c25d698882f5a2789fd6a9c7777342b8924aab3431d37393230bc13115e74b5",
       "size": 2407358,
-      "scale": 4
+      "scale": 4,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/SeemoRe_B_X4.onnx"
+      ]
     }
   ],
   "u8_wrap": false,

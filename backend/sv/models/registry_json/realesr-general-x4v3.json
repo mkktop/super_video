@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "realesr-general-x4v3.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/realesr-general-x4v3.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/realesr-general-x4v3.onnx",
       "sha256": "15e84d1e0981fa624f79f866f72f639caec15429b21feb20da7eab37d9449f8d",
-      "size": 4866417
+      "size": 4866417,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/realesr-general-x4v3.onnx"
+      ]
     }
   ],
   "u8_wrap": true,

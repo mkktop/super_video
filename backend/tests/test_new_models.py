@@ -89,16 +89,21 @@ def test_ani4k_entries():
 
 
 def test_all_manifest_files_wellformed():
-    """全注册表：sha256 合法、url 指向自家 models-v1（唯一模型源约定）。"""
+    """全注册表：sha256 合法；主源指 ModelScope 镜像（国内加速），models-v1 降为备用源。"""
     for spec in load_registry().values():
         for f in spec.files:
             if "sha256" in f:
                 assert re.fullmatch(r"[0-9a-f]{64}", f["sha256"]), (spec.id, f["name"])
             url = f.get("url", "")
             if url:
-                assert url.startswith(
-                    "https://github.com/mkktop/super_video/releases/download/models-v1/"
+                assert url == (
+                    "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/"
+                    + f["name"]
                 ), (spec.id, f["name"])
+                assert f.get("mirror_urls") == [
+                    "https://github.com/mkktop/super_video/releases/download/models-v1/"
+                    + f["name"]
+                ], (spec.id, f["name"])
 
 
 def test_latest_cugan_x3_pad_fix():

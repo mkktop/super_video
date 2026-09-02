@@ -26,10 +26,13 @@
   "files": [
     {
       "name": "ArtCNN_C4F16.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/ArtCNN_C4F16.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/ArtCNN_C4F16.onnx",
       "sha256": "7a6436299b8c757dbb7084ac39a25c310db1941133e73d1ee3e74c8b3bddc1ca",
       "size": 51559,
-      "source": "Artoriuz/ArtCNN 仓库 ONNX/ 目录官方导出（v1.6.2）"
+      "source": "Artoriuz/ArtCNN 仓库 ONNX/ 目录官方导出（v1.6.2）",
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/ArtCNN_C4F16.onnx"
+      ]
     }
   ],
   "scenes": [

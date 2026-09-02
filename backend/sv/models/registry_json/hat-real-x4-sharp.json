@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "Real_HAT_GAN_sharper.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/Real_HAT_GAN_sharper.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/Real_HAT_GAN_sharper.onnx",
       "sha256": "0387940d6ac444b92410fd3414fe02c0a38411913a3a59d9c87dc974f40147e8",
-      "size": 161222851
+      "size": 161222851,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/Real_HAT_GAN_sharper.onnx"
+      ]
     }
   ],
   "u8_wrap": false,

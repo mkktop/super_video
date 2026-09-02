@@ -123,7 +123,7 @@ super_video 是一款面向 Windows 的 AI 视频超分辨率桌面软件：通�
 | RIFE v4.26 | 补帧 x2 | 通用 | 帧率倍增，提升画面流畅度 |
 | 自定义 ONNX | 任意 | 通用 | 导入自有模型，支持 fp16 本体 |
 
-内置小模型随安装包分发，其余模型全部从本项目 GitHub Release 下载（sha256 校验，不依赖第三方直链）。
+内置小模型随安装包分发，其余模型从 ModelScope 镜像（国内主源）下载，GitHub Release 为自动回退的备用源；两处内容逐字节一致，全部产物 sha256 校验，不依赖第三方直链。
 
 ## 常见问题
 
@@ -185,6 +185,10 @@ GitHub 对国内网络连通性不稳定，客户端内置 R2 镜像（Cloudflar
 - 配置：仓库 Actions secrets 加 `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`（Cloudflare 控制台建 R2 编辑权限的 API Token）。未配置时 release.yml 对应步骤自动跳过，不影响发版。
 - 上传：release.yml 在 tag 发版时用 wrangler 把同一次构建的 `latest.yml` + 安装包传 R2（与 GitHub Release 同产物，sha512 跨源一致）。
 - 发版后核验：`curl https://super-video.kaikun.top/latest.yml` 的 version/sha512 应与 GitHub Release 配套。
+
+### 模型镜像（ModelScope，v0.4.2 起）
+
+模型权重与安装包同理：国内主源是 ModelScope 公开仓库 [`mengkaikun/super-video-models`](https://modelscope.cn/models/mengkaikun/super-video-models)（阿里 CDN，实测裸连 ~10 MB/s），GitHub `models-v1` Release 降为备用源。manifest 里 `url` 指 ModelScope、`mirror_urls` 列 GitHub，下载器主源失败自动逐个镜像重试，产物 sha256 校验不变。同步是注册表驱动的对账语义（`.github/scripts/sync_modelscope.py`）：远端缺什么传什么，`sync-modelscope.yml` 手动触发全量补齐，release.yml 在每次 tag 发版时自动增量同步（`MODELSCOPE_TOKEN` 未配置则跳过）。仓库 README 由脚本从注册表生成（含逐模型许可证表）。
 
 ## 架构
 

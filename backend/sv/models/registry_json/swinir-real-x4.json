@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "SwinIR-L_realSR_x4_GAN.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/SwinIR-L_realSR_x4_GAN.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/SwinIR-L_realSR_x4_GAN.onnx",
       "sha256": "a998338e63ee5c4d9b9fd4231adc3dc4b0bf399a8e668a58c14412dca9149a19",
-      "size": 141541799
+      "size": 141541799,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/SwinIR-L_realSR_x4_GAN.onnx"
+      ]
     }
   ],
   "u8_wrap": false,

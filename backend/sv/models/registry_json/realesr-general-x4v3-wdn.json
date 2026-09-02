@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "realesr-general-wdn-x4v3.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/realesr-general-wdn-x4v3.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/realesr-general-wdn-x4v3.onnx",
       "sha256": "1bddf505b7d2335d87a24a26e8acb82d915e99bf9e0dfc958c2b22a063d48e6b",
-      "size": 4866417
+      "size": 4866417,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/realesr-general-wdn-x4v3.onnx"
+      ]
     }
   ],
   "u8_wrap": true,

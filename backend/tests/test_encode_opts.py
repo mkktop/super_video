@@ -264,7 +264,7 @@ def test_registry_denoise_and_animejanai():
         spec = get_model(mid)
         assert spec.scale == [2] and spec.engine == "onnx"
         assert spec.files[0]["url"].startswith(
-            "https://github.com/mkktop/super_video/releases/download/models-v1/")
+            "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/")
         assert len(spec.files[0]["sha256"]) == 64
 
 

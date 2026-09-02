@@ -24,9 +24,12 @@
   "files": [
     {
       "name": "RealESRGAN_x4plus_dyn.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/RealESRGAN_x4plus_dyn.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/RealESRGAN_x4plus_dyn.onnx",
       "size": 67063454,
-      "sha256": "6ea6125934bebe44ba3dfb737dc4f969dc79a5549b11b9fb548a6a66f4776e75"
+      "sha256": "6ea6125934bebe44ba3dfb737dc4f969dc79a5549b11b9fb548a6a66f4776e75",
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/RealESRGAN_x4plus_dyn.onnx"
+      ]
     }
   ],
   "scenes": [

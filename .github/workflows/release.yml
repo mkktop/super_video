@@ -142,3 +142,18 @@ jobs:
             gh release upload models-v1 $p
             Write-Host "已上传 $name"
           }
+
+      - name: 同步缺失资产到 ModelScope 镜像（国内主源，注册表对账）
+        # 跟在 models-v1 同步之后：脚本按「远端已有同名同大小则跳过」对账，
+        # 平常发版零上传秒级完成，只有注册表新增/远端缺失时才传
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+        run: |
+          if (-not $env:MODELSCOPE_TOKEN) {
+            Write-Host "MODELSCOPE_TOKEN 未配置，跳过 ModelScope 镜像同步"
+            exit 0
+          }
+          pip install modelscope
+          python .github/scripts/sync_modelscope.py --readme

@@ -26,17 +26,23 @@
     {
       "name": "RealESR-AnimeVideo-v3_x4.onnx",
       "scale": 4,
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/RealESR-AnimeVideo-v3_x4.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/RealESR-AnimeVideo-v3_x4.onnx",
       "size": 2495473,
-      "sha256": "00ece3ac21c43ee31459216b5174b2cea0c5325044c5142aeb840f4890e175ff"
+      "sha256": "00ece3ac21c43ee31459216b5174b2cea0c5325044c5142aeb840f4890e175ff",
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/RealESR-AnimeVideo-v3_x4.onnx"
+      ]
     },
     {
       "name": "RealESRGANv2-animevideo-xsx2.onnx",
       "scale": 2,
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/RealESRGANv2-animevideo-xsx2.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/RealESRGANv2-animevideo-xsx2.onnx",
       "size": 2407691,
       "sha256": "6fad590f96df553a5cc348a9c5129e7874504a7dcd414e4a15fb0b281fca7e0c",
-      "source": "vs-mlrt v15.16 (AmusementClub)"
+      "source": "vs-mlrt v15.16 (AmusementClub)",
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/RealESRGANv2-animevideo-xsx2.onnx"
+      ]
     }
   ],
   "scenes": [

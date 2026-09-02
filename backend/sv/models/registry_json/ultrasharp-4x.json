@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "4x-UltraSharp.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x-UltraSharp.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/4x-UltraSharp.onnx",
       "sha256": "c83e0bf4fe1051ec7f2330614aa2edef0ad589d59c718934897a93459b180dd1",
-      "size": 67002795
+      "size": 67002795,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/4x-UltraSharp.onnx"
+      ]
     }
   ],
   "u8_wrap": true,

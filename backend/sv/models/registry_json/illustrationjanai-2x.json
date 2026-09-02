@@ -26,9 +26,12 @@
   "files": [
     {
       "name": "2x_IllustrationJaNai_V3_SPAN_S.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_IllustrationJaNai_V3_SPAN_S.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/2x_IllustrationJaNai_V3_SPAN_S.onnx",
       "sha256": "00b6a70642914371453bec96fbb7087697651c12ae8b0a3dbde5b9b4d82435b1",
-      "size": 851846
+      "size": 851846,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/2x_IllustrationJaNai_V3_SPAN_S.onnx"
+      ]
     }
   ],
   "u8_wrap": false,

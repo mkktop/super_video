@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "4x-Remacri.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x-Remacri.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/4x-Remacri.onnx",
       "sha256": "5c5ede6ca94f5bd160b3299ce17007fce5c91ea6603ece943577f1f87f004c91",
-      "size": 67132637
+      "size": 67132637,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/4x-Remacri.onnx"
+      ]
     }
   ],
   "u8_wrap": true,

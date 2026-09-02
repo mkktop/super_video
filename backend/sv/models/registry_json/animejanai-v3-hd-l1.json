@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx",
       "sha256": "f6bbfbed502b8d300ee9d678d2c277d4b56235c36d053c3a1a41be060c54c0e6",
-      "size": 184990
+      "size": 184990,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/2x_AnimeJaNai_HD_V3_SuperUltraCompact.onnx"
+      ]
     }
   ],
   "scenes": [

@@ -123,7 +123,7 @@ sidecar 仅监听 localhost（本地 token 鉴权），完整定义见 `server/a
 | graph_opt | `basic` / `disable` | DML 图优化降档（CUGAN 系 Add 算子全量优化崩溃） |
 | batch_hint | 整数 | 批帧建议（动态 batch 模型单 run 多帧） |
 
-通道序用红绿分屏法实测、范围用 0-255 喂入爆炸对照、pad 用 8..64 全尺寸扫描——完整口径与踩坑见根目录 `BENCH.md`（脚本历史参考 `scripts/calibrate_color.py`）。新模型入库流程：核实上游许可 → 逐项实测 IO → 上传 models-v1（平铺引用，`ASSETS.md` 同步维护资产页说明）→ 写 manifest（sha256 + size）→ 真实权重端到端验证。
+通道序用红绿分屏法实测、范围用 0-255 喂入爆炸对照、pad 用 8..64 全尺寸扫描——完整口径与踩坑见根目录 `BENCH.md`（脚本历史参考 `scripts/calibrate_color.py`）。新模型入库流程：核实上游许可 → 逐项实测 IO → 上传 models-v1（平铺引用，`ASSETS.md` 同步维护资产页说明）→ 写 manifest（sha256 + size；`url` 指 ModelScope 主源、`mirror_urls` 列 models-v1 备用，发版时自动对账同步镜像）→ 真实权重端到端验证。
 
 ## 已知取舍（2026-08-26 审查拍板，勿顺手"修复"）
 

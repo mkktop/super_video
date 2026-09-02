@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "rife_v4.26.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/rife_v4.26.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/rife_v4.26.onnx",
       "sha256": "af25762dfec02a4bbb949decea63988b01fa56c46c0ff9dc66ac8e2f12cbb661",
-      "size": 22748049
+      "size": 22748049,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/rife_v4.26.onnx"
+      ]
     }
   ],
   "scenes": [

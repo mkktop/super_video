@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "4x-AnimeSharp.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x-AnimeSharp.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/4x-AnimeSharp.onnx",
       "sha256": "da3c917439487e0c5b897aae776ce82759dabe8b68a00b0a1fdf5af2f90cc5eb",
-      "size": 67002795
+      "size": 67002795,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/4x-AnimeSharp.onnx"
+      ]
     }
   ],
   "u8_wrap": true,

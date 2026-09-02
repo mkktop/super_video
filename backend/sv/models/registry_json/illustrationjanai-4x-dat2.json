@@ -25,9 +25,12 @@
   "files": [
     {
       "name": "4x_IllustrationJaNai_V1_DAT2.onnx",
-      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_IllustrationJaNai_V1_DAT2.onnx",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/4x_IllustrationJaNai_V1_DAT2.onnx",
       "sha256": "ecc6878f0879db975f383d3f0ab2a5f15a61849a825481eb47bbb094c2d70631",
-      "size": 51322543
+      "size": 51322543,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/models-v1/4x_IllustrationJaNai_V1_DAT2.onnx"
+      ]
     }
   ],
   "u8_wrap": false,
