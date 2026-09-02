@@ -240,6 +240,26 @@ def _load_onnx_engine(
     return engine, used_precision
 
 
+def _batch_heights(images: list[dict]) -> list[int]:
+    """批量图片的展示高度（EXIF 方向转正后）：只读头部，不解码像素。
+
+    读不出的图返回时略过——坏图由主循环按张跳过并记日志，这里不重复报错。
+    """
+    from PIL import Image
+
+    out: list[int] = []
+    for meta in images:
+        try:
+            with Image.open(str(meta["in"])) as im:
+                w, h = im.size
+                if im.getexif().get(274, 1) in (5, 6, 7, 8):  # 横竖互换方向
+                    w, h = h, w
+            out.append(h)
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
 def _run_image_job(task: dict, params: dict, spec) -> int:
     """图片超分作业（单张或批量一个任务）：一次模型加载，逐图 解码（含 EXIF
     方向）→ 推理 → 原子落盘（.part + replace，取消/中断不留半个文件）。
@@ -311,6 +331,18 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         variant = auto_variant(spec, scale, height)  # MangaJaNai 系按源高度选权重
         if variant:
             emit({"type": "log", "line": f"按源高度 {height}p 自动选择权重档: {variant}"})
+            if n > 1:
+                heights = _batch_heights(images)
+                tiers = {auto_variant(spec, scale, h) for h in heights} - {None}
+                if len(tiers) > 1:
+                    # 逐图换档 = 逐档换 engine（销毁旧 session 再建新的），DML 下
+                    # 「创建后再析构」会话有原生崩溃前科（CUGAN/V3.1 实证）——
+                    # 统一首图档 + 明示取舍，要逐档精确就按高度分批
+                    emit({"type": "log", "line":
+                          f"批量图片高度不一（{min(heights)}~{max(heights)}p），"
+                          f"理想档含 {'/'.join(sorted(tiers))}，"
+                          f"已统一按首图 {height}p 的 {variant} 档处理；"
+                          "如需逐档精确请按高度分批创建任务"})
     try:
         from sv.models.registry import file_for_scale
         need = file_for_scale(spec, scale, variant)

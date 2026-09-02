@@ -179,6 +179,60 @@ def test_image_job_all_bad_fails(tmp_path, fake_engine):
     assert rc == 1
 
 
+# 高度自适应权重档（MangaJaNai 系语义）：io.auto_variant=height + NNNNp 变体
+TIER_SPEC = SimpleNamespace(
+    id="tier-fake", engine="onnx", scale=[2], fp16=False, tile_hint=0,
+    io={"color": "rgb", "range": "0-1", "pad": 1, "auto_variant": "height"},
+    files=[{"name": f"{v}.onnx", "scale": 2, "variant": v}
+           for v in ("1200p", "1300p")],
+)
+
+
+def _all_logs(events) -> list[str]:
+    return [e.get("line", "") for e in events if e.get("type") == "log"]
+
+
+def test_image_job_mixed_tier_batch_discloses(tmp_path, fake_engine):
+    """批量分属多个理想档：统一按首图档处理，必须日志明示取舍（不静默近似）。"""
+    images = []
+    for name, h in (("tall.png", 1200), ("taller.png", 1260)):
+        src = tmp_path / name
+        _make_png(src, 40, h)
+        images.append({"in": str(src), "out": str(tmp_path / f"{name}_2x.png")})
+    task = {"id": "imgt7", "input_path": images[0]["in"],
+            "output_path": images[0]["out"]}
+    from sv.server.worker import _run_image_job
+
+    rc = _run_image_job(task, {
+        "kind": "image", "format": "png", "scale": 2, "images": images,
+    }, TIER_SPEC)
+    assert rc == 0
+    for meta in images:
+        assert Path(meta["out"]).exists()
+    logs = _all_logs(fake_engine.events)
+    # 1260p 的理想档是 1300p，与首图 1200p 不同 → 必须披露统一档与分批指引
+    assert any("1200p/1300p" in l and "统一" in l and "分批" in l for l in logs), logs
+
+
+def test_image_job_batch_same_tier_no_notice(tmp_path, fake_engine):
+    """高度略差但同属一个理想档：不披露（1200 与 1250 都落 1200p，提示是噪音）。"""
+    images = []
+    for name, h in (("a.png", 1200), ("b.png", 1250)):
+        src = tmp_path / name
+        _make_png(src, 40, h)
+        images.append({"in": str(src), "out": str(tmp_path / f"{name}_2x.png")})
+    task = {"id": "imgt8", "input_path": images[0]["in"],
+            "output_path": images[0]["out"]}
+    from sv.server.worker import _run_image_job
+
+    assert _run_image_job(task, {
+        "kind": "image", "format": "png", "scale": 2, "images": images,
+    }, TIER_SPEC) == 0
+    logs = _all_logs(fake_engine.events)
+    assert any(l.startswith("按源高度 1200p") for l in logs), logs
+    assert not any("统一" in l for l in logs), logs
+
+
 # ---- 创建端点 ----
 
 @pytest.fixture(scope="module")

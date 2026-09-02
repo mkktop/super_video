@@ -90,7 +90,15 @@ const dlPctText = (p: number) => (p === 0 ? '连接中…' : `${Math.round(p * 1
 async function onDownload(id: string) {
   // 即时反馈：首个进度事件要等远端连上才来，本地先挂 0% 条让点击立刻可见
   store.downloadProgress = { ...store.downloadProgress, [id]: 0 }
-  const r = await api.downloadModel(id)
+  let r: Response
+  try {
+    r = await api.downloadModel(id)
+  } catch {
+    // fetch 网络层 reject（本地服务未连接等）：不回滚的话占位条永久卡「连接中…」
+    dropProgress(id)
+    message.error('下载启动失败：无法连接本地服务')
+    return
+  }
   if (r.status === 409) {
     dropProgress(id)
     message.warning('已有下载正在进行，请稍候')

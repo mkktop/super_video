@@ -63,13 +63,17 @@ def test_dis_entries_semantics():
 
 # ---- 引擎单通道 Y 路径（探针模型，无真实权重依赖）----
 
-def _y_probe_model(tmp_path, scale: int):
-    """单通道恒等探针：Y 原样输出（scale=1）或最近邻 2x（scale=2）。"""
+def _y_probe_model(tmp_path, scale: int, hw: tuple[int, int] | None = None):
+    """单通道恒等探针：Y 原样输出（scale=1）或最近邻 2x（scale=2）。
+
+    hw=None 动态尺寸（ArtCNN 官方导出口径）；给 hw 则定长（探非法组合用）。
+    """
     pytest.importorskip("onnx")
     import onnx
     from onnx import TensorProto, helper
 
-    x = helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, 1, None, None])
+    dims = [1, 1, *(hw if hw else (None, None))]
+    x = helper.make_tensor_value_info("input", TensorProto.FLOAT, dims)
     y = helper.make_tensor_value_info("output", TensorProto.FLOAT, [1, 1, None, None])
     if scale == 1:
         nodes = [helper.make_node("Identity", ["input"], ["output"])]
@@ -129,6 +133,21 @@ def test_y_path_disables_u8_wrap(tmp_path):
                        device="cpu")
     eng.load()
     assert eng.u8_wrapped is False and eng._u8_sess is None
+
+
+def test_y_static_shape_rejected_at_load(tmp_path):
+    """y 模型 + 定长导出组合：load 期即报清晰错误。
+
+    _infer_y 的分发在 fixed_hw 判断之前，定长 y 模型若放行会在首帧撞
+    ORT shape mismatch 的晦涩报错——防线前移到加载期。
+    """
+    from sv.engines.onnx_engine import OnnxSrEngine
+
+    model = _y_probe_model(tmp_path, 1, hw=(32, 32))
+    eng = OnnxSrEngine(model, 1, io={"color": "y", "range": "0-1", "pad": 1},
+                       device="cpu")
+    with pytest.raises(ValueError, match="定长导出"):
+        eng.load()
 
 
 # ---- 真实权重端到端（权重在 models_store；无权重跳过，DML 门控同 V3.1 惯例）----

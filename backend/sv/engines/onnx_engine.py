@@ -147,6 +147,12 @@ class OnnxSrEngine(BaseEngine):
         shape = inp.shape
         if len(shape) == 4 and isinstance(shape[2], int) and isinstance(shape[3], int):
             self.fixed_hw = (shape[2], shape[3])
+            if self.color == "y":
+                # _infer_y 走固定 hw 补边路径（分发在 fixed_hw 判断之前），
+                # 定长导出的 y 模型会在首帧撞 ORT shape mismatch——load 期即报
+                raise ValueError(
+                    "单通道 y 模型不支持定长导出，请改用动态尺寸导出"
+                    "（ArtCNN 官方导出即动态）")
         else:
             self.fixed_hw = None
         # batch 轴：动态(字符串)可批处理；固定 int 则只能按该值
