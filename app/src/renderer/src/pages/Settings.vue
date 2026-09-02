@@ -361,7 +361,7 @@ async function saveCloseToTray(v: boolean) {
 async function checkUpdate() {
   checking.value = true
   try {
-    await checkAppUpdate() // 结果进 store.update,本页文案由 computed 派生
+    await checkAppUpdate(true) // 手动检查允许切 R2 备用源；结果进 store.update,本页文案由 computed 派生
   } finally {
     checking.value = false
   }

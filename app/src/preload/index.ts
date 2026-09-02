@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'ele
 contextBridge.exposeInMainWorld('sv', {
   backendInfo: () => ipcRenderer.invoke('backend:info') as Promise<{ baseUrl: string; token?: string }>,
   appVersion: () => ipcRenderer.invoke('app:version') as Promise<string>,
-  checkUpdate: () => ipcRenderer.invoke('app:check-update') as Promise<{
+  checkUpdate: (allowMirror?: boolean) => ipcRenderer.invoke('app:check-update', allowMirror) as Promise<{
     status: string
     current: string
     version?: string

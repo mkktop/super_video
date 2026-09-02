@@ -180,7 +180,7 @@ cd app && pnpm dist
 
 ### R2 备用下载源（v0.4.0 起）
 
-GitHub 对国内网络连通性不稳定，客户端内置 R2 镜像（Cloudflare R2 桶 `super-video`，自定义域 `https://super-video.kaikun.top/`）作为备用源：**检查更新**先走 GitHub，连通失败自动切 R2 重查；**下载**从最近成功检查的源发起，网络错误自动切另一源重试一次。GitHub 仍是事实源（通道判定/更新说明），网络恢复后自动回主源。R2 上只有「最新正式版」：`latest.yml` 逐版覆盖 + 安装包按原名平铺。
+GitHub 对国内网络连通性不稳定，客户端内置 R2 镜像（Cloudflare R2 桶 `super-video`，自定义域 `https://super-video.kaikun.top/`）作为备用源。**仅手动「检查更新」时启用**（设置页点按钮）：先走 GitHub，连通失败自动切 R2 重查；启动时自动检查只走 GitHub 不切（省 R2 请求）。**下载**从最近成功检查的源发起，网络错误自动切另一源重试一次（下载是手动动作，GitHub 下载域不通时兜底生效）。GitHub 仍是事实源（通道判定/更新说明），网络恢复后自动回主源。R2 上只有「最新正式版」：`latest.yml` 逐版覆盖 + 安装包按原名平铺。
 
 - 配置：仓库 Actions secrets 加 `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`（Cloudflare 控制台建 R2 编辑权限的 API Token）。未配置时 release.yml 对应步骤自动跳过，不影响发版。
 - 上传：release.yml 在 tag 发版时用 wrangler 把同一次构建的 `latest.yml` + 安装包传 R2（与 GitHub Release 同产物，sha512 跨源一致）。

@@ -5,7 +5,8 @@ declare global {
     sv: {
       backendInfo: () => Promise<{ baseUrl: string; token?: string }>
       appVersion: () => Promise<string>
-      checkUpdate: () => Promise<{
+      /** allowMirror：仅手动检查传 true，允许 GitHub 失败后切 R2 备用源 */
+      checkUpdate: (allowMirror?: boolean) => Promise<{
         status: string
         current: string
         version?: string

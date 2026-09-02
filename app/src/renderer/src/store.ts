@@ -304,10 +304,12 @@ function connectWs() {
   ws.onerror = () => ws.close()
 }
 
-/** 应用更新检查:启动一次 + 设置页手动触发,结果共享给顶栏提示与设置页 */
-export async function checkAppUpdate() {
+/** 应用更新检查:启动一次 + 设置页手动触发,结果共享给顶栏提示与设置页。
+ * allowMirror：手动检查传 true（GitHub 失败可切 R2 备用源）；启动自动检查不传
+ * （省 R2 请求） */
+export async function checkAppUpdate(allowMirror = false) {
   try {
-    const r = await window.sv.checkUpdate()
+    const r = await window.sv.checkUpdate(allowMirror)
     store.update.status = r.status as typeof store.update.status
     store.update.version = r.version ?? ''
     store.update.current = r.current ?? ''

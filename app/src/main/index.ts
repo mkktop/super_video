@@ -618,7 +618,7 @@ function setupAutoUpdate(): void {
   }
 }
 
-async function checkUpdateManually(): Promise<{
+async function checkUpdateManually(allowMirror: boolean): Promise<{
   status: string
   current: string
   version?: string
@@ -630,10 +630,11 @@ async function checkUpdateManually(): Promise<{
   if (updaterBusy) return { status: 'busy', current }
   updaterBusy = true
   try {
-    // 主源优先：GitHub 连通失败才切 R2 重查一次；记录成功源供下载阶段使用
+    // 主源优先：仅手动检查（allowMirror）允许 GitHub 连通失败后切 R2 重查——
+    // 启动自动检查不打备用源（省 R2 请求），连不上就保持原样
     let src: 'github' | 'r2' = 'github'
     let outcome = await checkAtSource(src)
-    if (outcome.err && isNetworkError(outcome.err)) {
+    if (allowMirror && outcome.err && isNetworkError(outcome.err)) {
       console.warn('[updater] GitHub 检查失败，切换备用源 R2 重试:', outcome.err)
       src = 'r2'
       outcome = await checkAtSource(src)
@@ -755,7 +756,8 @@ ipcMain.handle('backend:info', () => ({ baseUrl, token: apiToken }))
 
 ipcMain.handle('app:version', () => app.getVersion())
 
-ipcMain.handle('app:check-update', () => checkUpdateManually())
+ipcMain.handle('app:check-update', (_e, allowMirror?: unknown) =>
+  checkUpdateManually(allowMirror === true))
 
 ipcMain.handle('app:download-update', () => downloadUpdate())
 
