@@ -1,0 +1,34 @@
+{
+  "id": "remacri-4x",
+  "name": "4x-Remacri（社区照片 · 温和）",
+  "vendor": "foolhardy",
+  "license": "CC-BY-NC-SA-4.0",
+  "engine": "onnx",
+  "family": "community",
+  "scale": [
+    4
+  ],
+  "content": [
+    "general"
+  ],
+  "temporal": false,
+  "speed": "balanced",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 4
+  },
+  "description": "社区口碑款，风格介于 x4plus 与 UltraSharp 之间：细节增强更温和、不易过锐",
+  "files": [
+    {
+      "name": "4x-Remacri.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x-Remacri.onnx",
+      "sha256": "5c5ede6ca94f5bd160b3299ce17007fce5c91ea6603ece943577f1f87f004c91",
+      "size": 67132637
+    }
+  ],
+  "u8_wrap": true
+}

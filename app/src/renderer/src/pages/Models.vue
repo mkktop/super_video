@@ -20,28 +20,35 @@ import { api, type ModelInfo } from '../api'
 import { refreshModels, store } from '../store'
 
 const message = useMessage()
-const tab = ref<'all' | 'installed' | 'anime' | 'general'>('all')
+const tab = ref<'all' | 'installed' | 'anime' | 'comic' | 'general'>('all')
 
 const speedLabel = { fast: '⚡ 快速', balanced: '⚖ 均衡', slow: '🐢 高质量慢速' }
 // 'real' 与 'general' 是注册表两代写入口径，展示与筛选统一按「真人/通用」
-const contentLabel = { anime: '动漫', general: '真人/通用', real: '真人/通用' }
+const contentLabel = { anime: '动漫', comic: '漫画', general: '真人/通用', real: '真人/通用' }
 
 /** 家族分节（纯展示层，按 id 前缀派生）：模型上量后一个家族十几张变体卡平铺
  *  难扫，按家族分节、家族顺序手工定推荐位；注册表新增未匹配的家族落「其他」，
- *  不改前端也不丢展示 */
-const FAMILIES: Array<{ key: string; name: string; note?: string }> = [
+ *  不改前端也不丢展示。ids 用于没有公共前缀的家族（社区精选三款） */
+const FAMILIES: Array<{ key: string; name: string; note?: string; ids?: string[] }> = [
   { key: 'animejanai-v31', name: 'AnimeJaNai V3.1 HD', note: '新一代 SPAN 架构 · 当前推荐' },
   { key: 'animejanai-v3', name: 'AnimeJaNai V3 HD', note: '上一代架构' },
   { key: 'real-cugan', name: 'Real-CUGAN', note: '动漫高画质' },
   { key: 'artcnn', name: 'ArtCNN', note: '动漫 · 轻量高速（亮度通道超分）' },
   { key: 'ani4k-v2', name: 'Ani4K v2' },
+  { key: 'mangajanai', name: 'MangaJaNai', note: '漫画专模 · 黑白页按源高度自适应' },
+  { key: 'illustrationjanai', name: 'IllustrationJaNai', note: '彩色漫画页 / 插画' },
   { key: 'realesrgan', name: 'Real-ESRGAN', note: '真人/通用' },
+  { key: 'hat', name: 'HAT-L Real GAN', note: '真人图片 4x 画质旗舰' },
+  { key: 'swinir', name: 'SwinIR', note: '真人图片 4x · transformer' },
   { key: 'dis', name: 'DIS', note: '真人/通用 · 2x 轻量修复' },
+  { key: 'seemore', name: 'SeemoRe', note: '通用 · 轻量多倍率' },
+  { key: 'community', name: '社区精选', note: 'OpenModelDB 口碑款 · CC BY-NC-SA', ids: ['ultrasharp-4x', 'animesharp-4x', 'remacri-4x'] },
   { key: 'realesr-animevideov3', name: 'AnimeVideo', note: '动漫 · 随软件内置' },
   { key: 'animejanai-v2', name: 'AnimeJaNai V2', note: '旧代' },
   { key: 'rife', name: 'RIFE 补帧', note: '插帧（帧率翻倍），功能不同于超分' },
 ]
-const inFamily = (id: string, key: string) => id === key || id.startsWith(`${key}-`)
+const inFamily = (id: string, f: { key: string; ids?: string[] }) =>
+  f.ids ? f.ids.includes(id) : id === f.key || id.startsWith(`${f.key}-`)
 
 const groups = computed<Array<{ key: string; name: string; note?: string; models: ModelInfo[] }>>(() => {
   const list = store.models
@@ -49,13 +56,14 @@ const groups = computed<Array<{ key: string; name: string; note?: string; models
       if (tab.value === 'all') return true
       if (tab.value === 'installed') return m.installed || m.bundled
       if (tab.value === 'anime') return m.content.includes('anime')
+      if (tab.value === 'comic') return m.content.includes('comic')
       return m.content.includes('general') || m.content.includes('real')
     })
     // 组内已下载在前（稳定排序保持注册表顺序），扫一眼就知道哪些已就绪
     .sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled))
   const out = FAMILIES.map((f) => ({
     key: f.key, name: f.name, note: f.note,
-    models: list.filter((m) => inFamily(m.id, f.key)),
+    models: list.filter((m) => inFamily(m.id, f)),
   })).filter((g) => g.models.length > 0)
   const known = new Set(out.flatMap((g) => g.models.map((m) => m.id)))
   const other = list.filter((m) => !known.has(m.id))
@@ -137,6 +145,7 @@ async function doImport() {
         <NButton size="small" :type="tab === 'all' ? 'primary' : 'default'" @click="tab = 'all'">全部</NButton>
         <NButton size="small" :type="tab === 'installed' ? 'primary' : 'default'" @click="tab = 'installed'">已下载</NButton>
         <NButton size="small" :type="tab === 'anime' ? 'primary' : 'default'" @click="tab = 'anime'">动漫</NButton>
+        <NButton size="small" :type="tab === 'comic' ? 'primary' : 'default'" @click="tab = 'comic'">漫画</NButton>
         <NButton size="small" :type="tab === 'general' ? 'primary' : 'default'" @click="tab = 'general'">真人/通用</NButton>
       </NSpace>
     </div>

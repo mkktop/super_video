@@ -1,0 +1,146 @@
+{
+  "id": "mangajanai",
+  "name": "MangaJaNai（漫画 · 高度自适应）",
+  "vendor": "the-database",
+  "license": "CC-BY-NC-4.0",
+  "engine": "onnx",
+  "family": "mangajanai",
+  "scale": [
+    2,
+    4
+  ],
+  "content": [
+    "comic"
+  ],
+  "temporal": false,
+  "speed": "fast",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": {
+      "2": 2,
+      "4": 4
+    },
+    "batch_hint": 1,
+    "auto_variant": "height"
+  },
+  "description": "黑白漫画专用超分：按源图高度自动选 7 档专训权重之一（网点频率对位，还原印刷网点、去 JPEG/摩尔纹），2x/4x 各 7 档；彩色页请用 IllustrationJaNai",
+  "files": [
+    {
+      "name": "2x_MangaJaNai_1200p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_MangaJaNai_1200p.onnx",
+      "sha256": "61c62ca8490e56622a4c05b8c3d182db6cdaa2fe75c6b9d7a67fd5736422e117",
+      "size": 67156246,
+      "scale": 2,
+      "variant": "1200p"
+    },
+    {
+      "name": "2x_MangaJaNai_1300p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_MangaJaNai_1300p.onnx",
+      "sha256": "61d18f0fd5583029a0109c4509601cd22fc3f4b3405716bbdd32d07b912a0a65",
+      "size": 67156246,
+      "scale": 2,
+      "variant": "1300p"
+    },
+    {
+      "name": "2x_MangaJaNai_1400p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_MangaJaNai_1400p.onnx",
+      "sha256": "f029264e7e3ad54704702eec905ef2ee81e1db4ae640f4ae28b53f04302e0dd5",
+      "size": 67156246,
+      "scale": 2,
+      "variant": "1400p"
+    },
+    {
+      "name": "2x_MangaJaNai_1500p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_MangaJaNai_1500p.onnx",
+      "sha256": "05f4f0ef603d296e25c9a48edef16327f2fa804012941adf4ceaf0490e9b3047",
+      "size": 67156246,
+      "scale": 2,
+      "variant": "1500p"
+    },
+    {
+      "name": "2x_MangaJaNai_1600p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_MangaJaNai_1600p.onnx",
+      "sha256": "e771698cea18cbb4f201b3f3ed157097ebab0278dfde41f0ddabef73d8c0b1ab",
+      "size": 67156246,
+      "scale": 2,
+      "variant": "1600p"
+    },
+    {
+      "name": "2x_MangaJaNai_1920p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_MangaJaNai_1920p.onnx",
+      "sha256": "08646b3a0bb581468dc52233a0f5fb98aae4537896f274e06a5b80ee38ad5ecb",
+      "size": 67156246,
+      "scale": 2,
+      "variant": "1920p"
+    },
+    {
+      "name": "2x_MangaJaNai_2048p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/2x_MangaJaNai_2048p.onnx",
+      "sha256": "568665dafcce482217a65e79e32804a48d93b532989e79b44bf2902abeae96af",
+      "size": 67156246,
+      "scale": 2,
+      "variant": "2048p"
+    },
+    {
+      "name": "4x_MangaJaNai_1200p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_MangaJaNai_1200p.onnx",
+      "sha256": "56ce44f24382037d983dc4241b4bc142c312fc36b337a4a36016fb70d28afeba",
+      "size": 67132637,
+      "scale": 4,
+      "variant": "1200p"
+    },
+    {
+      "name": "4x_MangaJaNai_1300p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_MangaJaNai_1300p.onnx",
+      "sha256": "adc217d16861a1314c283303dd10d7e799a18e445471a7af99838d5c65bfe7cf",
+      "size": 67132637,
+      "scale": 4,
+      "variant": "1300p"
+    },
+    {
+      "name": "4x_MangaJaNai_1400p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_MangaJaNai_1400p.onnx",
+      "sha256": "69f5ad3040585707333b56efaa24d0bd04939fc544b66a0f4ed23ec49e1e84f0",
+      "size": 67132637,
+      "scale": 4,
+      "variant": "1400p"
+    },
+    {
+      "name": "4x_MangaJaNai_1500p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_MangaJaNai_1500p.onnx",
+      "sha256": "72d9fcc06b3c4088e1f4d7d1b8b93bbe7333a54d701636880363e5312094f307",
+      "size": 67132637,
+      "scale": 4,
+      "variant": "1500p"
+    },
+    {
+      "name": "4x_MangaJaNai_1600p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_MangaJaNai_1600p.onnx",
+      "sha256": "12818afdfb458f09b0297c34dd6ae33d9590bef575d486b130c58ba3cf0072ae",
+      "size": 67132637,
+      "scale": 4,
+      "variant": "1600p"
+    },
+    {
+      "name": "4x_MangaJaNai_1920p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_MangaJaNai_1920p.onnx",
+      "sha256": "025a19cee2c8520372c633b7d4ef075b55de5c3619b7bb0fe6a9efd2ff7b3548",
+      "size": 67132637,
+      "scale": 4,
+      "variant": "1920p"
+    },
+    {
+      "name": "4x_MangaJaNai_2048p.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_MangaJaNai_2048p.onnx",
+      "sha256": "ff5f8c1127aa8f99a66c5045910c1e1bd3d3ba19c680f1ec048e6556b36ccde5",
+      "size": 67132637,
+      "scale": 4,
+      "variant": "2048p"
+    }
+  ],
+  "u8_wrap": true
+}

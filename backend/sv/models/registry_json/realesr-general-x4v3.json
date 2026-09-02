@@ -1,0 +1,34 @@
+{
+  "id": "realesr-general-x4v3",
+  "name": "RealESR-General x4v3（真人 4x 快档）",
+  "vendor": "xinntao",
+  "license": "BSD-3-Clause",
+  "engine": "onnx",
+  "family": "realesrgan",
+  "scale": [
+    4
+  ],
+  "content": [
+    "general"
+  ],
+  "temporal": false,
+  "speed": "fastest",
+  "vram_gb": 1,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 4
+  },
+  "description": "官方 tiny 快档（SRVGG，权重仅 5MB）：真人 4x 里速度与 x4plus 拉开档位，批量图片快速过",
+  "files": [
+    {
+      "name": "realesr-general-x4v3.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/realesr-general-x4v3.onnx",
+      "sha256": "15e84d1e0981fa624f79f866f72f639caec15429b21feb20da7eab37d9449f8d",
+      "size": 4866417
+    }
+  ],
+  "u8_wrap": true
+}

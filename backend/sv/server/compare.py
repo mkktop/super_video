@@ -284,7 +284,7 @@ def _pick_still_times(video: Path, duration_s: float | None = None,
     return ts
 
 
-def _load_engine(spec, scale: int, warmup_hw: tuple[int, int], log):
+def _load_engine(spec, scale: int, warmup_hw: tuple[int, int], log, variant: str | None = None):
     """按任务同款规则加载引擎（复用 worker 的公共函数：fp16 补转/TRT/降档）。"""
     from ..models.registry import model_file
     from .settings import load as load_settings
@@ -297,9 +297,9 @@ def _load_engine(spec, scale: int, warmup_hw: tuple[int, int], log):
         eng.load()
         return eng
     precision = load_settings().get("precision", "fp32")
-    weight = model_file(spec, scale, precision)
+    weight = model_file(spec, scale, precision, variant)
     eng, _ = _load_onnx_engine(
-        weight, spec, scale, None, precision,
+        weight, spec, scale, variant, precision,
         int(spec.tile_hint or 0), warmup_hw, batch=1, log=log)
     return eng
 
@@ -354,9 +354,11 @@ def _run_job(job: dict) -> None:
         t0 = time.perf_counter()
         try:
             spec = get_model(mid)
-            need = file_for_scale(spec, job["scale"], None)
+            from ..models.registry import auto_variant
+            variant = auto_variant(spec, job["scale"], warmup_hw[0])
+            need = file_for_scale(spec, job["scale"], variant)
             manager.ensure_files(spec, [need])  # 未安装模型当场下载
-            engine = _load_engine(spec, job["scale"], warmup_hw, _log)
+            engine = _load_engine(spec, job["scale"], warmup_hw, _log, variant)
 
             if job["kind"] == "video":
                 out = work / f"{mid}.mp4"

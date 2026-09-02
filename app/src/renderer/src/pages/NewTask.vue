@@ -204,7 +204,7 @@ const audioHint = computed(() => {
 })
 
 const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
-const contentLabel = { anime: '动漫', general: '真人/通用', real: '真人/通用' } as Record<string, string>
+const contentLabel = { anime: '动漫', comic: '漫画', general: '真人/通用', real: '真人/通用' } as Record<string, string>
 
 /** 选模型：新模型支持当前倍率则保留，否则回落到最小倍率 */
 function selectModel(id: string) {

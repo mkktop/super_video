@@ -1,0 +1,34 @@
+{
+  "id": "realesr-general-x4v3-wdn",
+  "name": "RealESR-General x4v3 降噪（真人 4x · 快）",
+  "vendor": "xinntao",
+  "license": "BSD-3-Clause",
+  "engine": "onnx",
+  "family": "realesrgan",
+  "scale": [
+    4
+  ],
+  "content": [
+    "general"
+  ],
+  "temporal": false,
+  "speed": "fastest",
+  "vram_gb": 1,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 4
+  },
+  "description": "快档的降噪权重（wdn）：带噪点的老照片/截图在超分同时压噪，避免噪点被放大",
+  "files": [
+    {
+      "name": "realesr-general-wdn-x4v3.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/realesr-general-wdn-x4v3.onnx",
+      "sha256": "1bddf505b7d2335d87a24a26e8acb82d915e99bf9e0dfc958c2b22a063d48e6b",
+      "size": 4866417
+    }
+  ],
+  "u8_wrap": true
+}

@@ -43,7 +43,8 @@ def fake_engines(monkeypatch):
     import sv.server.compare as cmp_mod
     import sv.models.manager as mgr
 
-    monkeypatch.setattr(cmp_mod, "_load_engine", lambda spec, scale, hw, log: _Nearest2x())
+    monkeypatch.setattr(cmp_mod, "_load_engine",
+                        lambda spec, scale, hw, log, variant=None: _Nearest2x())
     monkeypatch.setattr(mgr, "ensure_files", lambda spec, needs: None)
     monkeypatch.setattr(
         "sv.models.registry.get_model",
@@ -272,7 +273,7 @@ def test_cancel_skips_remaining_models(client, tmp_path, fake_engines, monkeypat
 
     gate = threading.Event()
 
-    def gated(spec, scale, hw, log):
+    def gated(spec, scale, hw, log, variant=None):
         gate.wait(timeout=10)  # 卡住 A 的引擎加载，制造确定性的取消窗口
         return _Nearest2x()
 
@@ -306,7 +307,7 @@ def test_cancel_queued_job(client, tmp_path, fake_engines, monkeypatch):
     gate = threading.Event()
     monkeypatch.setattr(
         cmp_mod, "_load_engine",
-        lambda spec, scale, hw, log: (gate.wait(5), _Nearest2x())[1])
+        lambda spec, scale, hw, log, variant=None: (gate.wait(5), _Nearest2x())[1])
     gate.set()  # 不阻塞，走正常队列
     clip = tmp_path / "cq.mp4"
     _make_clip(clip, 12)
@@ -316,7 +317,7 @@ def test_cancel_queued_job(client, tmp_path, fake_engines, monkeypatch):
         "models": ["cmp-a", "cmp-b"], "scale": 2})
     hold = threading.Event()
 
-    def holding(spec, scale, hw, log):
+    def holding(spec, scale, hw, log, variant=None):
         hold.wait(timeout=10)
         return _Nearest2x()
 

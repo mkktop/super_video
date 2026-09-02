@@ -1,0 +1,34 @@
+{
+  "id": "hat-real-x4",
+  "name": "HAT-L Real GAN（真人 4x 画质旗舰）",
+  "vendor": "XPixelGroup",
+  "license": "Apache-2.0",
+  "engine": "onnx",
+  "family": "hat",
+  "scale": [
+    4
+  ],
+  "content": [
+    "general"
+  ],
+  "temporal": false,
+  "speed": "slow",
+  "vram_gb": 4,
+  "tile_hint": 256,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 1
+  },
+  "description": "真人照片 4x 画质旗舰（HAT-L，256 定长分块）：比 x4plus 细节更稳、伪影更少；慢速但图片任务无所谓速度",
+  "files": [
+    {
+      "name": "Real_HAT_GAN_SRx4.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/Real_HAT_GAN_SRx4.onnx",
+      "sha256": "323de9e82511d6efcb1160e408474ed3f3210dea7fa61a2d2e367649d5fa3042",
+      "size": 161222851
+    }
+  ],
+  "u8_wrap": false
+}

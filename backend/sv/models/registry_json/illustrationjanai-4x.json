@@ -1,0 +1,34 @@
+{
+  "id": "illustrationjanai-4x",
+  "name": "IllustrationJaNai 4x（彩色插画）",
+  "vendor": "the-database",
+  "license": "CC-BY-NC-4.0",
+  "engine": "onnx",
+  "family": "illustrationjanai",
+  "scale": [
+    4
+  ],
+  "content": [
+    "comic"
+  ],
+  "temporal": false,
+  "speed": "balanced",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 4
+  },
+  "description": "彩色漫画页/插画 4x：去 JPEG 伪影与印刷网点残留，封面彩页放大通用",
+  "files": [
+    {
+      "name": "4x_IllustrationJaNai_V1_ESRGAN.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_IllustrationJaNai_V1_ESRGAN.onnx",
+      "sha256": "e8272216f90cfb9bc0c1de0119b56ee98108b89c600c575f1c552878a5d48e66",
+      "size": 67132637
+    }
+  ],
+  "u8_wrap": true
+}

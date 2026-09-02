@@ -1,0 +1,34 @@
+{
+  "id": "illustrationjanai-4x-dat2",
+  "name": "IllustrationJaNai 4x DAT2（彩色插画 · 画质）",
+  "vendor": "the-database",
+  "license": "CC-BY-NC-4.0",
+  "engine": "onnx",
+  "family": "illustrationjanai",
+  "scale": [
+    4
+  ],
+  "content": [
+    "comic"
+  ],
+  "temporal": false,
+  "speed": "slow",
+  "vram_gb": 3,
+  "tile_hint": 256,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 1
+  },
+  "description": "彩色插画 4x 画质档（DAT2 transformer，256 定长分块）：细节与线条还原上限更高，速度慢于 ESRGAN 档",
+  "files": [
+    {
+      "name": "4x_IllustrationJaNai_V1_DAT2.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x_IllustrationJaNai_V1_DAT2.onnx",
+      "sha256": "ecc6878f0879db975f383d3f0ab2a5f15a61849a825481eb47bbb094c2d70631",
+      "size": 51322543
+    }
+  ],
+  "u8_wrap": false
+}

@@ -1,0 +1,34 @@
+{
+  "id": "hat-real-x4-sharp",
+  "name": "HAT-L Real GAN Sharp（真人 4x · 锐利）",
+  "vendor": "XPixelGroup",
+  "license": "Apache-2.0",
+  "engine": "onnx",
+  "family": "hat",
+  "scale": [
+    4
+  ],
+  "content": [
+    "general"
+  ],
+  "temporal": false,
+  "speed": "slow",
+  "vram_gb": 4,
+  "tile_hint": 256,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 1
+  },
+  "description": "HAT 画质旗舰的锐利风格独立权重（非后处理）：观感更锐，偏好清晰线条的照片选它",
+  "files": [
+    {
+      "name": "Real_HAT_GAN_sharper.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/Real_HAT_GAN_sharper.onnx",
+      "sha256": "0387940d6ac444b92410fd3414fe02c0a38411913a3a59d9c87dc974f40147e8",
+      "size": 161222851
+    }
+  ],
+  "u8_wrap": false
+}

@@ -105,6 +105,27 @@ def file_for_scale(spec: ModelSpec, scale: int, variant: str | None = None) -> d
     raise ModelNotFoundError(f"{spec.id} 缺少 x{scale} 权重")
 
 
+def auto_variant(spec: ModelSpec, scale: int, src_h: int | None) -> str | None:
+    """按源高度自动选变体（io.auto_variant == "height"——MangaJaNai 系）。
+
+    该家族权重按设计源高度分档（"1200p".."2048p"，网点频率对位），取与源
+    高度最近的档；平手取更低档（欠拟合网点比过拟合稳）。显式 variant /
+    非该家族 / 未知高度一律返回 None 走 file_for_scale 的常规解析。
+    """
+    if src_h is None or spec.io.get("auto_variant") != "height":
+        return None
+    cands = [
+        (int(f["variant"][:-1]), f["variant"])
+        for f in spec.files
+        if f.get("scale") == scale
+        and isinstance(f.get("variant"), str)
+        and f["variant"].endswith("p") and f["variant"][:-1].isdigit()
+    ]
+    if not cands:
+        return None
+    return min(cands, key=lambda t: (abs(t[0] - src_h), t[0]))[1]
+
+
 def model_file(spec: ModelSpec, scale: int, precision: str = "fp32",
                variant: str | None = None) -> Path:
     """权重解析：models_store 优先，其次随包 bundled 目录。

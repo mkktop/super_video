@@ -1,0 +1,34 @@
+{
+  "id": "swinir-real-x4",
+  "name": "SwinIR-L Real GAN（真人 4x）",
+  "vendor": "JingyunLiang",
+  "license": "Apache-2.0",
+  "engine": "onnx",
+  "family": "swinir",
+  "scale": [
+    4
+  ],
+  "content": [
+    "general"
+  ],
+  "temporal": false,
+  "speed": "slow",
+  "vram_gb": 4,
+  "tile_hint": 256,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 1
+  },
+  "description": "老牌 transformer 画质档（SwinIR-L，256 定长分块）：训练集含 Manga109，真人照片与漫画皆可用；与 HAT 二选一即可",
+  "files": [
+    {
+      "name": "SwinIR-L_realSR_x4_GAN.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/SwinIR-L_realSR_x4_GAN.onnx",
+      "sha256": "a998338e63ee5c4d9b9fd4231adc3dc4b0bf399a8e668a58c14412dca9149a19",
+      "size": 141541799
+    }
+  ],
+  "u8_wrap": false
+}

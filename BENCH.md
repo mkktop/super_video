@@ -655,3 +655,55 @@ RGB→CHW→[0,1]（_preprocess /255、_postprocess clamp(0,1)*255）。
 Real-ESRGAN 后）两节。测试 +16（test_artcnn_dis.py：manifest 语义 3 +
 Y 探针数学 3 + 真权重 CPU 5 + GPU-gated DML 5）；全量 324 passed +
 1 skipped；vue-tsc node/web 双绿 + pnpm build 绿。
+
+## 图片/漫画超分扩容：MangaJaNai 漫画专模 + HAT/SwinIR 真人 4x 画质档（2026-09-02）
+
+背景：项目澄清**非商用**后 CC BY-NC 系解锁（MangaJaNai/社区款），两轮调研的
+落地批次——29 个新资产（models-v1 38→67）、14 张市场卡、全新「漫画」内容类型。
+
+### 导出实证（全部 torch-vs-ort 逐位/uint8 口径）
+
+- **动态导出（spandrel 加载 → opset17 动态轴）**：MangaJaNai ×14（2x/4x ×
+  1200p~2048p 七高度档）、Remacri、x4plus_anime_6B、x4v3(+wdn)、IllustrationJaNai
+  V1 4x ESRGAN / 2x ESRGAN——47x63 与 128x96 两尺寸 uint8 maxdiff=1（rounding）。
+  真图 sanity：漫画风合成页（线稿+网点+文字条，900x1200 按设计高度喂 1200p 档）
+  模型 edge-corr 0.85 / PSNR 22.9 vs bicubic 0.62 / 19.3，**网点还原为干净圆点**
+  （bicubic 为糊团）——注意合成彩色渐变/小尺寸喂入是 OOD，corr 会假性偏低。
+- **官方 ONNX 直用**：UltraSharp（fp32 opset17，动态 batch+HW，0-1 域判别式：
+  0-255 喂入出 282 线性确认）、AnimeSharp（fp32 opset16 同口径）、IllustrationJaNai
+  V3 SPAN_S fp16（官方 opset23 fp16 IO，DML 实测可跑）。
+- **定长 256 导出（关键教训）**：窗口注意力（HAT/SwinIR/DAT2）动态导出的
+  Reshape 烤死 trace 常量（{1,47,63,180}→{1,2,16,3,16,180} 级崩溃），dynamo
+  导出器又因 torch.export 失败不可用；**SeemoRe 动态导出更隐蔽——H≥96 后
+  MoE 路由语义系统性发散（47% 像素 maxdiff>2），小尺寸验证全绿掩盖**。三者
+  统一 256 定长导出：tile span 恒 ≤tile（tile.py _axis_spans 保证），fixed_hw
+  补边路径接管，torch-vs-ort@256 全部 maxdiff=1。**凡窗口注意力/MoE/带内部
+  pad 分支的架构，导出后必须做「多尺寸逐位对照」而非只验 trace 尺寸**。
+- **spandrel ESRGAN 内部 pad 分支折叠**：trace@64 时 `if pad_h or pad_w:`
+  走 false 支被常量折叠，奇数输入 pixelshuffle 崩（{1,3,95,1,127} reshape 失败
+  实证）→ io.pad 按倍率补边（2x 偶数 / 4x 的倍数，x4plus pad:4 同惯例）：
+  mangajanai {"2":2,"4":4}、x4v3/anime_6B/remacri/illu-4x = 4。
+- **CPU 导出环境**：torch 2.14+cpu + spandrel 0.4.2 即可全流程（无需 CUDA），
+  legacy 导出器（dynamo=False）仍可用；fp32 导出后 DML 走既有 fp16 惰性转换。
+
+### 引擎/产品语义
+
+- **io.auto_variant="height"**（MangaJaNai）：worker 图片/视频两路径 + compare
+  在变体为空时按源高度选最近档（平手取低），task log 明示所选档；显式 denoise
+  参数优先级不变。compare 桩签名同步（+variant=None 形参）。
+- IllustrationJaNai 2x 官方 fp16 导出的 u8 包装 A/B 在 DML 差 3（>容差 2）→
+  manifest u8_wrap:false 免每次加载空试回退；HAT/SwinIR/DAT2/SeemoRe 定长
+  模型 fixed_hw 天然跳过包装。
+- 市场页 FAMILIES 新增 MangaJaNai / IllustrationJaNai / HAT / SwinIR / SeemoRe /
+  社区精选（ids 列表匹配支持无公共前缀家族），「漫画」筛选 tab（content=comic）。
+
+### 测试与验证
+
+- 新增 test_imagesr_batch.py 20 例：manifest 语义 5（14 卡/高度变体唯一性/
+  定长语义/许可口径/auto_variant 守卫）+ 真权重 CPU 8（HAT fixed_hw 补边路径、
+  SeemoRe 三倍率、wdn 与 base 实质不同、官方 ONNX 动态 batch、本地权重 sha256
+  对账）+ GPU-gated DML 5（manga 包装生效/HAT 定长/SPAN fp16/UltraSharp
+  包装/SeemoRe x3，各 3 帧压力无崩溃）。全量 345 passed；compare 6 例曾因
+  桩 arity 挂 → 修桩后全绿（教训：给 _load_engine 加参数要 grep tests 里的
+  全部 lambda 桩）。
+- 权重 29 资产已传 models-v1（38→67，1.76GB），digest 逐一比对注册表 sha256。

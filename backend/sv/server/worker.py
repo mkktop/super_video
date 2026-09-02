@@ -306,6 +306,11 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
 
     denoise = params.get("denoise")
     variant = f"denoise{int(denoise)}" if denoise is not None else None
+    if variant is None:
+        from sv.models.registry import auto_variant
+        variant = auto_variant(spec, scale, height)  # MangaJaNai 系按源高度选权重
+        if variant:
+            emit({"type": "log", "line": f"按源高度 {height}p 自动选择权重档: {variant}"})
     try:
         from sv.models.registry import file_for_scale
         need = file_for_scale(spec, scale, variant)
@@ -548,6 +553,11 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
               "如需保留请将封装容器改为 MKV"})
     denoise = params.get("denoise")  # real-cugan 降噪档：0/1/2/3 → 对应变体权重
     variant = f"denoise{int(denoise)}" if denoise is not None else None
+    if variant is None:
+        from sv.models.registry import auto_variant
+        variant = auto_variant(spec, scale, info.height)  # MangaJaNai 系按源高度选权重
+        if variant:
+            emit({"type": "log", "line": f"按源高度 {info.height}p 自动选择权重档: {variant}"})
 
     try:
         from sv.models.registry import file_for_scale

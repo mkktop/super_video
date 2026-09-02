@@ -1,0 +1,34 @@
+{
+  "id": "animesharp-4x",
+  "name": "4x-AnimeSharp（社区动漫图片款）",
+  "vendor": "Kim2091",
+  "license": "CC-BY-NC-SA-4.0",
+  "engine": "onnx",
+  "family": "community",
+  "scale": [
+    4
+  ],
+  "content": [
+    "anime"
+  ],
+  "temporal": false,
+  "speed": "balanced",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 1
+  },
+  "description": "Kim2091 的动漫图片 4x 社区经典：线条锐利化处理，动漫截图/插画放大；官方 ONNX 导出",
+  "files": [
+    {
+      "name": "4x-AnimeSharp.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x-AnimeSharp.onnx",
+      "sha256": "da3c917439487e0c5b897aae776ce82759dabe8b68a00b0a1fdf5af2f90cc5eb",
+      "size": 67002795
+    }
+  ],
+  "u8_wrap": true
+}

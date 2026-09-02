@@ -1,0 +1,34 @@
+{
+  "id": "ultrasharp-4x",
+  "name": "4x-UltraSharp（社区照片口碑款）",
+  "vendor": "Kim2091 (Ulysses)",
+  "license": "CC-BY-NC-SA-4.0",
+  "engine": "onnx",
+  "family": "community",
+  "scale": [
+    4
+  ],
+  "content": [
+    "general"
+  ],
+  "temporal": false,
+  "speed": "balanced",
+  "vram_gb": 2,
+  "tile_hint": 0,
+  "fp16": true,
+  "io": {
+    "color": "rgb",
+    "range": "0-1",
+    "pad": 1
+  },
+  "description": "Upscayl 生态最出圈的社区照片 4x：锐利干净、泛用性极强；官方 ONNX 导出",
+  "files": [
+    {
+      "name": "4x-UltraSharp.onnx",
+      "url": "https://github.com/mkktop/super_video/releases/download/models-v1/4x-UltraSharp.onnx",
+      "sha256": "c83e0bf4fe1051ec7f2330614aa2edef0ad589d59c718934897a93459b180dd1",
+      "size": 67002795
+    }
+  ],
+  "u8_wrap": true
+}
