@@ -165,3 +165,24 @@ def test_download_failure_broadcast(dl_client):
                       for e in rec))
     ev = next(e for e in rec if e.get("failed"))
     assert "模拟网络故障" in ev["failed"]
+
+
+def test_download_immediate_zero_progress_event(dl_client):
+    """点击响应性：端点返回前就必须广播 0% 进度事件。
+
+    真实进度要等远端连上并收到首块数据才会来（直连 GitHub 常以十秒计），
+    UI 靠这条事件即时出进度条——回归口径：POST 同步返回后 rec 里已有。
+    """
+    app_mod, c, rec, monkeypatch = dl_client
+    gate = threading.Event()
+
+    def fake_download(spec, cb=None, only_files=None):
+        gate.wait(20)
+
+    monkeypatch.setattr(app_mod.manager, "is_downloaded", lambda spec: False)
+    monkeypatch.setattr(app_mod.manager, "download", fake_download)
+    r = c.post("/api/models/realesr-animevideov3/download")
+    assert r.status_code == 200
+    assert any(e.get("type") == "model_download" and e.get("progress") == 0 for e in rec), \
+        "端点返回前必须已广播 0% 进度事件"
+    gate.set()

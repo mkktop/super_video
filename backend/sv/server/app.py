@@ -528,6 +528,9 @@ async def download_model(model_id: str) -> dict:
                 bus.publish({"type": "model_download", "model_id": model_id,
                              "failed": str(e)})
 
+    # 即时反馈：真实进度事件要等远端连上并收到首块数据才来（直连 GitHub 常以十秒计），
+    # 先广播 0% 让前端立刻出进度条
+    bus.publish({"type": "model_download", "model_id": model_id, "progress": 0.0})
     asyncio.create_task(_do())
     return {"ok": True, "started": True}
 

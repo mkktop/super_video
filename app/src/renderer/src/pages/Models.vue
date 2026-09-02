@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   NButton,
   NEmpty,
@@ -79,11 +79,40 @@ const groups = computed<Array<{ key: string; name: string; note?: string; models
 
 const totalShown = computed(() => groups.value.reduce((n, g) => n + g.models.length, 0))
 
+function dropProgress(id: string) {
+  const { [id]: _drop, ...rest } = store.downloadProgress
+  store.downloadProgress = rest
+}
+
+// 0% 阶段 = 正在连远端（直连 GitHub 常以十秒计），文案区分于真实下载进度
+const dlPctText = (p: number) => (p === 0 ? '连接中…' : `${Math.round(p * 100)}%`)
+
 async function onDownload(id: string) {
+  // 即时反馈：首个进度事件要等远端连上才来，本地先挂 0% 条让点击立刻可见
+  store.downloadProgress = { ...store.downloadProgress, [id]: 0 }
   const r = await api.downloadModel(id)
-  if (!r.ok && r.status !== 409) message.error(`下载启动失败: ${r.status}`)
+  if (r.status === 409) {
+    dropProgress(id)
+    message.warning('已有下载正在进行，请稍候')
+    return
+  }
+  if (!r.ok) {
+    dropProgress(id)
+    message.error(`下载启动失败: ${r.status}`)
+    return
+  }
+  const j = (await r.json().catch(() => ({}))) as { already?: boolean }
+  if (j.already) dropProgress(id) // 已下载：不会有任何进度事件，撤掉占位条
   refreshModels()
 }
+
+// 失败事件从 WS 异步到达：store 记一条，这里弹 toast（进度条由 store 统一摘除）
+watch(
+  () => store.downloadFailed,
+  (f) => {
+    if (f) message.error(`模型下载失败：${f.msg}`)
+  },
+)
 
 async function onDelete(id: string) {
   const r = await api.deleteModel(id)
@@ -206,8 +235,9 @@ async function doImport() {
                   :percentage="Math.round(store.downloadProgress[m.id] * 100)"
                   :show-indicator="false"
                   :height="8"
+                  :processing="store.downloadProgress[m.id] === 0"
                 />
-                <span class="dl-pct">{{ Math.round(store.downloadProgress[m.id] * 100) }}%</span>
+                <span class="dl-pct">{{ dlPctText(store.downloadProgress[m.id]) }}</span>
               </div>
             </template>
             <template v-else-if="m.installed">
@@ -337,7 +367,7 @@ h1 { font-size: 20px; font-weight: 700; }
 }
 .bundled-note { color: #34d399; font-size: 12.5px; }
 .dl { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
-.dl-pct { font-size: 12px; color: #4f8cff; width: 38px; text-align: right; flex-shrink: 0; }
+.dl-pct { font-size: 12px; color: #4f8cff; min-width: 38px; text-align: right; flex-shrink: 0; }
 .imp-file { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .imp-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9aa0a6; font-size: 12.5px; }
 .imp-hint { margin-left: 10px; font-size: 11.5px; color: #9aa0a6; }

@@ -20,6 +20,8 @@ export const store = reactive({
   models: [] as ModelInfo[],
   presets: [] as Preset[],
   downloadProgress: {} as Record<string, number>, // model_id -> 0~1
+  /** 最近一次模型下载失败（Models 页 watch 弹 toast；null=无）。失败此前被静默吞掉 */
+  downloadFailed: null as null | { id: string; msg: string; ts: number },
   gpuName: '',
   engine: null as null | {
     backend: string
@@ -222,6 +224,7 @@ function handleWsEvent(raw: MessageEvent) {
     }
     if (ev.type === 'model_download') {
       const id: string = ev.model_id
+      if (ev.failed) store.downloadFailed = { id, msg: String(ev.failed), ts: Date.now() }
       if (ev.done || ev.failed) {
         const { [id]: _drop, ...rest } = store.downloadProgress
         store.downloadProgress = rest
