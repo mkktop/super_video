@@ -12,12 +12,16 @@ contextBridge.exposeInMainWorld('sv', {
   }>,
   downloadUpdate: () => ipcRenderer.invoke('app:download-update') as Promise<{ ok: boolean; error?: string }>,
   installUpdate: () => ipcRenderer.invoke('app:install-update') as Promise<void>,
-  updateState: () => ipcRenderer.invoke('app:update-state') as Promise<{ ready: string; downloading: boolean }>,
+  updateState: () => ipcRenderer.invoke('app:update-state') as Promise<{
+    ready: string
+    downloading: boolean
+    source: 'github' | 'r2'
+  }>,
   // 更新通道同步给主进程（electron-updater allowPrerelease 的开关来源）
   setUpdateChannel: (channel: 'stable' | 'preview') =>
     ipcRenderer.send('app:set-update-channel', channel),
-  onUpdateProgress: (cb: (percent: number) => void) => {
-    const fn = (_e: IpcRendererEvent, percent: number) => cb(percent)
+  onUpdateProgress: (cb: (p: { percent: number; source: 'github' | 'r2' }) => void) => {
+    const fn = (_e: IpcRendererEvent, p: { percent: number; source: 'github' | 'r2' }) => cb(p)
     ipcRenderer.on('app:update-progress', fn)
     return () => ipcRenderer.removeListener('app:update-progress', fn)
   },

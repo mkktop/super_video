@@ -178,7 +178,13 @@ const downloadPercent = computed(() => store.update.percent)
 const updateMsg = computed(() => {
   const u = store.update
   if (u.ready) return `新版本 v${u.ready} 已下载完成，点击"立即重启"生效`
-  if (u.downloading) return '正在下载更新…（下载完成后可点击"立即重启"）'
+  if (u.downloading) {
+    // 进度条下方明示当前下载源；切源（GitHub → R2 备用源）时进度回零重下，来源跟着变
+    const src = u.downloadSource === 'r2' ? 'R2 备用源' : u.downloadSource === 'github' ? 'GitHub' : ''
+    return src
+      ? `正在从 ${src} 下载更新…（下载完成后可点击"立即重启"）`
+      : '正在下载更新…（连接下载源中）'
+  }
   if (u.downloadError) return `下载失败：${u.downloadError}`
   if (!u.checked) return ''
   if (u.status === 'dev') return '开发模式不检查更新（打包版自动检查 GitHub Releases）'
@@ -370,6 +376,7 @@ async function checkUpdate() {
 async function doDownload() {
   store.update.downloading = true
   store.update.percent = 0
+  store.update.downloadSource = '' // 首个进度事件到达前来源未知（连接下载源阶段）
   store.update.downloadError = ''
   const r = await window.sv.downloadUpdate()
   if (!r.ok) {

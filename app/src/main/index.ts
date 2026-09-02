@@ -453,6 +453,8 @@ let updaterBusy = false
 let downloadBusy = false
 // 已下载待安装的版本：事件只广播一次，renderer 重载后靠 app:update-state 查询恢复
 let readyVersion = ''
+// 当前下载/最近一次下载所用的源（进度事件携带，UI 显示"从哪下载"）
+let downloadSource: 'github' | 'r2' = 'github'
 // 更新通道：renderer 读取设置后经 IPC 同步（照 close_to_tray 模式）。默认稳定——
 // 存量用户与未同步前（启动自动检查竞态）都只看正式版 Release，宁保守不尝鲜
 let updateChannel: 'stable' | 'preview' = 'stable'
@@ -603,7 +605,8 @@ function setupAutoUpdate(): void {
     // 差分下载实测会把旧版安装包错拼成"新更新"(v0.1.0→v0.1.1 两次复现)，
     // 禁用后走全量下载 + sha512 校验，241MB 一次性代价换正确性
     autoUpdater.disableDifferentialDownload = true
-    autoUpdater.on('download-progress', (p) => broadcast('app:update-progress', Math.round(p.percent)))
+    autoUpdater.on('download-progress', (p) =>
+      broadcast('app:update-progress', { percent: Math.round(p.percent), source: downloadSource }))
     autoUpdater.on('update-downloaded', (info) => {
       readyVersion = info.version
       broadcast('app:update-ready', info.version)
@@ -689,6 +692,7 @@ async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
       checkSource === 'github' ? ['github', 'r2'] : ['r2', 'github']
     let lastErr: unknown = null
     for (const src of sources) {
+      downloadSource = src // 每轮尝试都让进度事件带上真实源（切源后 UI 跟着变）
       const outcome = await checkAtSource(src)
       if (outcome.err) {
         lastErr = outcome.err
@@ -763,7 +767,11 @@ ipcMain.handle('app:download-update', () => downloadUpdate())
 
 ipcMain.handle('app:install-update', () => installUpdate())
 
-ipcMain.handle('app:update-state', () => ({ ready: readyVersion, downloading: downloadBusy }))
+ipcMain.handle('app:update-state', () => ({
+  ready: readyVersion,
+  downloading: downloadBusy,
+  source: downloadSource,
+}))
 
 // 更新通道同步：Settings 切换与 store 启动加载都会发；下次检查更新即生效
 ipcMain.on('app:set-update-channel', (_e, v: unknown) => {

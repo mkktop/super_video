@@ -48,6 +48,7 @@ export const store = reactive({
     ready: '', // 已下载待安装的版本(空=未下载)
     downloading: false,
     percent: 0,
+    downloadSource: '' as '' | 'github' | 'r2', // 当前下载源（进度事件携带）
     downloadError: '',
   },
   hardware: null as null | {
@@ -326,8 +327,9 @@ export async function checkAppUpdate(allowMirror = false) {
 /** 更新下载事件 → 全局 store：监听随 initStore 注册且不注销，
  *  页面切换/组件重建不丢状态；update-ready 只广播一次，重进设置页靠 store 还原。 */
 function watchUpdateEvents() {
-  window.sv.onUpdateProgress((pct) => {
-    store.update.percent = pct
+  window.sv.onUpdateProgress((p) => {
+    store.update.percent = p.percent
+    store.update.downloadSource = p.source
   })
   window.sv.onUpdateReady((v) => {
     store.update.ready = v
@@ -337,7 +339,10 @@ function watchUpdateEvents() {
   // renderer 重载兜底：向主进程查询当前下载状态
   void window.sv.updateState().then((s) => {
     if (s.ready) store.update.ready = s.ready
-    if (s.downloading) store.update.downloading = true
+    if (s.downloading) {
+      store.update.downloading = true
+      store.update.downloadSource = s.source
+    }
   })
 }
 
