@@ -26,6 +26,7 @@ import glob
 import hashlib
 import json
 import os
+import shutil
 import sys
 import time
 import urllib.request
@@ -57,17 +58,19 @@ license: other
 
 
 def collect_files() -> dict[str, dict]:
-    """注册表全部文件条目按 name 去重（不同 manifest 引用同一文件取一份）。"""
+    """注册表全部文件条目按 name 去重（不同 manifest 引用同一文件取一份）。
+    附带 _model_id 供 models_store 本地副本解析。"""
     files: dict[str, dict] = {}
     for p in sorted(glob.glob(REGISTRY_GLOB)):
         spec = json.loads(Path(p).read_text(encoding="utf-8"))
         for f in spec["files"]:
             if not f.get("url"):
                 continue
-            if f["name"] in files and files[f["name"]] != f:
+            entry = {**f, "_model_id": spec["id"]}
+            if f["name"] in files and files[f["name"]] != entry:
                 print(f"!! 注册表内 {f['name']} 条目不一致，以先出现为准", file=sys.stderr)
                 continue
-            files.setdefault(f["name"], f)
+            files.setdefault(f["name"], entry)
     return files
 
 
@@ -93,11 +96,13 @@ def sha256(path: Path) -> str:
 
 
 def source_file(entry: dict, cache_dir: Path) -> Path:
-    """拿到待上传的本地文件：bundled 优先，否则缓存下载（3 次重试）。"""
+    """拿到待上传的本地文件：bundled → models_store（应用下载缓存，开发机常已有
+    基准测试用过的权重，免走不稳定的 GitHub 代理路径）→ 缓存下载（3 次重试）。"""
     name, url = entry["name"], entry["url"]
-    local = BUNDLED_DIR / name
-    if local.exists():
-        return local
+    for local in (BUNDLED_DIR / name,
+                  REPO_ROOT / "models_store" / entry["_model_id"] / name):
+        if local.exists():
+            return local
     dest = cache_dir / name
     if dest.exists() and dest.stat().st_size == entry.get("size"):
         return dest
@@ -183,19 +188,41 @@ def main() -> int:
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     failed = []
+    staged: dict[str, Path] = {}
     for i, (name, f) in enumerate(sorted(pending.items()), 1):
-        print(f"[{i}/{len(pending)}] {name}", flush=True)
+        print(f"[{i}/{len(pending)}] 取源 {name}", flush=True)
         try:
             path = source_file(f, cache_dir)
             if f.get("sha256") and sha256(path) != f["sha256"]:
                 raise RuntimeError(f"{name} sha256 校验失败")
-            with direct_connection():
-                api.upload_file(path_or_fileobj=str(path), path_in_repo=name,
-                                repo_id=repo, repo_type="model",
-                                commit_message=f"sync {name} from models-v1")
+            staged[name] = path
         except Exception as e:  # noqa: BLE001 —— 单文件失败不阻塞整批
             failed.append(name)
             print(f"  !! {type(e).__name__}: {e}", file=sys.stderr)
+
+    # 批量走暂存目录 + upload_folder（并行自适应分批 commit）。upload_file 是
+    # 每文件一次 git commit，CI 跨洋到阿里云 RTT 把它放大到 ~90s/文件，
+    # 68 个会被串行开销拖到撞 workflow 超时
+    if staged:
+        try:
+            with direct_connection():
+                if len(staged) == 1:
+                    name, path = next(iter(staged.items()))
+                    api.upload_file(path_or_fileobj=str(path), path_in_repo=name,
+                                    repo_id=repo, repo_type="model",
+                                    commit_message=f"sync {name} from models-v1")
+                else:
+                    stage = cache_dir / "staging"
+                    shutil.rmtree(stage, ignore_errors=True)
+                    stage.mkdir(parents=True)
+                    for name, path in staged.items():
+                        shutil.copy2(path, stage / name)
+                    api.upload_folder(repo_id=repo, repo_type="model",
+                                      folder_path=str(stage), max_workers=8,
+                                      commit_message=f"sync {len(staged)} files from models-v1")
+        except Exception as e:  # noqa: BLE001
+            failed.extend(n for n in staged if n not in failed)
+            print(f"  !! 批量上传失败 {type(e).__name__}: {e}", file=sys.stderr)
 
     if args.readme:
         manifests = [json.loads(Path(p).read_text(encoding="utf-8"))
