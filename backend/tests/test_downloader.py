@@ -61,7 +61,7 @@ def test_download_size_mismatch(tmp_path, monkeypatch):
 
 
 def test_download_mirror_fallback(tmp_path, monkeypatch):
-    """主源失败 → 依次镜像重试，成功落盘且内容一致。"""
+    """主源失败 → 依次镜像重试，成功落盘且内容一致；source_cb 按实际发起顺序回调。"""
     good = tmp_path / "good.onnx"
     good.write_bytes(b"mirror-content")
     dead = tmp_path / "no-such-file.onnx"  # 主源 404（file:// 打不开 → URLError）
@@ -70,9 +70,24 @@ def test_download_mirror_fallback(tmp_path, monkeypatch):
         "size": good.stat().st_size, "sha256": _sha(good),
         "mirror_urls": [dead.as_uri(), good.as_uri()],  # 第一个镜像也挂，验证逐个尝试
     }])
-    download(spec)
+    sources: list[str] = []
+    download(spec, source_cb=lambda url, name: sources.append(url))
     dest = tmp_path / "models" / "dl-test" / "m.onnx"
     assert dest.read_bytes() == b"mirror-content"
+    assert sources == [dead.as_uri(), dead.as_uri(), good.as_uri()]
+
+
+def test_download_source_cb_primary(tmp_path, monkeypatch):
+    """主源一次成功的常规路径：source_cb 恰好回调一次、带主源 URL。"""
+    src = tmp_path / "ok.onnx"
+    src.write_bytes(b"primary-content")
+    spec = _spec(tmp_path, monkeypatch, [{
+        "name": "p.onnx", "url": src.as_uri(),
+        "size": src.stat().st_size, "sha256": _sha(src),
+    }])
+    sources: list[str] = []
+    download(spec, source_cb=lambda url, name: sources.append(url))
+    assert sources == [src.as_uri()]
 
 
 def test_download_all_mirrors_exhausted(tmp_path, monkeypatch):
@@ -132,7 +147,7 @@ def test_download_concurrent_rejected(dl_client):
     started = threading.Event()
     release = threading.Event()
 
-    def fake_download(spec, cb=None, only_files=None):
+    def fake_download(spec, cb=None, only_files=None, source_cb=None):
         started.set()
         release.wait(20)
 
@@ -154,7 +169,7 @@ def test_download_failure_broadcast(dl_client):
     """下载异常必须广播 failed 事件（UI 进度条据此解除卡住）。"""
     app_mod, c, rec, monkeypatch = dl_client
 
-    def boom(spec, cb=None, only_files=None):
+    def boom(spec, cb=None, only_files=None, source_cb=None):
         raise DownloadError("模拟网络故障")
 
     monkeypatch.setattr(app_mod.manager, "is_downloaded", lambda spec: False)
@@ -176,7 +191,7 @@ def test_download_immediate_zero_progress_event(dl_client):
     app_mod, c, rec, monkeypatch = dl_client
     gate = threading.Event()
 
-    def fake_download(spec, cb=None, only_files=None):
+    def fake_download(spec, cb=None, only_files=None, source_cb=None):
         gate.wait(20)
 
     monkeypatch.setattr(app_mod.manager, "is_downloaded", lambda spec: False)

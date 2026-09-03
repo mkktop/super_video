@@ -512,8 +512,17 @@ async def download_model(model_id: str) -> dict:
                     "progress": round(done / total, 4),
                 })
 
+            def on_source(url, label):
+                # 渠道透出：按实际命中的下载 URL 判定（主源 ModelScope，回落 GitHub 镜像）
+                src = ("modelscope" if "modelscope" in url
+                       else "github" if "github" in url else "")
+                if src:
+                    bus.publish_threadsafe({
+                        "type": "model_download", "model_id": model_id, "source": src,
+                    })
+
             try:
-                await loop.run_in_executor(None, manager.download, spec, cb)
+                await loop.run_in_executor(None, manager.download, spec, cb, None, on_source)
                 # 下载完成后生成 fp16 变体（bundled 模型随包已有，此处只补下载件）
                 try:
                     from ..models.fp16 import ensure_fp16

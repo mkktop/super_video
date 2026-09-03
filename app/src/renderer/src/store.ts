@@ -20,6 +20,8 @@ export const store = reactive({
   models: [] as ModelInfo[],
   presets: [] as Preset[],
   downloadProgress: {} as Record<string, number>, // model_id -> 0~1
+  /** 下载实际命中的渠道（modelscope | github）：主源失败回落镜像时跟随翻转 */
+  downloadSource: {} as Record<string, string>,
   /** 最近一次模型下载失败（Models 页 watch 弹 toast；null=无）。失败此前被静默吞掉 */
   downloadFailed: null as null | { id: string; msg: string; ts: number },
   gpuName: '',
@@ -229,9 +231,14 @@ function handleWsEvent(raw: MessageEvent) {
       if (ev.done || ev.failed) {
         const { [id]: _drop, ...rest } = store.downloadProgress
         store.downloadProgress = rest
+        const { [id]: _dropSrc, ...restSrc } = store.downloadSource
+        store.downloadSource = restSrc
         refreshModels()
       } else if (typeof ev.progress === 'number') {
         store.downloadProgress = { ...store.downloadProgress, [id]: ev.progress }
+      }
+      if (typeof ev.source === 'string' && ev.source) {
+        store.downloadSource = { ...store.downloadSource, [id]: ev.source }
       }
       return
     }
@@ -294,6 +301,7 @@ function connectWs() {
     // 断线间隙可能错过 model_download done 事件，进度条残留卡住：
     // 清空后靠 refreshModels 纠正完成态，下载中的条目由下一个进度事件补回
     store.downloadProgress = {}
+    store.downloadSource = {}
     schedulePoll()
   }
   ws.onmessage = handleWsEvent

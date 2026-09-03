@@ -90,11 +90,14 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = None) -> None:
+def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = None,
+             source_cb=None) -> None:
     """下载模型文件。progress_cb(bytes_done, bytes_total, file_label)。
 
     only_files：只下载给定子集（变体懒下载——任务实际用哪个权重下哪个）；
     已在本地且校验通过的文件照旧跳过。
+    source_cb(url, file_label)：每次实际发起下载前回调（主源 + 逐镜像），
+    供上层透出当前下载渠道（前端显示 ModelScope / GitHub 镜像）。
     """
     d = model_dir(spec.id)
     d.mkdir(parents=True, exist_ok=True)
@@ -123,6 +126,8 @@ def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = 
         try:
             done_at_file = done  # 镜像重试时进度回退，避免重复累计
             opener = _opener()
+            if source_cb:
+                source_cb(url, name)
             _download_to(url, tmp, opener, progress_cb, done, total, name)
         except (urllib.error.URLError, OSError) as e:
             mirrors = [u for u in f.get("mirror_urls", []) if u]
@@ -133,6 +138,8 @@ def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = 
             ok = False
             for m in mirrors:
                 try:
+                    if source_cb:
+                        source_cb(m, name)
                     _download_to(m, tmp, opener, progress_cb, done_at_file, total, name)
                     ok = True
                     break

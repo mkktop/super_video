@@ -87,6 +87,13 @@ function dropProgress(id: string) {
 // 0% 阶段 = 正在连远端（直连 GitHub 常以十秒计），文案区分于真实下载进度
 const dlPctText = (p: number) => (p === 0 ? '连接中…' : `${Math.round(p * 100)}%`)
 
+// 当前下载渠道：后端按实际命中的 URL 透出（主源 ModelScope，回落即 GitHub 镜像）；
+// 首个 source 事件到来前返回空（0% 阶段只显示「连接中…」）
+const srcText = (id: string) => {
+  const s = store.downloadSource[id]
+  return s === 'modelscope' ? 'ModelScope' : s === 'github' ? 'GitHub 镜像' : ''
+}
+
 async function onDownload(id: string) {
   // 即时反馈：首个进度事件要等远端连上才来，本地先挂 0% 条让点击立刻可见
   store.downloadProgress = { ...store.downloadProgress, [id]: 0 }
@@ -245,6 +252,7 @@ async function doImport() {
                   :height="8"
                   :processing="store.downloadProgress[m.id] === 0"
                 />
+                <span v-if="srcText(m.id)" class="dl-src">{{ srcText(m.id) }}</span>
                 <span class="dl-pct">{{ dlPctText(store.downloadProgress[m.id]) }}</span>
               </div>
             </template>
@@ -375,6 +383,7 @@ h1 { font-size: 20px; font-weight: 700; }
 }
 .bundled-note { color: #34d399; font-size: 12.5px; }
 .dl { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dl-src { font-size: 12px; color: #9aa0a6; flex-shrink: 0; }
 .dl-pct { font-size: 12px; color: #4f8cff; min-width: 38px; text-align: right; flex-shrink: 0; }
 .imp-file { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .imp-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9aa0a6; font-size: 12.5px; }
