@@ -202,7 +202,24 @@ def _load_onnx_engine(
 
     def _oom(e: Exception) -> bool:
         t = str(e).lower()
-        return "memory" in t or "alloc" in t or "oom" in t
+        if "memory" in t or "alloc" in t or "oom" in t:
+            return True
+        # DML 显存不足在中文 Windows 上被 UnicodeDecodeError 掩盖：ORT 的错误
+        # 消息 bytes 内嵌系统 GBK 错误描述（0x8007000E「存储空间不足…」），
+        # Python 绑定层按 UTF-8 硬解直接抛解码错误——str(e) 只剩无用的解码
+        # 报文。原始 bytes 挂在 UnicodeDecodeError.args[1]：GBK/UTF-8 双解
+        # 后按错误码/关键字识别（MangaJaNai 大图 4x 全尺寸 warmup 实锤，
+        # 此前降 tile 重试被假象骗过直接失败）
+        for a in e.args:
+            if not isinstance(a, (bytes, bytearray)):
+                continue
+            blob = bytes(a)
+            s = blob.decode("gbk", "replace") + blob.decode("utf-8", "replace")
+            s = s.lower()
+            if ("8007000e" in s or "e_outofmemory" in s or "out of memory" in s
+                    or "存储空间不足" in s):
+                return True
+        return False
 
     def _cuda_kernel_fault(e: Exception) -> bool:
         """CUDA 执行层内核崩溃特征：报错串带 GPU 版 ORT 的 providers/cuda 源路径
@@ -215,6 +232,16 @@ def _load_onnx_engine(
     # engine=cpu 显式锁 CPUExecutionProvider（CUGAN×DML 泄漏模型的兜底通道）
     _eng = settings.load().get("engine")
     ort_device = _eng if _eng in ("trt", "cpu") else "auto"
+    # 大图输出像素预算：无 tile 且放大后像素超 36M（1080p x4=33M 不动、
+    # 漫画扫描页 2133p x4≈51M 命中）时预设 512 分块——全尺寸会话会把 GPU
+    # 打爆（中文 Windows 上 OOM 被 GBK 错误消息的解码异常掩盖成
+    # UnicodeDecodeError），且 OOM 后同进程 DML 会话已损坏，降档重建只会
+    # 被静默回退 CPU（实测 gc 释放也救不回）——干净会话一次到位才是正解
+    if tile == 0 and warmup_hw[0] * warmup_hw[1] * scale * scale > 36_000_000:
+        tile = 512
+        if log:
+            log({"type": "log", "line":
+                 "输出分辨率较大，自动启用 512px 分块处理（避免显存不足）"})
     # CUGAN×DML 逐帧显存泄漏（实测 1080p BASIC≈8 帧、ALL≈30 帧即 0x887A0006
     # 设备摘除，全 GPU 会话连坐；540p 阈值更高但终会爆；与线程/包装/内容无关），
     # CUDA EP 实测同样挂起。仅 TRT 与显式 CPU 可用（TRT 端到端 14.9fps 验证）。
@@ -277,6 +304,12 @@ def _load_onnx_engine(
             if not _oom(e) or tile in (1,) or attempt == 3:
                 raise
             new_tile = 256 if tile == 0 else max(64, tile // 2)
+            # 先释放失败引擎再降档重建：OOM 的旧 session 仍攥着 DML/CUDA 资源，
+            # 不放手时降 tile 后的新会话会接着爆（DML 资源回收依赖对象析构）
+            engine = None
+            import gc
+
+            gc.collect()
             if log:
                 log({"type": "log", "line":
                      f"显存不足，分块大小调整为 {new_tile} 后重试"})

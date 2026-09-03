@@ -220,3 +220,71 @@ def test_worker_cuda_engine_fault_falls_to_cpu(monkeypatch, tmp_path):
         tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
     # engine=cuda 映射的 ort_device 是 auto（provider 链自动含 CUDA），降级即 cpu
     assert calls == ["auto", "cpu"], f"应退 CPU 重试: {calls}"
+
+
+def test_worker_unicode_masked_oom_falls_back_tile(monkeypatch, tmp_path):
+    """中文 Windows 上 DML 显存不足被 UnicodeDecodeError 掩盖（ORT 错误消息
+    bytes 内嵌系统 GBK 描述，Python 绑定层 utf-8 硬解失败）——_oom 必须能从
+    e.args 的原始 bytes 识别 0x8007000E，降 tile 重试不被假象骗过直接失败。"""
+    from sv.server import worker
+
+    calls: list[tuple[str, int]] = []
+
+    class _OomThenOk:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None):
+            calls.append((device, tile))
+            if len(calls) == 1:
+                # 现场形态：args[1] 是含 GBK 错误描述的原始 bytes
+                raise UnicodeDecodeError(
+                    "utf-8",
+                    b"[ONNXRuntimeError] : 6 : RUNTIME_EXCEPTION ... 8007000E "
+                    b"\xc7\xf3\xb4\xe6\xb4\xe6\xb4\xa6\xb2\xbb\xd7\xe3\xa1\xad",
+                    240, 241, "invalid continuation byte")
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            return frame
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
+    monkeypatch.setattr(worker, "OnnxSrEngine", _OomThenOk)
+    monkeypatch.setattr(worker, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 4, None, "fp32", 0, (2133, 1510), log=lambda ev: None)
+    assert [c[1] for c in calls] == [512, 256], \
+        "先预设 512（大图预算），UnicodeDecodeError 形态 OOM 再降至 256 重试"
+
+
+def test_worker_large_output_preset_tile(monkeypatch, tmp_path):
+    """大图输出像素超预算（2133p x4≈51M > 36M）自动预设 512 分块：
+    干净会话一次到位，避免全尺寸 OOM 后同进程 DML 损坏只能退 CPU。"""
+    from sv.server import worker
+
+    calls: list[int] = []
+
+    class _Ok:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None):
+            calls.append(tile)
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            return frame
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="x")
+    monkeypatch.setattr(worker, "OnnxSrEngine", _Ok)
+    monkeypatch.setattr(worker, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    # 大图：预设 512；1080p x4（33M）不动保持全尺寸性能
+    worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 4, None, "fp32", 0, (2133, 1510), log=lambda ev: None)
+    assert calls == [512]
+    calls.clear()
+    worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 4, None, "fp32", 0, (1080, 1920), log=lambda ev: None)
+    assert calls == [0]
