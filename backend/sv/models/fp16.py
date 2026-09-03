@@ -64,6 +64,13 @@ def convert_file(src: Path, dst: Path) -> None:
     tmp = dst.with_name(f"{dst.name}.{os.getpid()}.tmp")
     try:
         tmp.write_bytes(m16.SerializeToString())
+        # 落盘前加载验证：转换器对注意力类结构（DAT2 的 Cast 节点）会产出
+        # 类型不一致的图——序列化不报错、加载才炸。不验证的话坏图会被
+        # model_file 当有效变体永久选中，之后所有 fp16 任务加载失败且不自愈
+        # （illustrationjanai-4x-dat2 实锤）。CPU 会话建图即可暴露，无需推理。
+        import onnxruntime as _ort
+
+        _ort.InferenceSession(str(tmp), providers=["CPUExecutionProvider"])
         tmp.replace(dst)
     finally:
         tmp.unlink(missing_ok=True)  # 换名成功后 tmp 已不存在；失败清残片

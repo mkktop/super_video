@@ -129,3 +129,48 @@ def test_engine_fp16_run():
     out = eng.process(frame)
     assert out.shape == (128, 128, 3) and out.dtype == np.uint8
     assert int(out.std()) > 5  # 非全黑/全白
+
+
+def test_convert_rejects_broken_graph(tmp_path, monkeypatch):
+    """转换产物必须过加载验证：坏图（类型不一致）不得落盘为有效变体。
+
+    回归：illustrationjanai-4x-dat2 的 DAT2 注意力结构经转换器产出
+    Cast 节点类型不一致的图——序列化不报错、加载才炸，坏 _fp16.onnx
+    落盘后被 model_file 永久选中，任务每次加载失败且不自愈。
+    用 monkeypatch 让转换器返回声明类型不一致的图，复现该场景。
+    """
+    import onnx
+    from onnx import TensorProto, helper
+    from sv.models import fp16 as fp16mod
+
+    src = _toy_fp32_onnx(tmp_path / "m.onnx")
+    dst = tmp_path / "m_fp16.onnx"
+
+    def _broken_convert(m, **_kw):
+        # 输出声明 float16、节点实际产出 float 的不一致图（加载即 Type Error）
+        node = helper.make_node("Identity", ["input"], ["output"])
+        g = helper.make_graph(
+            [node], "broken",
+            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, 3, 8, 8])],
+            [helper.make_tensor_value_info("output", TensorProto.FLOAT16, [1, 3, 8, 8])],
+        )
+        return helper.make_model(g, opset_imports=[helper.make_opsetid("", 18)])
+
+    import onnxconverter_common.float16 as _f16mod
+    monkeypatch.setattr(_f16mod, "convert_float_to_float16", _broken_convert)
+    with pytest.raises(Exception):
+        fp16mod.convert_file(src, dst)
+    assert not dst.exists(), "坏图不得落盘为有效 fp16 变体"
+    assert not list(tmp_path.glob("*.tmp")), "不得留 .tmp 残片"
+    # 同场景下 ensure_fp16_file 优雅回退 fp32 原件（转换被拒不能影响任务可用）
+    assert fp16mod.ensure_fp16_file(src) == src
+
+
+def test_convert_good_graph_lands(tmp_path):
+    """好图路径：真转换 + 加载验证通过后落盘，产物可建会话。"""
+    src = _toy_fp32_onnx(tmp_path / "m.onnx")
+    out = ensure_fp16_file(src)
+    assert out.name == "m_fp16.onnx" and out.exists()
+    import onnxruntime as ort
+
+    ort.InferenceSession(str(out), providers=["CPUExecutionProvider"])

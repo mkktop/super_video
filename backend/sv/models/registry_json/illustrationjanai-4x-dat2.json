@@ -15,7 +15,7 @@
   "speed": "slow",
   "vram_gb": 3,
   "tile_hint": 256,
-  "fp16": true,
+  "fp16": false,
   "io": {
     "color": "rgb",
     "range": "0-1",
