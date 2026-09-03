@@ -41,7 +41,10 @@ def main(model_path: str) -> int:
         sess = ort.InferenceSession(model_path, providers=["CUDAExecutionProvider"])
         result["provider"] = ",".join(sess.get_providers())
         inp = sess.get_inputs()[0]
-        x = np.zeros((1, 3, 64, 64), dtype=np.float32)
+        # 内置集已是原生 fp16 模型（V3.1）：按会话声明 dtype 构造张量，
+        # 固定 float32 喂 fp16 模型会 type mismatch 误报探测失败
+        dtype = np.float16 if inp.type == "tensor(float16)" else np.float32
+        x = np.zeros((1, 3, 64, 64), dtype=dtype)
         sess.run([o.name for o in sess.get_outputs()], {inp.name: x})
         if "CUDAExecutionProvider" not in sess.get_providers():
             result["error"] = f"会话未使用 CUDA: {sess.get_providers()}"

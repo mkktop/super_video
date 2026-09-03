@@ -241,7 +241,10 @@ def cmd_ort_check(args):
             c = fixed[1] if len(fixed) > 1 and fixed[1] else 3
             h = fixed[2] if len(fixed) > 2 and fixed[2] else 64
             w = fixed[3] if len(fixed) > 3 and fixed[3] else 64
-            x = _np.zeros((1, c, h, w), dtype=_np.float32)
+            # 内置集已是原生 fp16 模型（V3.1）：按会话声明 dtype 构造张量，
+            # 固定 float32 喂 fp16 模型会 type mismatch 误报探测失败
+            dt = _np.float16 if inp.type == "tensor(float16)" else _np.float32
+            x = _np.zeros((1, c, h, w), dtype=dt)
             sess.run([o.name for o in sess.get_outputs()], {inp.name: x})
             if "CUDAExecutionProvider" not in sess.get_providers():
                 raise RuntimeError(f"会话未使用 CUDA: {sess.get_providers()}")

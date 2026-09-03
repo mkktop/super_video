@@ -7,8 +7,6 @@ import pytest
 
 from sv.engines.onnx_engine import OnnxSrEngine
 
-BUNDLED = "sv/models/bundled/RealESR-AnimeVideo-v3_x4.onnx"
-
 
 def test_native_fp16_model(tmp_path):
     """AnimeJaNai 类 fp16 本体模型（IO 也是 float16）：输入自动转 fp16，输出回 float32 语义。"""
@@ -86,6 +84,24 @@ def test_trt_fallback_chain(monkeypatch):
     assert _FakeSession.calls[0][0] == "TensorrtExecutionProvider"
     assert _FakeSession.calls[1] == ["CUDAExecutionProvider", "CPUExecutionProvider"]
     assert eng.provider_used == ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+
+def test_probe_model_picks_existing_bundled(monkeypatch, tmp_path):
+    """CUDA/TRT 探测的校验模型必须动态取 bundled 现存文件。
+
+    回归：探测曾硬编码 RealESR-AnimeVideo-v3_x4.onnx，内置集换血 V3.1 后
+    文件不再随包，engine=trt/cuda 在安装版必报「缺少校验用模型」恒回落
+    DirectML（v0.4.0+ 实锤）。"""
+    import sv.server.engine_select as es
+
+    m = es._probe_model()
+    assert m is not None and m.suffix == ".onnx" and m.exists()
+
+    # bundled 空目录 → None（探测层报「缺少校验用模型」而非拿死路径）
+    monkeypatch.setattr(es, "BUNDLED_DIR", tmp_path)
+    assert es._probe_model() is None
+    (tmp_path / "w.onnx").write_bytes(b"x")
+    assert es._probe_model() == tmp_path / "w.onnx"
 
 
 def test_trt_provider_options_attached(monkeypatch):

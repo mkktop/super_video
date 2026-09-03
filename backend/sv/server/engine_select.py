@@ -32,6 +32,19 @@ def _cuda_venv_python() -> Path | None:
     return p if p.exists() else None
 
 
+def _probe_model() -> Path | None:
+    """探测校验用模型：bundled 里现存任意一个 .onnx（排序保稳定）。
+
+    曾硬编码 RealESR-AnimeVideo-v3_x4.onnx——内置集换血 V3.1（47990e1）后
+    文件不再随包，CUDA/TRT 探测在安装版必败（"缺少校验用模型"→恒回落
+    DirectML）。探测只需建真会话跑一帧，任何 bundled 权重都够格；动态
+    选取让未来换血不再连带破坏。"""
+    try:
+        return sorted(BUNDLED_DIR.glob("*.onnx"))[0]
+    except IndexError:
+        return None
+
+
 _PROBE_CACHE: dict[str, tuple[bool, str]] = {}
 
 
@@ -40,8 +53,8 @@ def _probe_cuda(python_exe: Path) -> tuple[bool, str]:
     key = str(python_exe)
     if key in _PROBE_CACHE:
         return _PROBE_CACHE[key]
-    model = BUNDLED_DIR / "RealESR-AnimeVideo-v3_x4.onnx"
-    if not model.exists():
+    model = _probe_model()
+    if model is None:
         return False, "缺少校验用模型"
     script = BACKEND_DIR / "scripts" / "check_cuda.py"
     try:
@@ -65,8 +78,8 @@ def _probe_frozen() -> tuple[bool, str]:
     key = f"frozen:{sys.executable}"
     if key in _PROBE_CACHE:
         return _PROBE_CACHE[key]
-    model = BUNDLED_DIR / "RealESR-AnimeVideo-v3_x4.onnx"
-    if not model.exists():
+    model = _probe_model()
+    if model is None:
         return False, "缺少校验用模型"
     try:
         out = subprocess.run(
