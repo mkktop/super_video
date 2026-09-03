@@ -115,8 +115,21 @@ jobs:
           $ver = (Get-Content app/package.json -Raw | ConvertFrom-Json).version
           $env:CLOUDFLARE_API_TOKEN = $env:CF_TOKEN
           $env:CLOUDFLARE_ACCOUNT_ID = $env:CF_ACCOUNT
-          npx --yes wrangler@4 r2 object put super-video/latest.yml --file dist-app/latest.yml --remote
-          npx --yes wrangler@4 r2 object put "super-video/super_video_${ver}_setup.exe" --file "dist-app/super_video_${ver}_setup.exe" --remote
+          # wrangler 走 Cloudflare API，偶发 502（v0.4.3 实测 252MB exe 一次 502，
+          # 且 pwsh 不因原生命令失败中断——latest.yml 已传 exe 没传，R2 进混合态
+          # 而步骤末尾 $LASTEXITCODE 才暴露失败）。逐文件显式校验退出码 + 重试 3 次
+          function Put-R2($key, $file) {
+            for ($i = 1; $i -le 3; $i++) {
+              npx --yes wrangler@4 r2 object put "super-video/$key" --file $file --remote
+              if ($LASTEXITCODE -eq 0) { return }
+              Write-Host "::warning::wrangler put $key 第 $i 次失败（exit=$LASTEXITCODE），重试"
+              Start-Sleep -Seconds (10 * $i)
+            }
+            Write-Host "::error::wrangler put $key 三次均失败"
+            exit 1
+          }
+          Put-R2 "latest.yml" "dist-app/latest.yml"
+          Put-R2 "super_video_${ver}_setup.exe" "dist-app/super_video_${ver}_setup.exe"
           Write-Host "R2 备用源已更新 latest.yml + super_video_${ver}_setup.exe"
 
       - name: 模型资产同步到 models-v1 Release（注册表驱动，缺什么补什么）
