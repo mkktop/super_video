@@ -121,6 +121,14 @@ const canSubmit = computed(
     !submitting.value,
 )
 
+// 解码失败（TIFF 变体/超大图/损坏文件）的缩略图：就地换占位，不影响其他图片
+const broken = ref<Set<string>>(new Set())
+function onThumbErr(f: string) {
+  const s = new Set(broken.value)
+  s.add(f)
+  broken.value = s
+}
+
 async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
@@ -185,7 +193,15 @@ export default { name: 'ImageSR' }
       </NButton>
       <div v-if="files.length" class="thumb-grid">
         <div v-for="(f, i) in files" :key="f" class="thumb-cell">
-          <img :src="thumbUrl(f)" class="thumb" loading="lazy" alt="" />
+          <img
+            v-if="!broken.has(f)"
+            :src="thumbUrl(f)"
+            class="thumb"
+            loading="lazy"
+            alt=""
+            @error="onThumbErr(f)"
+          />
+          <div v-else class="thumb thumb-broken" title="此图片无法预览（不影响处理）">无法预览</div>
           <button class="rm" title="移除" @click="removeAt(i)">✕</button>
           <span class="fname" :title="f">{{ baseName(f) }}</span>
         </div>
@@ -334,6 +350,14 @@ h1 { font-size: 20px; font-weight: 700; }
   border-radius: 6px;
   display: block;
   background: #141517;
+}
+.thumb-broken {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #6d747d;
+  border: 1px dashed #33363b;
 }
 .rm {
   position: absolute;

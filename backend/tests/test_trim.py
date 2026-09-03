@@ -139,6 +139,7 @@ def test_trim_api(client, fixture_video):
     r = client.post("/api/trim", json={
         "input": str(fixture_video), "start_s": 2.5, "end_s": 5.0,
         "mode": "smart", "output": str(out),
+        "overwrite": True,  # 复跑覆盖上次产物（覆盖预检只挡非显式确认）
     })
     assert r.status_code == 201, r.text
     jid = r.json()["job_id"]

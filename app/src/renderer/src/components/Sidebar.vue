@@ -108,8 +108,8 @@ const miniPerf = computed(() => {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: #17191d;
-  border-right: 1px solid #232629;
+  background: var(--sv-panel);
+  border-right: 1px solid var(--sv-border);
   padding: 14px 10px;
 }
 .nav {
@@ -125,7 +125,7 @@ const miniPerf = computed(() => {
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: #9aa0a6;
+  color: var(--sv-text-dim);
   font-size: 13.5px;
   cursor: pointer;
   position: relative;
@@ -133,8 +133,8 @@ const miniPerf = computed(() => {
   text-align: left;
 }
 .nav-item:hover:not(:disabled) {
-  background: #1f2328;
-  color: #e8eaed;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--sv-text);
 }
 .nav-item.active {
   background: linear-gradient(90deg, rgba(79, 140, 255, 0.16), rgba(139, 92, 246, 0.08));

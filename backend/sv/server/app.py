@@ -149,6 +149,7 @@ class TaskCreate(BaseModel):
     output: str | None = None
     model_id: str
     params: dict = Field(default_factory=dict)  # scale/codec/crf/preset/tile/interp/denoise 每任务独立
+    overwrite: bool = False  # 显式 output 撞已存在文件/活动任务时 409，确认覆盖后带 True 重交
 
 
 class ModelImport(BaseModel):
@@ -310,6 +311,10 @@ def probe_media(body: ProbeBody) -> dict:
         "has_audio": info.has_audio,
         "audio_tracks": [a.codec for a in info.audio],
         "subtitles": info.subtitles,
+        # 媒体属性透出（UI 信息卡展示 10bit/VFR/隔行，用户据此决定预处理开关）
+        "bit_depth": getattr(info, "bit_depth", 8),
+        "vfr": bool(getattr(info, "vfr", False)),
+        "field_order": getattr(info, "field_order", "progressive") or "progressive",
     }
     if body.hwdecode and m0_error is None:
         # 按本文件实测的硬解可用性（编码矩阵 + 真解码验证），UI 据此禁用不支持的选项
@@ -598,6 +603,31 @@ def _sr_output_name(out_root: Path, stem: str, fmt: str, res_label: str,
 _TEMPLATE_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+def _active_output_keys() -> set[str]:
+    """排队/运行中任务将写入的输出路径集合（normcase 归一）。
+
+    自动命名的后缀避让必须把它算进去：A 刚建还没跑、磁盘上尚无产物时，
+    B 再建同名任务 plain.exists() 探不到碰撞，会静默互相覆盖。显式路径
+    则用于创建期 409 预检。"""
+    return {
+        os.path.normcase(t["output_path"])
+        for t in db.list_tasks()
+        if t["status"] in ("queued", "running") and t.get("output_path")
+    }
+
+
+def _reject_output_conflict(out: str, active_outs: set[str], overwrite: bool) -> None:
+    """用户显式指定输出路径的覆盖预检：目标文件已存在或已有活动任务将写入
+    同一路径时 409（前端弹确认，带 overwrite=True 重交）。"""
+    if overwrite:
+        return
+    if os.path.normcase(out) in active_outs:
+        raise HTTPException(
+            409, f"已有排队/运行中的任务将写入同一路径：{out}")
+    if Path(out).exists():
+        raise HTTPException(409, f"输出文件已存在：{out}")
+
+
 def _render_output_stem(template: str, stem: str, model_id: str, res_label: str,
                         out_w: int, out_h: int) -> str:
     """输出命名模板渲染：空模板返回原 stem（沿用旧行为）。
@@ -700,15 +730,17 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     out_root = Path(odir) if odir else paths[0].parent
     if batch and body.output:
         raise HTTPException(400, "批量图片由系统逐图命名输出，不能指定单一输出文件")
-    # 逐图输出命名：目录无同名则沿用原名，冲突退 _倍率 后缀（不覆盖现有文件）
+    # 逐图输出命名：目录无同名则沿用原名，冲突退 _倍率 后缀（不覆盖现有文件；
+    # 尚未开跑的活动任务占用的名字同样要避让）
     images_meta: list[dict] = []
-    used: set[str] = set()
+    used: set[str] = _active_output_keys()
     ow, oh = (tw, th) if tw is not None else (src_w * target, src_h * target)
     for p in paths:
         if batch or not body.output:
             stem = _render_output_stem(tmpl, p.stem, body.model_id, res_label, ow, oh)
             out = _sr_output_name(out_root, stem, fmt, res_label, used)
         else:
+            _reject_output_conflict(str(body.output), used, body.overwrite)
             out = str(body.output)
             used.add(os.path.normcase(out))
         images_meta.append({"in": str(p), "out": out})
@@ -877,11 +909,16 @@ def create_task(body: TaskCreate) -> dict:
     out_root = Path(odir) if odir else input_path.parent
     ow, oh = (tw, th) if tw is not None else (info.width * target, info.height * target)
     stem = _render_output_stem(_tmpl, input_path.stem, body.model_id, res_label, ow, oh)
+    active_outs = _active_output_keys()
     if out_kind == "video":
-        # 目录无同名则沿用（模板渲染后的）名字，同名冲突（含源文件本身）
-        # 退 _倍率 后缀——同规则见 _sr_output_name
-        out = body.output or _sr_output_name(
-            out_root, stem, container, res_label, set())
+        if body.output:
+            # 显式路径：静默覆盖不可接受，撞已存在文件/活动任务时 409 让前端确认
+            _reject_output_conflict(body.output, active_outs, body.overwrite)
+            out = body.output
+        else:
+            # 目录无同名则沿用（模板渲染后的）名字，同名冲突（含源文件本身与
+            # 尚未开跑的活动任务）退 _倍率 后缀——同规则见 _sr_output_name
+            out = _sr_output_name(out_root, stem, container, res_label, active_outs)
     else:
         # 图片序列：输出是文件夹，帧图按 000001.png 起逐帧编号
         out = body.output or str(out_root / f"{stem}_{res_label}_frames")
@@ -924,9 +961,9 @@ def sr_log_ids() -> set[str]:
 
 
 @app.get("/api/tasks")
-def get_tasks() -> list[dict]:
+def get_tasks(q: str = "") -> list[dict]:
     logs = sr_log_ids()
-    out = _with_queue_pos(db.list_tasks())
+    out = _with_queue_pos(db.list_tasks(q=q.strip()))
     for t in out:
         t["has_sr_log"] = t["id"] in logs
     return out
@@ -1048,6 +1085,33 @@ def reorder_tasks(body: TaskReorder) -> dict:
     return {"ok": True, "reordered": n}
 
 
+class TaskBatch(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=200)
+    action: str  # cancel | delete | resume
+
+
+@app.post("/api/tasks/batch")
+async def batch_tasks(body: TaskBatch) -> dict:
+    """批量取消/删除/续跑：逐个复用单任务端点的完整校验路径，失败不中断，
+    返回逐条结果（部分成功语义），前端按 failed 内容提示。"""
+    if body.action not in ("cancel", "delete", "resume"):
+        raise HTTPException(400, "action 仅支持 cancel / delete / resume")
+    done: list[str] = []
+    failed: dict[str, str] = {}
+    for tid in body.ids:
+        try:
+            if body.action == "cancel":
+                await cancel_task(tid)
+            elif body.action == "delete":
+                await remove_task(tid)
+            else:
+                resume_task(tid)
+            done.append(tid)
+        except HTTPException as e:
+            failed[tid] = str(e.detail)
+    return {"ok": True, "done": done, "failed": failed}
+
+
 # ---- 视频剪切（轻量后台任务，与超分队列独立；产物可直接作为超分输入）----
 
 
@@ -1057,6 +1121,7 @@ class TrimCreate(BaseModel):
     end_s: float
     mode: str = "smart"  # smart | fast | exact
     output: str | None = None
+    overwrite: bool = False  # 显式 output 撞已存在文件时 409，确认覆盖后带 True 重交
 
 
 _trim_jobs: dict[str, dict] = {}
@@ -1142,6 +1207,9 @@ def create_trim(body: TrimCreate) -> dict:
             _root.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             raise HTTPException(400, f"无法创建输出目录 {_root}: {e}") from e
+    elif Path(output).exists() and not body.overwrite:
+        # 自动命名带时间戳不会撞；显式路径撞已存在文件时 409 让前端确认
+        raise HTTPException(409, f"输出文件已存在：{output}")
     # 简单 GC：完成态任务超过 50 个时丢最旧的
     done_ids = [k for k, v in _trim_jobs.items() if v["state"] in ("done", "failed")]
     for k in done_ids[: max(0, len(done_ids) - 50)]:

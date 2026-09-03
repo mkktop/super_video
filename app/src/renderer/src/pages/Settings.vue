@@ -20,7 +20,7 @@ import { checkAppUpdate, refreshTrt, store } from '../store'
 import { fmtBytes } from '../utils'
 
 const message = useMessage()
-const engine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
+const engine = ref<'auto' | 'cuda' | 'trt' | 'directml' | 'cpu'>('auto')
 const precision = ref<'fp16' | 'fp32'>('fp16')
 const saving = ref(false)
 const appVersion = ref('')
@@ -160,7 +160,7 @@ async function doClearCache() {
   }
 }
 // 已保存的引擎/精度（脏状态对比用；保存成功后同步）
-const savedEngine = ref<'auto' | 'cuda' | 'trt' | 'directml'>('auto')
+const savedEngine = ref<'auto' | 'cuda' | 'trt' | 'directml' | 'cpu'>('auto')
 const savedPrecision = ref<'fp16' | 'fp32'>('fp16')
 const proxyOptions = [
   { label: '跟随系统代理', value: 'auto' },
@@ -200,7 +200,8 @@ const updateMsg = computed(() => {
 })
 const engineDirty = computed(() => engine.value !== savedEngine.value || precision.value !== savedPrecision.value)
 /** 后端取值 → 展示名（当前生效值与运行中实况共用） */
-const backendText = (b?: string) => (b === 'trt' ? 'CUDA + TensorRT' : b === 'cuda' ? 'CUDA' : 'DirectML')
+const backendText = (b?: string) =>
+  b === 'trt' ? 'CUDA + TensorRT' : b === 'cuda' ? 'CUDA' : b === 'cpu' ? 'CPU' : 'DirectML'
 const backendLabel = computed(() => backendText(store.engine?.backend))
 /** 任务运行中且实况后端 ≠ 设置生效值：提示并排展示两态（下一任务起切换） */
 const runningBackend = computed(() => {
@@ -249,7 +250,7 @@ const outDirShown = computed(() => {
 onMounted(async () => {
   void loadCacheStats()
   const s = (await api.settings()) as {
-    engine?: 'auto' | 'cuda' | 'trt' | 'directml'
+    engine?: 'auto' | 'cuda' | 'trt' | 'directml' | 'cpu'
     precision?: 'fp16' | 'fp32'
     download_proxy?: string
     perf_sampling?: boolean
@@ -527,9 +528,10 @@ async function uninstallTrc() {
                 <NRadioButton value="directml">DirectML</NRadioButton>
                 <NRadioButton value="cuda">CUDA</NRadioButton>
                 <NRadioButton value="trt">TensorRT</NRadioButton>
+                <NRadioButton value="cpu">CPU</NRadioButton>
               </NRadioGroup>
             </div>
-            <p class="hint">DirectML 兼容所有显卡；CUDA / TensorRT 仅限 NVIDIA 显卡。TensorRT 需安装下方加速组件，未安装时自动回退 DirectML。</p>
+            <p class="hint">DirectML 兼容所有显卡；CUDA / TensorRT 仅限 NVIDIA 显卡。TensorRT 需安装下方加速组件，未安装时自动回退 DirectML。CPU 为显存/GPU 异常时的兜底通道（速度慢）。</p>
             <div class="row stack">
               <span class="row-label">计算精度</span>
               <NRadioGroup v-model:value="precision" size="small">

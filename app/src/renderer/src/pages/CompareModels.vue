@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NProgress,
@@ -74,8 +74,9 @@ async function pickImage() {
   if (files.length) imageInput.value = files[0]
 }
 
-// 剪切页「剪切并去对比模型」跳转：区间已落成独立小文件，默认从 0 起取整段
-// （超 20s 由上限截断，仍可在下方滑条自由调整取段）
+// 剪切页「剪切并去对比模型」/ 新建任务页「先试跑」跳转：区间已落成独立小文件，
+// 默认从 0 起取整段（超 20s 由上限截断，仍可在下方滑条自由调整取段）。
+// 新建任务页会附带预选模型与倍率（pendingModel/pendingScale），此处一并消费。
 // 本页 KeepAlive 常驻：只有首次进入才触发 onMounted；之后从缓存激活只触发
 // onActivated——两处都得消费，否则新片段进不来（还会停在上次的结果视图里），
 // 「开始对比」自然点不了。首次进入两钩子连发，靠置空信号保证幂等。
@@ -86,7 +87,21 @@ function consumePendingCompare() {
   reset()
   view.value = 'frames'
   mode.value = 'video'
-  void loadVideoFile(pc.input, pc.start_s, pc.end_s - pc.start_s)
+  const pm = ui.pendingModel
+  ui.pendingModel = null
+  const wantScale = ui.pendingScale
+  ui.pendingScale = null
+  void loadVideoFile(pc.input, pc.start_s, pc.end_s - pc.start_s).then(() => {
+    if (!pm) return
+    const spec = store.models.find((m) => m.id === pm)
+    if (!spec || !spec.vram_ok || selected.value.size >= MAX_MODELS) return
+    selected.value.add(pm)
+    selected.value = new Set(selected.value)
+    void nextTick(() => {
+      // commonScales 的 watch 会把 scale 拉回最大值；预填倍率在它之后收敛
+      if (wantScale && commonScales.value.includes(wantScale)) scale.value = wantScale
+    })
+  })
 }
 onMounted(consumePendingCompare)
 onActivated(consumePendingCompare)
@@ -167,7 +182,7 @@ function startPolling(id: string) {
 const canRun = computed(
   () =>
     srcReady.value &&
-    selected.value.size >= 2 &&
+    selected.value.size >= 1 &&
     commonScales.value.includes(scale.value) &&
     !running.value,
 )
@@ -223,8 +238,8 @@ watch(doneEntries, (list) => {
 const curEntry = computed(() =>
   doneEntries.value.find((e) => e.model_id === curModel.value) ?? null)
 
-// 视频模式：静帧/成片两种对比载体；图片只有静帧
-const view = ref<'frames' | 'video'>('frames')
+// 视频模式：总览网格/静帧/成片三种对比载体；图片只有网格与静帧
+const view = ref<'grid' | 'frames' | 'video'>('frames')
 // 静帧多帧样本：切片段均匀取 4 帧（后端避黑选定），源/模型同索引=同时间戳
 const stillIdx = ref(0)
 const stillCount = computed(() => job.value?.still_count ?? 1)
@@ -326,8 +341,8 @@ function useModel(mid: string) {
       <section class="sec">
         <h2 class="sec-title">
           <span class="sec-num">2</span>选择模型（{{ selected.size }}/{{ MAX_MODELS }}）
-          <span class="sel-chip" :class="{ on: selected.size >= 2 }">
-            {{ selected.size >= 2 ? `将并排对比 ${selected.size} 个模型` : '至少选 2 个' }}
+          <span class="sel-chip" :class="{ on: selected.size >= 1 }">
+            {{ selected.size >= 1 ? `将对比 ${selected.size} 个模型` : '至少选 1 个' }}
           </span>
         </h2>
         <div class="model-grid">
@@ -436,13 +451,13 @@ function useModel(mid: string) {
             </NButton>
           </div>
           <NRadioGroup
-            v-if="job.kind === 'video'"
             v-model:value="view"
             size="small"
             class="view-toggle"
           >
+            <NRadioButton value="grid">总览</NRadioButton>
             <NRadioButton value="frames">静帧</NRadioButton>
-            <NRadioButton value="video">成片</NRadioButton>
+            <NRadioButton v-if="job.kind === 'video'" value="video">成片</NRadioButton>
           </NRadioGroup>
           <NButton size="small" class="fs-toggle" @click="toggleStageFull">
             {{ stageFull ? '退出全屏（ESC）' : '⛶ 全屏' }}
@@ -456,7 +471,35 @@ function useModel(mid: string) {
             :out-url="outVideoUrl"
             :streaming="running"
           />
-          <CompareSlider v-else :src-url="srcStillUrl" :out-url="outStillUrl" />
+          <CompareSlider v-else-if="view === 'frames'" :src-url="srcStillUrl" :out-url="outStillUrl" />
+          <!-- 总览网格：源 vs 各模型同帧并排，一眼比完所有候选；点卡片进分割线细看 -->
+          <div v-else class="grid-view">
+            <div
+              class="g-card"
+              role="button"
+              :title="'原片（点此回静帧细看）'"
+              @click="view = 'frames'"
+            >
+              <img :src="compareAssetUrl(job.id, 'src_still/0')" alt="原片" loading="lazy" />
+              <div class="g-name">原片</div>
+              <div class="g-meta">{{ job.input.split(/[\\/]/).pop() }}</div>
+            </div>
+            <div
+              v-for="e in doneEntries"
+              :key="e.model_id"
+              class="g-card"
+              :class="{ cur: e.model_id === curModel }"
+              role="button"
+              :title="`点此进入分割线对比：${modelName(e.model_id)}`"
+              @click="curModel = e.model_id; stillIdx = 0; view = 'frames'"
+            >
+              <img :src="compareAssetUrl(job.id, `still/${e.model_id}/0`)" alt="" loading="lazy" />
+              <div class="g-name">{{ modelName(e.model_id) }}</div>
+              <div class="g-meta">
+                {{ job.kind === 'video' ? `${e.fps.toFixed(1)} fps · ` : '' }}{{ e.out_w }}x{{ e.out_h }}
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 静帧样本条：缩略图取源帧，点选/[ ] 切换；切模型保持当前帧 -->
@@ -613,6 +656,50 @@ h1 { font-size: 20px; font-weight: 700; }
   border-radius: 8px;
   background: #0d0e10;
   overflow: hidden;
+}
+/* 总览网格：源 + 各模型并排缩略，卡片悬停/当前模型描边 */
+.grid-view {
+  height: 100%;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  align-content: start;
+}
+.g-card {
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #141517;
+  transition: border-color 0.15s;
+}
+.g-card:hover { border-color: #4a4f55; }
+.g-card.cur { border-color: #4f8cff; }
+.g-card img {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: contain;
+  background: #000;
+  display: block;
+}
+.g-name {
+  padding: 6px 8px 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e8eaed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.g-meta {
+  padding: 2px 8px 8px;
+  font-size: 11px;
+  color: #9aa0a6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .frame-strip { display: flex; gap: 8px; }
 .f-thumb {

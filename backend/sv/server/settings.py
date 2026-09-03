@@ -7,7 +7,7 @@ from pathlib import Path
 from ..paths import DATA_ROOT
 
 DEFAULTS = {
-    "engine": "auto",  # auto | cuda | trt（CUDA+TensorRT，需 .venv-cuda + tensorrt 组件）| directml
+    "engine": "auto",  # auto | cuda | trt（CUDA+TensorRT，需 .venv-cuda + tensorrt 组件）| directml | cpu（兜底，慢）
     "precision": "fp16",  # fp16（实测提速 1.36~1.73x，PSNR 74dB+）| fp32
     "download_proxy": "",  # 模型下载代理："" = 跟随系统代理 | direct = 直连 | http://host:port = 自定义
     "perf_sampling": True,  # 性能监控后台采样（CPU/GPU/内存，2s 一拍）
@@ -76,7 +76,7 @@ def save(updates: dict) -> dict:
     for k in DEFAULTS:
         if k in updates:
             v = updates[k]
-            if k == "engine" and v not in ("auto", "cuda", "trt", "directml"):
+            if k == "engine" and v not in ("auto", "cuda", "trt", "directml", "cpu"):
                 raise ValueError(f"非法 engine 值: {v}")
             if k == "precision" and v not in ("fp16", "fp32"):
                 raise ValueError(f"非法 precision 值: {v}")

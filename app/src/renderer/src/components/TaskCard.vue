@@ -3,9 +3,11 @@ import { computed, ref } from 'vue'
 import {
   NButton,
   NCard,
+  NCheckbox,
   NCollapse,
   NCollapseItem,
   NModal,
+  NPopconfirm,
   NProgress,
   NSpin,
   NTag,
@@ -20,10 +22,14 @@ const props = defineProps<{
   /** 排队任务在队列内可上移/下移（undefined=非排队态隐藏箭头） */
   canUp?: boolean
   canDown?: boolean
+  /** 任务页批量选择模式：显示勾选框（点选只发事件，选中态由父组件管理） */
+  selectMode?: boolean
+  selected?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'move', dir: -1 | 1): void
   (e: 'retryParams'): void
+  (e: 'toggleSelect'): void
 }>()
 const message = useMessage()
 const previewBroken = ref(false) // 预览 404/损坏时兜底（done 但预览生成失败不再显示破图图标）
@@ -147,6 +153,14 @@ function onOpenInputFolder() {
 <template>
   <n-card size="small" :bordered="true" class="task-card">
     <div class="row1">
+      <NCheckbox
+        v-if="selectMode"
+        :checked="selected"
+        class="sel-box"
+        title="选择此任务"
+        @click.stop
+        @update:checked="emit('toggleSelect')"
+      />
       <div class="names">
         <span class="file">{{ fileName }}</span>
         <span class="arrow">→</span>
@@ -253,7 +267,12 @@ function onOpenInputFolder() {
       >
         输入所在文件夹
       </NButton>
-      <NButton v-if="!isBusy" size="small" quaternary @click="onDelete">删除</NButton>
+      <NPopconfirm v-if="!isBusy" @positive-click="onDelete">
+        <template #trigger>
+          <NButton size="small" quaternary>删除</NButton>
+        </template>
+        删除这条任务记录{{ task.status === 'done' ? '（已生成的输出文件不受影响）' : '' }}？
+      </NPopconfirm>
       <!-- 排队顺序微调：悬停显示（拖拽的补充，触控板不好精准拖） -->
       <span v-if="task.status === 'queued'" class="qbtns">
         <button class="qbtn" title="上移" :disabled="!canUp" @click="emit('move', -1)">↑</button>
@@ -274,6 +293,8 @@ function onOpenInputFolder() {
 <style scoped>
 .task-card { background: #1e2023; }
 .row1 { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.sel-box { margin-left: 2px; flex-shrink: 0; }
+.names { flex: 1; }
 .names { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .arrow, .out { color: #9aa0a6; font-size: 13px; }

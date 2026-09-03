@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { NButton, NEmpty, NPopconfirm, NSpace } from 'naive-ui'
+import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
+import { NButton, NEmpty, NInput, NPopconfirm, NSpace, useDialog, useMessage } from 'naive-ui'
 import TaskCard from '../components/TaskCard.vue'
 import { api, type Task } from '../api'
 import { refreshStats, refreshTasks, store, ui } from '../store'
+
+const message = useMessage()
+const dialog = useDialog()
 
 // ---- 队列完成动作倒计时横幅（关机/休眠宽限期，可撤销） ----
 const tick = ref(Date.now())
@@ -50,14 +53,145 @@ const filterTabs: Array<{ key: Filter; label: string }> = [
   { key: 'failed', label: '失败/取消' },
 ]
 const filtered = computed(() =>
-  store.tasks.filter((t) => {
+  baseList.value.filter((t) => {
     if (filter.value === 'all') return true
     if (filter.value === 'active') return t.status === 'running' || t.status === 'queued'
     if (filter.value === 'done') return t.status === 'done'
     return t.status === 'failed' || t.status === 'canceled'
   }),
 )
-const doneCount = computed(() => store.tasks.filter((t) => t.status === 'done').length)
+const doneCount = computed(() => baseList.value.filter((t) => t.status === 'done').length)
+
+// ---- 搜索（按文件名/输出路径/模型，后端 LIKE 过滤） ----
+// 结果存本地 searchList，不动 store.tasks——侧栏任务徽标/首页依赖全量列表，
+// 搜索筛选不能污染全局。store.tasks 随 WS 更新时按 id 就地合入，卡片进度照常走。
+const q = ref('')
+const searching = ref(false)
+const searchList = ref<Task[] | null>(null)
+let qTimer: ReturnType<typeof setTimeout> | null = null
+const baseList = computed(() => searchList.value ?? store.tasks)
+
+function onSearchInput() {
+  if (qTimer) clearTimeout(qTimer)
+  qTimer = setTimeout(runSearch, 300)
+}
+async function runSearch() {
+  const kw = q.value.trim()
+  if (!kw) {
+    searchList.value = null
+    return
+  }
+  searching.value = true
+  try {
+    searchList.value = await api.tasks(kw)
+  } catch {
+    message.error('搜索失败（本地服务未连接？）')
+  } finally {
+    searching.value = false
+  }
+}
+function clearSearch() {
+  q.value = ''
+  searchList.value = null
+}
+watch(
+  () => store.tasks,
+  (list) => {
+    if (!searchList.value) return
+    const byId = new Map(list.map((t) => [t.id, t]))
+    searchList.value = searchList.value
+      .map((t) => byId.get(t.id) ?? t)
+      .filter((t) => byId.has(t.id) || t.status === 'running' || t.status === 'queued')
+  },
+)
+
+// ---- 批量选择 ----
+const selectMode = ref(false)
+const selected = ref<Set<string>>(new Set())
+function enterSelect() {
+  selectMode.value = true
+}
+function exitSelect() {
+  selectMode.value = false
+  selected.value = new Set()
+}
+function toggleSelect(id: string) {
+  const s = new Set(selected.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  selected.value = s
+}
+function toggleAll() {
+  if (filtered.value.every((t) => selected.value.has(t.id))) {
+    selected.value = new Set()
+  } else {
+    selected.value = new Set(filtered.value.map((t) => t.id))
+  }
+}
+const selCount = computed(() => selected.value.size)
+const selCancelable = computed(() =>
+  filtered.value.some((t) => selected.value.has(t.id) && (t.status === 'queued' || t.status === 'running')))
+const selDeletable = computed(() =>
+  filtered.value.some((t) => selected.value.has(t.id) && t.status !== 'running'))
+const selResumable = computed(() =>
+  filtered.value.some((t) => selected.value.has(t.id) && (t.status === 'failed' || t.status === 'canceled')))
+
+const batchBusy = ref(false)
+async function batchRun(action: 'cancel' | 'delete' | 'resume') {
+  const ids = [...selected.value]
+  if (!ids.length) return
+  if (action === 'delete') {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      dialog.warning({
+        title: `删除 ${ids.length} 条任务记录`,
+        content: '仅删除队列记录与临时产物，已生成的输出文件不受影响。确定吗？',
+        positiveText: '删除',
+        negativeText: '取消',
+        onPositiveClick: () => resolve(true),
+        onNegativeClick: () => resolve(false),
+        onClose: () => resolve(false),
+      })
+    })
+    if (!confirmed) return
+  }
+  batchBusy.value = true
+  try {
+    const r = await api.batchTasks(action, ids)
+    const failN = Object.keys(r.failed).length
+    if (r.done.length) {
+      if (action === 'delete') message.success(`已删除 ${r.done.length} 条记录`)
+      else if (action === 'cancel') message.success(`已取消 ${r.done.length} 个任务`)
+      else message.success(`已将 ${r.done.length} 个任务重新入队`)
+    }
+    if (failN) {
+      const first = Object.values(r.failed)[0]
+      message.warning(`${failN} 项未处理：${first ?? '未知原因'}`)
+    }
+    const doneSet = new Set(r.done)
+    selected.value = new Set([...selected.value].filter((id) => !doneSet.has(id)))
+    refreshTasks()
+    refreshStats()
+    if (searchList.value) runSearch() // 删除后搜索结果需同步（含 300 历史上限刷新）
+  } catch (e) {
+    message.error(`批量操作失败: ${(e as Error).message}`)
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+// 离开任务页：退出选择模式、清空搜索（store 不落地，避免其他页被过滤）
+watch(
+  () => ui.page,
+  (p) => {
+    if (p !== 'tasks') {
+      if (selectMode.value) exitSelect()
+      if (q.value) clearSearch()
+    }
+  },
+)
+onBeforeUnmount(() => {
+  if (qTimer) clearTimeout(qTimer)
+})
 
 // ---- 批量清理已完成 ----
 const cleaning = ref(false)
@@ -158,7 +292,7 @@ function retryWithParams(t: Task) {
       </div>
       <NSpace :size="8">
         <NPopconfirm
-          v-if="doneCount"
+          v-if="!selectMode && doneCount && !searchList"
           @positive-click="clearDone"
         >
           <template #trigger>
@@ -166,6 +300,7 @@ function retryWithParams(t: Task) {
           </template>
           删除全部 {{ doneCount }} 条已完成任务的记录（输出文件不受影响）？
         </NPopconfirm>
+        <NButton size="small" v-if="!selectMode" @click="enterSelect">批量选择</NButton>
         <NButton type="primary" @click="ui.page = 'newtask'">＋ 新建任务</NButton>
       </NSpace>
     </div>
@@ -183,6 +318,22 @@ function retryWithParams(t: Task) {
       <NButton size="small" :loading="cancelingAction" @click="cancelQueueAction">取消{{ bannerText }}</NButton>
     </div>
 
+    <!-- 批量选择操作条 -->
+    <div v-if="selectMode" class="batch-bar">
+      <NButton size="small" @click="exitSelect">退出选择</NButton>
+      <span class="bb-count">已选 {{ selCount }} 项</span>
+      <span class="bb-spacer" />
+      <NButton size="small" :disabled="!filtered.length" @click="toggleAll">
+        {{ filtered.length && filtered.every((t) => selected.has(t.id)) ? '取消全选' : '全选本页' }}
+      </NButton>
+      <NButton size="small" type="warning" :disabled="!selCancelable || batchBusy" :loading="batchBusy"
+               @click="batchRun('cancel')">批量取消</NButton>
+      <NButton size="small" type="info" :disabled="!selResumable || batchBusy" :loading="batchBusy"
+               @click="batchRun('resume')">批量继续</NButton>
+      <NButton size="small" type="error" :disabled="!selDeletable || batchBusy" :loading="batchBusy"
+               @click="batchRun('delete')">批量删除</NButton>
+    </div>
+
     <div class="filter-bar">
       <button
         v-for="ft in filterTabs"
@@ -193,11 +344,28 @@ function retryWithParams(t: Task) {
       >
         {{ ft.label }}
       </button>
+      <span class="fb-spacer" />
+      <NInput
+        v-model:value="q"
+        size="small"
+        clearable
+        placeholder="搜索文件名 / 输出 / 模型"
+        style="width: 220px"
+        :loading="searching"
+        @update:value="onSearchInput"
+        @clear="clearSearch"
+      />
     </div>
 
     <NEmpty
       v-if="store.ready && filtered.length === 0"
-      :description="store.tasks.length ? '该筛选下没有任务' : '队列为空，点击右上角「新建任务」添加视频'"
+      :description="
+        searchList
+          ? '没有匹配的任务，换个关键词试试'
+          : store.tasks.length
+            ? '该筛选下没有任务'
+            : '队列为空，点击右上角「新建任务」添加视频'
+      "
       style="margin-top: 12vh"
     />
     <NSpace v-else vertical :size="12">
@@ -205,9 +373,11 @@ function retryWithParams(t: Task) {
         v-for="t in filtered"
         :key="t.id"
         :task="t"
-        :draggable="t.status === 'queued'"
+        :draggable="t.status === 'queued' && !selectMode"
         :can-up="t.status === 'queued' && queuedIds.indexOf(t.id) > 0"
         :can-down="t.status === 'queued' && queuedIds.indexOf(t.id) < queuedIds.length - 1"
+        :select-mode="selectMode"
+        :selected="selected.has(t.id)"
         :class="{ 'task-dragging': draggingId === t.id, 'task-drag-over': dragOverId === t.id }"
         @dragstart="onDragStart(t, $event)"
         @dragover="onDragOver(t, $event)"
@@ -215,6 +385,7 @@ function retryWithParams(t: Task) {
         @dragend="resetDrag"
         @move="moveTask(t.id, $event)"
         @retry-params="retryWithParams(t)"
+        @toggle-select="toggleSelect(t.id)"
       />
     </NSpace>
     <div v-if="!store.ready" class="loading">
@@ -234,7 +405,19 @@ function retryWithParams(t: Task) {
 }
 h1 { font-size: 20px; font-weight: 700; }
 .sub { font-size: 12.5px; color: #9aa0a6; margin-top: 4px; }
-.filter-bar { display: flex; gap: 6px; }
+.filter-bar { display: flex; gap: 6px; align-items: center; }
+.fb-spacer { flex: 1; }
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid rgba(79, 140, 255, 0.4);
+  border-radius: 8px;
+  background: rgba(79, 140, 255, 0.07);
+}
+.bb-count { font-size: 13px; color: #e8eaed; }
+.bb-spacer { flex: 1; }
 .filter-btn {
   border: 1px solid #2a2d31;
   background: #1e2023;

@@ -8,6 +8,7 @@ import {
   NInput,
   NInputNumber,
   NModal,
+  NPopconfirm,
   NProgress,
   NRadioGroup,
   NRadioButton,
@@ -257,7 +258,12 @@ async function doImport() {
               </div>
             </template>
             <template v-else-if="m.installed">
-              <NButton size="small" quaternary type="error" @click="onDelete(m.id)">删除权重</NButton>
+              <NPopconfirm @positive-click="onDelete(m.id)">
+                <template #trigger>
+                  <NButton size="small" quaternary type="error">删除权重</NButton>
+                </template>
+                删除「{{ m.name }}」已下载的权重（{{ m.size_mb }}MB）？删除后可随时重新下载。
+              </NPopconfirm>
             </template>
             <template v-else>
               <NButton size="small" type="primary" ghost @click="onDownload(m.id)">下载 ({{ m.size_mb }}MB)</NButton>

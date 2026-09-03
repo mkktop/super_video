@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   NConfigProvider,
+  NDialogProvider,
   NGlobalStyle,
   NMessageProvider,
   darkTheme,
@@ -8,7 +9,7 @@ import {
   zhCN,
   type GlobalThemeOverrides,
 } from 'naive-ui'
-import { onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, type Component } from 'vue'
 import { initStore, retryInit, store, ui } from './store'
 import TitleBar from './components/TitleBar.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -23,6 +24,23 @@ import Perf from './pages/Perf.vue'
 import Logs from './pages/Logs.vue'
 import Settings from './pages/Settings.vue'
 import Compare from './pages/Compare.vue'
+
+/** 页面名 → 组件（动态 <component :is> 是 KeepAlive+Transition 的正确组合方式：
+ *  v-if 链在 KeepAlive 内切换时外层 Transition 感知不到） */
+const PAGES: Record<string, Component> = {
+  newtask: NewTask,
+  home: Home,
+  trim: Trim,
+  imagesr: ImageSR,
+  mcompare: CompareModels,
+  tasks: Tasks,
+  models: Models,
+  perf: Perf,
+  logs: Logs,
+  compare: Compare,
+  settings: Settings,
+}
+const pageComp = computed(() => PAGES[ui.page] ?? Home)
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -65,7 +83,8 @@ onUnmounted(() => offNavigate?.())
   >
     <n-global-style />
     <n-message-provider>
-      <div class="app">
+      <n-dialog-provider>
+        <div class="app">
         <TitleBar />
         <div class="body">
           <Sidebar v-if="ui.page !== 'compare'" />
@@ -79,33 +98,39 @@ onUnmounted(() => offNavigate?.())
             <!-- 表单/作业页 KeepAlive 常驻（NewTask/Trim/ImageSR/CompareModels）：
                  填一半切页草稿不丢、剪切/对比进行中切页回来结果还在；
                  其余页面照常即挂即卸。常驻页的全局监听须配 onActivated/onDeactivated 守卫 -->
-            <KeepAlive :include="['NewTask', 'Trim', 'ImageSR', 'CompareModels']">
-              <NewTask v-if="ui.page === 'newtask'" />
-              <Home v-else-if="ui.page === 'home'" />
-              <Trim v-else-if="ui.page === 'trim'" />
-              <ImageSR v-else-if="ui.page === 'imagesr'" />
-              <CompareModels v-else-if="ui.page === 'mcompare'" />
-              <Tasks v-else-if="ui.page === 'tasks'" />
-              <Models v-else-if="ui.page === 'models'" />
-              <Perf v-else-if="ui.page === 'perf'" />
-              <Logs v-else-if="ui.page === 'logs'" />
-              <Compare v-else-if="ui.page === 'compare'" />
-              <Settings v-else-if="ui.page === 'settings'" />
-            </KeepAlive>
+            <Transition name="page" mode="out-in">
+              <KeepAlive :include="['NewTask', 'Trim', 'ImageSR', 'CompareModels']">
+                <component :is="pageComp" />
+              </KeepAlive>
+            </Transition>
           </main>
         </div>
       </div>
+      </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
 
 <style>
+/* ---- 设计 token：页面/组件样式统一引用（存量 scoped hex 逐轮迁移至此） ---- */
+:root {
+  --sv-bg: #141517;        /* 应用背景 */
+  --sv-panel: #1e2023;     /* 卡片/面板 */
+  --sv-panel-deep: #0d0e10;/* 舞台/画布 */
+  --sv-border: #2a2d31;    /* 描边 */
+  --sv-text: #e8eaed;      /* 主文字 */
+  --sv-text-dim: #9aa0a6;  /* 次文字 */
+  --sv-text-faint: #7c838c;
+  --sv-accent: #4f8cff;    /* 主色 */
+  --sv-danger: #f87171;
+  --sv-radius: 8px;
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #app { height: 100%; overflow: hidden; }
 body {
   font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  background: #141517;
-  color: #e8eaed;
+  background: var(--sv-bg);
+  color: var(--sv-text);
   -webkit-font-smoothing: antialiased;
 }
 .app { display: flex; flex-direction: column; height: 100vh; }
@@ -121,6 +146,29 @@ body {
   overflow: hidden;
   display: flex;
 }
+
+/* ---- 页面切换过渡：淡入淡出（KeepAlive 缓存命中同样触发进入动画） ---- */
+.page-enter-active { transition: opacity 0.16s ease; }
+.page-leave-active { transition: opacity 0.1s ease; }
+.page-enter-from, .page-leave-to { opacity: 0; }
+
+/* ---- 通用骨架占位（shimmer）：NewTask probe 卡等加载态用 ---- */
+.sv-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #1d1f22;
+  border-radius: 6px;
+}
+.sv-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.055), transparent);
+  animation: sv-shimmer 1.3s infinite;
+}
+@keyframes sv-shimmer { 100% { transform: translateX(100%); } }
+
 .init-error {
   max-width: 560px;
   margin: 60px auto;

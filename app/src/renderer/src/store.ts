@@ -16,6 +16,9 @@ export const store = reactive({
   initError: '', // 初始化失败信息（非空=显示错误横幅+重试按钮，不再永久卡 loading）
   connected: false,
   tasks: [] as Task[],
+  /** 任务列表搜索词（任务页输入框驱动）：非空时 refreshTasks 带 q 过滤，
+   *  离开任务页清空——其他页（首页运行卡等）依赖全量列表 */
+  taskQuery: '',
   stats: { total: 0, done: 0, frames: 0, bytes: 0 } as Stats,
   models: [] as ModelInfo[],
   presets: [] as Preset[],
@@ -131,7 +134,7 @@ function mergeTasks(incoming: Task[]): void {
 
 export async function refreshTasks() {
   try {
-    mergeTasks(await api.tasks())
+    mergeTasks(await api.tasks(store.taskQuery))
     store.connected = true
   } catch {
     store.connected = false

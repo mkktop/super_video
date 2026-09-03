@@ -3,6 +3,15 @@
 export let baseUrl = ''
 let token = ''
 
+/** 带 HTTP 状态码的错误（409 覆盖确认等分支需要区分状态而非只看文案） */
+export class ApiError extends Error {
+  status: number
+  constructor(msg: string, status: number) {
+    super(msg)
+    this.status = status
+  }
+}
+
 /** 统一 fetch：自动带 token 头（401 时 sidecar 会拒绝无令牌请求） */
 function _fetch(url: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers)
@@ -143,6 +152,12 @@ export interface ProbeInfo {
   decoder?: { nvdec: boolean; d3d11va: boolean }
   /** 智能推荐（recommend=true 时附带；源分析失败则缺省） */
   recommend?: RecommendInfo
+  /** 位深（8/10…）：10bit 源在反交错等信息卡与去色带建议上有意义 */
+  bit_depth?: number
+  /** 可变帧率：后端自动转 CFR，展示让用户知道有这一步 */
+  vfr?: boolean
+  /** 场序：progressive=逐行；tt/bb/tb/bt=隔行（反交错建议依据） */
+  field_order?: string
 }
 
 export interface Task {
@@ -337,8 +352,9 @@ export const api = {
       body: JSON.stringify(body),
     })
   },
-  async tasks(): Promise<Task[]> {
-    return (await _fetch(`${baseUrl}/api/tasks`)).json()
+  async tasks(q = ''): Promise<Task[]> {
+    const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
+    return (await _fetch(`${baseUrl}/api/tasks${qs}`)).json()
   },
   async stats(): Promise<Stats> {
     return (await _fetch(`${baseUrl}/api/stats`)).json()
@@ -361,12 +377,28 @@ export const api = {
     output?: string
     model_id: string
     params: Record<string, unknown>
+    /** 显式 output 撞已存在文件/活动任务时后端 409；用户确认覆盖后带 true 重交 */
+    overwrite?: boolean
   }): Promise<Response> {
     return _fetch(`${baseUrl}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
+  },
+  /** 批量取消/删除/续跑：复用单任务端点校验，部分成功；failed 为逐条失败原因 */
+  async batchTasks(action: 'cancel' | 'delete' | 'resume', ids: string[]): Promise<{
+    ok: boolean
+    done: string[]
+    failed: Record<string, string>
+  }> {
+    const r = await _fetch(`${baseUrl}/api/tasks/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ids }),
+    })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`)
+    return r.json()
   },
   async cancel(id: string): Promise<Response> {
     return _fetch(`${baseUrl}/api/tasks/${id}/cancel`, { method: 'POST' })
@@ -440,7 +472,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!r.ok) throw new Error(`${(await r.json()).detail ?? r.status}`)
+    if (!r.ok) throw new ApiError(`${(await r.json()).detail ?? r.status}`, r.status)
     return r.json()
   },
   async compareStatus(id: string): Promise<CompareJob> {
@@ -467,13 +499,15 @@ export const api = {
     end_s: number
     mode: string
     output?: string
+    /** 显式 output 撞已存在文件时后端 409；用户确认覆盖后带 true 重交 */
+    overwrite?: boolean
   }): Promise<{ job_id: string; output: string }> {
     const r = await _fetch(`${baseUrl}/api/trim`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    if (!r.ok) throw new Error((await r.json()).detail ?? `HTTP ${r.status}`)
+    if (!r.ok) throw new ApiError((await r.json()).detail ?? `HTTP ${r.status}`, r.status)
     return r.json()
   },
   async trimStatus(id: string): Promise<TrimJob> {

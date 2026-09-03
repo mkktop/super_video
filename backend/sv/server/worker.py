@@ -189,8 +189,10 @@ def _load_onnx_engine(
         t = str(e).lower()
         return "memory" in t or "alloc" in t or "oom" in t
 
-    # 推理后端：设置 engine=trt 时走 TensorRT 链（TRT 不可用引擎层自动回退）
-    ort_device = "trt" if settings.load().get("engine") == "trt" else "auto"
+    # 推理后端：设置 engine=trt 走 TensorRT 链（TRT 不可用引擎层自动回退）；
+    # engine=cpu 显式锁 CPUExecutionProvider（CUGAN×DML 泄漏模型的兜底通道）
+    _eng = settings.load().get("engine")
+    ort_device = _eng if _eng in ("trt", "cpu") else "auto"
     # CUGAN×DML 逐帧显存泄漏（实测 1080p BASIC≈8 帧、ALL≈30 帧即 0x887A0006
     # 设备摘除，全 GPU 会话连坐；540p 阈值更高但终会爆；与线程/包装/内容无关），
     # CUDA EP 实测同样挂起。仅 TRT 与显式 CPU 可用（TRT 端到端 14.9fps 验证）。

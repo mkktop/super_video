@@ -94,12 +94,17 @@ def select_engine(force: str | None = None) -> EngineChoice:
     CUDA 基础设施保留，SV_ENGINE=cuda 强制启用（M3 扩散模型 PyTorch 阶段启用）。
     trt = CUDA venv + TensorrtExecutionProvider（worker 内按同名设置再选 provider；
     TRT 库缺失时引擎层自动回退，此处只保证解释器可用）。
-    force: 'cuda' | 'trt' | 'directml'（环境变量 SV_ENGINE）。
+    cpu = 主解释器 + CPUExecutionProvider（GPU 问题兜底：CUGAN×DML 泄漏模型的
+    报错文案即引导用户显式切 CPU，设置白名单同步允许）。
+    force: 'cuda' | 'trt' | 'directml' | 'cpu'（环境变量 SV_ENGINE）。
 
     打包版（PyInstaller frozen）：worker 复用 sidecar.exe；engine=trt/cuda 且
     TRT 组件已安装（trt-runtime/，含 GPU 版 onnxruntime）时走组件探测，
     否则照旧 DirectML。
     """
+    if force == "cpu" or os.environ.get("SV_ENGINE") == "cpu":
+        return EngineChoice(
+            "cpu", sys.executable, "纯 CPU 推理（速度慢，GPU 问题时的兜底通道）")
     if getattr(sys, "frozen", False):
         want = force or os.environ.get("SV_ENGINE")
         if want in ("cuda", "trt"):

@@ -73,6 +73,7 @@ def test_serial_queue_no_concurrency(client, clips):
         r = client.post("/api/tasks", json={
             "input": str(clips["tiny"]), "output": str(out),
             "model_id": "realesr-animevideov3", "params": {},
+            "overwrite": True,  # 复跑覆盖上次产物（输出覆盖预检 409 只挡非显式确认）
         })
         assert r.status_code == 201, r.text
         ids.append(r.json()["id"])
@@ -155,6 +156,7 @@ def test_custom_res_and_tile(client, clips):
         "input": str(clips["tiny"]), "output": str(out),
         "model_id": "realesr-animevideov3",
         "params": {"scale": 4, "target_w": 481, "target_h": 270, "tile": 256},
+        "overwrite": True,  # 复跑覆盖上次产物
     })
     assert r.status_code == 201, r.text
     t = r.json()
@@ -178,6 +180,7 @@ def test_cancel_running_kills_tree(client, clips):
     r = client.post("/api/tasks", json={
         "input": str(clips["medium"]), "output": str(out),
         "model_id": "realesr-animevideov3", "params": {},
+        "overwrite": True,  # 复跑覆盖上次产物
     })
     task_id = r.json()["id"]
 
@@ -208,6 +211,7 @@ def _post_task(client, clips, out_name, model="realesr-animevideov3", params=Non
     r = client.post("/api/tasks", json={
         "input": str(clips["tiny"]), "output": str(TEMP_DIR / out_name),
         "model_id": model, "params": params or {},
+        "overwrite": True,  # 复跑覆盖上次产物（输出覆盖预检只挡非显式确认）
     })
     assert r.status_code == 201, r.text
     return r.json()["id"]
@@ -237,6 +241,7 @@ def test_resume_api(client, clips):
     r = client.post("/api/tasks", json={
         "input": str(clips["medium"]), "output": str(out),
         "model_id": "realesr-animevideov3", "params": {},
+        "overwrite": True,  # 复跑覆盖上次产物
     })
     tid = r.json()["id"]
     t = wait_status(client, tid, ("running", "done"), timeout=60)

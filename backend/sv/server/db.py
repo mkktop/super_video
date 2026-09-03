@@ -109,10 +109,27 @@ def get_task(task_id: str) -> dict | None:
     return _row2dict(r) if r else None
 
 
-def list_tasks(history_limit: int = 100) -> list[dict]:
+def list_tasks(history_limit: int = 100, q: str = "") -> list[dict]:
     """任务列表：运行/排队任务全量在前（按 queue_order），历史（done/failed/canceled）
     只取最近 history_limit 条（按创建时间倒序）——列表渲染成本不随使用时间增长。
-    首页统计要全量数字，走 stats() 聚合，别数这里。"""
+    首页统计要全量数字，走 stats() 聚合，别数这里。
+
+    q 非空时按输入/输出路径与模型 id 子串过滤（SQLite LIKE 对 ASCII 不区分
+    大小写），历史上限放宽到 300 让搜索能覆盖更早记录。"""
+    if q:
+        cond = " AND (input_path LIKE ? OR output_path LIKE ? OR model_id LIKE ?)"
+        pat = (f"%{q}%",) * 3
+        history_limit = max(history_limit, 300)
+        with db_conn() as c:
+            active = c.execute(
+                "SELECT * FROM tasks WHERE status IN ('running','queued')" + cond +
+                " ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, queue_order ASC",
+                pat).fetchall()
+            history = c.execute(
+                "SELECT * FROM tasks WHERE status NOT IN ('running','queued')" + cond +
+                " ORDER BY created_at DESC LIMIT ?",
+                (*pat, history_limit)).fetchall()
+        return [_row2dict(r) for r in [*active, *history]]
     with db_conn() as c:
         active = c.execute(
             "SELECT * FROM tasks WHERE status IN ('running','queued')"

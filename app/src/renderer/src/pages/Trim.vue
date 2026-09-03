@@ -7,12 +7,14 @@ import {
   NProgress,
   NSlider,
   NTag,
+  useDialog,
   useMessage,
 } from 'naive-ui'
-import { api, mediaSrc, type ProbeInfo, type TrimJob } from '../api'
+import { api, ApiError, mediaSrc, type ProbeInfo, type TrimJob } from '../api'
 import { openWizardWith, ui } from '../store'
 
 const message = useMessage()
+const dialog = useDialog()
 
 const input = ref('')
 const probeInfo = ref<ProbeInfo | null>(null)
@@ -188,21 +190,25 @@ async function startCut(dest: 'save' | 'sr' | 'cmp') {
   }
   stopPolling() // 上一次任务若仍在轮询（异常残留），先掐掉再起新的
   job.value = null
-  try {
+  const run = async (overwrite: boolean) => {
     const r = await api.createTrim({
-      input: input.value,
+      input: input.value!,
       start_s: startSec.value,
       end_s: endSec.value,
       mode: 'exact',
       output: output.value || undefined,
+      overwrite,
     })
     jobId.value = r.job_id
-    job.value = { state: 'queued', progress: 0, input: input.value, start_s: startSec.value,
+    job.value = { state: 'queued', progress: 0, input: input.value!, start_s: startSec.value,
       end_s: endSec.value, mode: 'exact', output: r.output, error: null }
+    return r.job_id
+  }
+  const startPollingFor = (jid: string) => {
     let failures = 0
     polling.value = setInterval(async () => {
       try {
-        const j = await api.trimStatus(r.job_id)
+        const j = await api.trimStatus(jid)
         failures = 0
         job.value = j
         if (j.state === 'done' || j.state === 'failed' || j.state === 'canceled') {
@@ -225,8 +231,32 @@ async function startCut(dest: 'save' | 'sr' | 'cmp') {
         if (++failures >= 10) stopPolling()
       }
     }, 400)
+  }
+  try {
+    startPollingFor(await run(false))
   } catch (e) {
-    message.error(`提交失败: ${(e as Error).message}`)
+    if (e instanceof ApiError && e.status === 409) {
+      // 输出文件已存在：确认覆盖后重交（仅显式路径会撞；自动命名带时间戳）
+      const confirmed = await new Promise<boolean>((resolve) => {
+        dialog.warning({
+          title: '输出路径冲突',
+          content: `${e.message}。继续将覆盖该文件，确定吗？`,
+          positiveText: '覆盖并继续',
+          negativeText: '返回修改',
+          onPositiveClick: () => resolve(true),
+          onNegativeClick: () => resolve(false),
+          onClose: () => resolve(false),
+        })
+      })
+      if (!confirmed) return
+      try {
+        startPollingFor(await run(true))
+      } catch (e2) {
+        message.error(`提交失败: ${(e2 as Error).message}`)
+      }
+    } else {
+      message.error(`提交失败: ${(e as Error).message}`)
+    }
   }
 }
 

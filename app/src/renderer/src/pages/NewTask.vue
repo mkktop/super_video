@@ -10,6 +10,7 @@ import {
   NInput,
   NInputNumber,
   NPopover,
+  NPopconfirm,
   NRadio,
   NRadioButton,
   NRadioGroup,
@@ -17,12 +18,14 @@ import {
   NSlider,
   NSwitch,
   NTag,
+  useDialog,
   useMessage,
 } from 'naive-ui'
 import { api, mediaSrc, type ModelInfo, type ProbeInfo } from '../api'
 import { refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
+const dialog = useDialog()
 
 const inputs = ref<string[]>([])
 const probeInfo = ref<ProbeInfo | null>(null)
@@ -65,19 +68,35 @@ function joinDefault(dir: string, name: string): string {
   return `${dir.replace(/[\\/]+$/, '')}\\${name}`
 }
 
-/** 后端 _sr_output_name 的镜像：目录无同名 → 沿用原名；同名（含源文件本身）
- *  → _倍率 后缀。异步查存在性，表单预填与实际创建保持一致。 */
+/** 排队/运行中任务将写入的输出路径集合（小写归一）：预填命名避让用，
+ *  与后端创建期的活动任务播种同口径（A 还没跑、B 预填同名会互相覆盖） */
+const activeOuts = computed(() =>
+  new Set(
+    store.tasks
+      .filter((t) => t.status === 'queued' || t.status === 'running')
+      .map((t) => t.output_path.toLowerCase()),
+  ),
+)
+
+/** 后端 _sr_output_name 的镜像：目录无同名 → 沿用原名；同名（含源文件本身与
+ *  尚未开跑的活动任务）→ _倍率 后缀（也被占用再退 _2 序号）。异步查存在性，
+ *  表单预填与实际创建保持一致。 */
 async function defaultOutputName(stem: string, fmt: string, srcPath: string): Promise<string> {
   const suffix =
     resMode.value === 'custom' ? `${effW.value}x${effH.value}` : `${targetScale.value}x`
-  const suffixed = `${stem}_${suffix}.${fmt}`
   const outDir = globalOutDir.value || srcPath.replace(/[\\/][^\\/]*$/, '')
   const plain = joinDefault(outDir, `${stem}.${fmt}`)
   // 与源同路径（同目录同扩展名）时"同名文件"就是源本身，必须保后缀
-  if (plain.toLowerCase() !== srcPath.toLowerCase() && !(await window.sv.fsExists(plain))) {
+  if (
+    plain.toLowerCase() !== srcPath.toLowerCase() &&
+    !activeOuts.value.has(plain.toLowerCase()) &&
+    !(await window.sv.fsExists(plain))
+  ) {
     return plain
   }
-  return joinDefault(outDir, suffixed)
+  const suffixed = joinDefault(outDir, `${stem}_${suffix}.${fmt}`)
+  if (!activeOuts.value.has(suffixed.toLowerCase())) return suffixed
+  return joinDefault(outDir, `${stem}_${suffix}_2.${fmt}`)
 }
 
 async function autoFillOutput() {
@@ -207,6 +226,20 @@ const audioHint = computed(() => {
   if (audioMode.value === 'none') return '不保留音轨'
   const conv = container.value === 'mkv' ? '' : '，不兼容 MP4/MOV 的轨自动转 AAC'
   return `将保留全部 ${n} 条音轨${conv}`
+})
+
+/** 媒体属性提示（信息卡下方标签行）：10bit/VFR/隔行——后两者后端会自动处理，
+ * 展示让用户知道有这一步；隔行另给反交错建议（与智能推荐同依据，未开推荐也可见） */
+const mediaFlags = computed(() => {
+  const p = probeInfo.value
+  if (!p?.ok) return [] as string[]
+  const flags: string[] = []
+  if (p.field_order && p.field_order !== 'progressive') {
+    flags.push('隔行扫描源 — 建议开启反交错')
+  }
+  if (p.vfr) flags.push('可变帧率 — 将自动转为恒定帧率')
+  if ((p.bit_depth ?? 8) > 8) flags.push(`${p.bit_depth}bit 位深 — 处理时转为 8bit`)
+  return flags
 })
 
 const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
@@ -541,6 +574,53 @@ async function deleteUserPreset(pid: string) {
 }
 
 // ---- 提交 ----
+/** 组装单个输入的创建请求体（overwrite 用于撞名确认后的重交） */
+function buildCreateBody(input: string, overwrite: boolean) {
+  const out = inputs.value.length === 1 ? output.value || undefined : undefined
+  const scaleToSend = resMode.value === 'custom' ? customScale.value! : targetScale.value
+  return {
+    input,
+    output: out,
+    model_id: modelId.value,
+    overwrite,
+    params: {
+      scale: scaleToSend,
+      target_scale: scaleToSend,
+      ...(resMode.value === 'custom' ? { target_w: effW.value, target_h: effH.value } : {}),
+      ...(isImage.value
+        ? { out_kind: outKind.value }
+        : {
+            codec: codec.value,
+            crf: crf.value,
+            container: container.value,
+            audio_mode: audioMode.value,
+            subtitle_mode: keepSubtitles.value ? 'auto' : 'none',
+          }),
+      interp: interp.value,
+      decoder: decoder.value,
+      ...(deinterlace.value ? { deinterlace: true } : {}),
+      ...(deband.value ? { deband: true } : {}),
+      ...(denoise.value !== null ? { denoise: denoise.value } : {}),
+      ...(tileChoice.value ? { tile: tileChoice.value } : {}),
+    },
+  }
+}
+
+/** 409（输出文件已存在/撞活动任务）→ 确认覆盖弹窗；resolve false=用户放弃保持表单 */
+function confirmOverwrite(detail: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: '输出路径冲突',
+      content: `${detail}。继续将覆盖该文件，确定吗？`,
+      positiveText: '覆盖并继续',
+      negativeText: '返回修改',
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    })
+  })
+}
+
 async function submit() {
   if (!canSubmit.value) return
   if (resMode.value === 'custom' && !customOk.value) {
@@ -550,34 +630,16 @@ async function submit() {
   submitting.value = true
   let ok = 0
   let lastErr = ''
-  const scaleToSend = resMode.value === 'custom' ? customScale.value! : targetScale.value
   for (const input of inputs.value) {
-    const out = inputs.value.length === 1 ? output.value || undefined : undefined
-    const r = await api.createTask({
-      input,
-      output: out,
-      model_id: modelId.value,
-      params: {
-        scale: scaleToSend,
-        target_scale: scaleToSend,
-        ...(resMode.value === 'custom' ? { target_w: effW.value, target_h: effH.value } : {}),
-        ...(isImage.value
-          ? { out_kind: outKind.value }
-          : {
-              codec: codec.value,
-              crf: crf.value,
-              container: container.value,
-              audio_mode: audioMode.value,
-              subtitle_mode: keepSubtitles.value ? 'auto' : 'none',
-            }),
-        interp: interp.value,
-        decoder: decoder.value,
-        ...(deinterlace.value ? { deinterlace: true } : {}),
-        ...(deband.value ? { deband: true } : {}),
-        ...(denoise.value !== null ? { denoise: denoise.value } : {}),
-        ...(tileChoice.value ? { tile: tileChoice.value } : {}),
-      },
-    })
+    let r = await api.createTask(buildCreateBody(input, false))
+    if (r.status === 409) {
+      // 仅显式指定输出路径会 409（自动命名有后缀避让）：确认后带 overwrite 重交
+      const detail = (await r.json().catch(() => ({}))).detail ?? '输出路径冲突'
+      submitting.value = false
+      if (!(await confirmOverwrite(String(detail)))) return
+      submitting.value = true
+      r = await api.createTask(buildCreateBody(input, true))
+    }
     if (r.ok) ok++
     else lastErr = `${(await r.json()).detail ?? r.status}`
   }
@@ -601,6 +663,39 @@ function reset() {
   modelId.value = ''
   output.value = ''
   outputTouched.value = false
+}
+
+// ---- 先试跑 20 秒（复用模型对比基建：片头 20s + 当前模型跑一版，看效果再决定入队） ----
+const canTryRun = computed(
+  () =>
+    inputs.value.length === 1 &&
+    !!probeInfo.value?.ok &&
+    probeInfo.value.duration_s > 1 &&
+    !!modelId.value &&
+    !!selectedModel.value?.vram_ok &&
+    (!!selectedModel.value?.installed || !!selectedModel.value?.bundled),
+)
+const tryRunHint = computed(() => {
+  if (inputs.value.length !== 1 || !probeInfo.value?.ok || !selectedModel.value) return ''
+  return `先用「${selectedModel.value.name}」跑片头 20 秒看效果与速度？满意再入队全片`
+})
+const tryRunTitle = computed(() => {
+  if (!inputs.value.length) return ''
+  if (inputs.value.length > 1) return '批量文件不支持试跑'
+  if (!probeInfo.value?.ok) return '等待视频信息读取完成'
+  if (probeInfo.value.duration_s <= 1) return '视频过短，直接入队即可'
+  if (!modelId.value || !selectedModel.value) return '请先选择模型'
+  if (!selectedModel.value.vram_ok) return '当前模型超出显存，不可用'
+  if (!selectedModel.value.installed && !selectedModel.value.bundled) return '模型未下载：先下载（入队也会自动下载）'
+  return '用当前模型对片头 20 秒快速跑一版，可拖动分割线对比原片'
+})
+function tryRun() {
+  if (!canTryRun.value || !probeInfo.value || !modelId.value) return
+  const dur = probeInfo.value.duration_s
+  ui.pendingCompare = { input: inputs.value[0], start_s: 0, end_s: Math.min(20, dur) }
+  ui.pendingModel = modelId.value
+  ui.pendingScale = resMode.value === 'custom' ? customScale.value! : targetScale.value
+  ui.page = 'mcompare'
 }
 
 const fmtDur = (s: number) => {
@@ -645,12 +740,17 @@ export default { name: 'NewTask' }
         @click="applyPreset(p.id)"
       >
         <span class="p-icon">{{ p.icon }}</span>{{ p.name }}
-        <span
-          v-if="p.user"
-          class="p-del"
-          title="删除此预设"
-          @click.stop="deleteUserPreset(p.id)"
-        >×</span>
+        <NPopconfirm @positive-click="deleteUserPreset(p.id)">
+          <template #trigger>
+            <span
+              v-if="p.user"
+              class="p-del"
+              title="删除此预设"
+              @click.stop
+            >×</span>
+          </template>
+          删除预设「{{ p.name }}」？
+        </NPopconfirm>
       </button>
       <NPopover v-model:show="presetPopShow" trigger="click" placement="bottom-end">
         <template #trigger>
@@ -708,7 +808,10 @@ export default { name: 'NewTask' }
             <span>音轨 <b>{{ probeInfo.has_audio ? '有' : '无' }}</b></span>
           </div>
         </div>
-        <div v-else class="probe-err">{{ probeInfo.error || '文件不可用' }}</div>
+        <div v-if="mediaFlags.length" class="probe-flags">
+          <span v-for="f in mediaFlags" :key="f" class="flag">{{ f }}</span>
+        </div>
+        <div v-if="!probeInfo.ok" class="probe-err">{{ probeInfo.error || '文件不可用' }}</div>
       </NCard>
       <!-- 智能推荐：源内容分析（动画/真人、隔行、老编码）→ 一键配好参数 -->
       <NCard v-if="recommend && probeInfo?.ok" size="small" class="rec-card" :bordered="true">
@@ -737,7 +840,14 @@ export default { name: 'NewTask' }
           </NButton>
         </div>
       </NCard>
-      <div v-else-if="probing" class="probe-hint">正在读取视频信息…</div>
+      <div v-else-if="probing" class="probe-skel">
+        <div class="sv-skeleton skel-thumb" />
+        <div class="skel-rows">
+          <div class="sv-skeleton" style="height: 14px" />
+          <div class="sv-skeleton" style="height: 14px" />
+          <div class="sv-skeleton" style="height: 14px; width: 70%" />
+        </div>
+      </div>
     </section>
 
     <!-- ② 选择模型 -->
@@ -926,7 +1036,18 @@ export default { name: 'NewTask' }
 
     <!-- 吸底操作条 -->
     <div class="footer-bar">
+      <span class="hint-inline tryrun-hint">
+        {{ tryRunHint }}
+      </span>
+      <span class="footer-spacer" />
       <NButton :disabled="submitting" @click="reset">清空</NButton>
+      <NButton
+        :disabled="!canTryRun"
+        :title="tryRunTitle"
+        @click="tryRun"
+      >
+        ▶ 先试跑 20 秒
+      </NButton>
       <NButton
         type="primary"
         :loading="submitting"
@@ -1073,8 +1194,31 @@ h1 { font-size: 20px; font-weight: 700; }
   flex: 1;
 }
 .probe-grid b { color: #e8eaed; font-weight: 600; margin-left: 4px; }
+.probe-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.flag {
+  font-size: 12px;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.09);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
 .probe-err { color: #f87171; font-size: 13px; }
-.probe-hint { color: #9aa0a6; font-size: 13px; text-align: center; }
+.probe-skel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #2a2d31;
+  border-radius: 8px;
+}
+.skel-thumb { width: 168px; aspect-ratio: 16 / 9; flex-shrink: 0; }
+.skel-rows { flex: 1; display: flex; flex-direction: column; gap: 12px; }
 
 .recents { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .recents-label { font-size: 12px; color: #9aa0a6; }
@@ -1182,9 +1326,13 @@ h1 { font-size: 20px; font-weight: 700; }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
   padding: 12px 4px 4px;
   background: #141517;
   border-top: 1px solid #232629;
   z-index: 5;
+  flex-wrap: wrap;
 }
+.tryrun-hint { font-size: 12px; color: #4f8cff; }
+.footer-spacer { flex: 1; }
 </style>
