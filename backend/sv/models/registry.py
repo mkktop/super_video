@@ -65,8 +65,8 @@ def load_registry() -> dict[str, ModelSpec]:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 spec = ModelSpec.from_dict(data)
                 specs[spec.id] = spec
-            except (json.JSONDecodeError, KeyError) as e:
-                # 单个 manifest 损坏不影响整体
+            except (ValueError, KeyError, OSError) as e:
+                # 单个 manifest 损坏不影响整体（ValueError 兼盖 JSON/UTF-8 解码错误）
                 print(f"[registry] 跳过无效 manifest {f.name}: {e}")
     return specs
 

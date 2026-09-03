@@ -158,7 +158,7 @@ cd app && pnpm install && pnpm build && npx electron .
 
 ```bash
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
-# 306 通过 + 1 跳过（无 GPU/部分模型缺失时按机器跳过）
+# 352 通过 + 2 跳过（无 GPU/部分模型缺失时按机器跳过）
 ```
 
 ### 打包发布

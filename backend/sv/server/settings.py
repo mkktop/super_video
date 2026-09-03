@@ -48,7 +48,24 @@ def load() -> dict:
     data = dict(DEFAULTS)
     if SETTINGS_PATH.exists():
         try:
-            data.update(json.loads(SETTINGS_PATH.read_text(encoding="utf-8")))
+            raw = SETTINGS_PATH.read_bytes()
+        except OSError:
+            return data
+        # UTF-8 是本应用唯一写入口径，但文件可能被外部工具重存成 ANSI/GBK
+        # （中文系统记事本手改 output_dir/命名模板是实测踩法）：utf-8 解码
+        # 抛 UnicodeDecodeError 会沿 worker 的 settings.load() 一路裸奔，
+        # 任务以「引擎加载失败 UnicodeDecodeError: ...」硬失败（1060 实机）。
+        # 解不动 UTF-8（含 BOM）退 GBK 读出内容——下次 save() 会整体按
+        # UTF-8 原子回写，自然愈合回单一口径；两边都解不动才弃用回默认。
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            try:
+                text = raw.decode("gbk")
+            except (UnicodeDecodeError, ValueError):
+                return data
+        try:
+            data.update(json.loads(text))
         except json.JSONDecodeError:
             pass
     return data

@@ -23,7 +23,7 @@ def load() -> list[dict]:
         return []
     try:
         data = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError 兼盖 UnicodeDecodeError（文件被外部存成 GBK 等）
         return []  # 损坏按无预设处理，不阻塞内置预设展示
     return [p for p in data if isinstance(p, dict) and p.get("id")]
 
