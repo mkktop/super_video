@@ -97,8 +97,9 @@ def sha256(path: Path) -> str:
 
 def source_file(entry: dict, cache_dir: Path) -> Path:
     """拿到待上传的本地文件：bundled → models_store（应用下载缓存，开发机常已有
-    基准测试用过的权重，免走不稳定的 GitHub 代理路径）→ 缓存下载（3 次重试）。"""
-    name, url = entry["name"], entry["url"]
+    基准测试用过的权重，免走不稳定的 GitHub 代理路径）→ 按 url + mirror_urls 逐个
+    下载（主源可能指尚未铺底的 ModelScope，必须能回落到 GitHub 原始源）。"""
+    name = entry["name"]
     for local in (BUNDLED_DIR / name,
                   REPO_ROOT / "models_store" / entry["_model_id"] / name):
         if local.exists():
@@ -107,24 +108,26 @@ def source_file(entry: dict, cache_dir: Path) -> Path:
     if dest.exists() and dest.stat().st_size == entry.get("size"):
         return dest
     part = dest.with_suffix(dest.suffix + ".part")
+    urls = [u for u in [entry.get("url", ""), *entry.get("mirror_urls", [])] if u]
     last_err: Exception | None = None
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "super-video-sync/1.0"})
-            with urllib.request.build_opener().open(req, timeout=60) as resp, open(part, "wb") as out:
-                got, total = 0, entry.get("size") or 0
-                while chunk := resp.read(1 << 20):
-                    out.write(chunk)
-                    got += len(chunk)
-                    if total and got // (32 << 20) != (got - len(chunk)) // (32 << 20):
-                        print(f"    {name}: {got / 1e6:.0f}/{total / 1e6:.0f} MB", flush=True)
-            part.replace(dest)
-            return dest
-        except (urllib.error.URLError, OSError) as e:
-            last_err = e
-            part.unlink(missing_ok=True)
-            time.sleep(5 * (attempt + 1))
-    raise RuntimeError(f"下载 {name} 失败（3 次）: {last_err}")
+    for url in urls:
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "super-video-sync/1.0"})
+                with urllib.request.build_opener().open(req, timeout=60) as resp, open(part, "wb") as out:
+                    got, total = 0, entry.get("size") or 0
+                    while chunk := resp.read(1 << 20):
+                        out.write(chunk)
+                        got += len(chunk)
+                        if total and got // (32 << 20) != (got - len(chunk)) // (32 << 20):
+                            print(f"    {name}: {got / 1e6:.0f}/{total / 1e6:.0f} MB", flush=True)
+                part.replace(dest)
+                return dest
+            except (urllib.error.URLError, OSError) as e:
+                last_err = e
+                part.unlink(missing_ok=True)
+                time.sleep(3 * (attempt + 1))
+    raise RuntimeError(f"下载 {name} 失败（{len(urls)} 个源 × 3 次）: {last_err}")
 
 
 def build_readme(manifests: list[dict]) -> str:
