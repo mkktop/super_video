@@ -28,11 +28,16 @@ const dur = ref(0)
 // ---- 加载失败重试：对比产物是边跑边落的（seg 先切好、各模型 mp4 跑完一个出一个），
 // 刚点开成片的一瞬某路可能还是 404——那不是格式问题。失败计数同时充当加载代号
 // 追加进 URL 触发强制重载；换地址时清零重新计。streaming 时限放宽到 10 次×1.5s ----
+// gaveUp 与计数分离：重试预算用尽后的最后一次加载也失败时置位——此前用
+// fails > maxFails 判定，但计数到 maxFails 后不再自增，判定恒 false，
+// 「无法播放」提示从未出现过，CSP 拦截类永久黑屏被静默（成片模式两周无人发现）
 const MAX_FAST = 1 // 非流式也允许多试一次：挡偶发网络抖动误标"格式不支持"
 const MAX_STREAMING = 10
 const RETRY_MS = 1500
 const srcFails = ref(0)
 const outFails = ref(0)
+const srcGaveUp = ref(false)
+const outGaveUp = ref(false)
 const retryTimers: Record<'src' | 'out', ReturnType<typeof setTimeout> | null> = { src: null, out: null }
 const maxFails = computed(() => (props.streaming ? MAX_STREAMING : MAX_FAST))
 
@@ -41,23 +46,28 @@ function busted(url: string, n: number) {
 }
 function onErr(side: 'src' | 'out') {
   if (retryTimers[side] !== null) return
-  if ((side === 'src' ? srcFails.value : outFails.value) >= maxFails.value) return
+  const fails = side === 'src' ? srcFails.value : outFails.value
+  if (fails >= maxFails.value) {
+    if (side === 'src') srcGaveUp.value = true
+    else outGaveUp.value = true
+    return
+  }
   retryTimers[side] = setTimeout(() => {
     retryTimers[side] = null
     if (side === 'src') srcFails.value++
     else outFails.value++
   }, RETRY_MS)
 }
-const srcBroken = computed(() => srcFails.value > maxFails.value)
-const outBroken = computed(() => outFails.value > maxFails.value)
 /** 流式中出现过失败且尚未放弃：提示"生成中/正在重试"而非"不支持" */
 const waitingAssets = computed(
-  () => !!props.streaming && !srcBroken.value && !outBroken.value &&
+  () => !!props.streaming && !srcGaveUp.value && !outGaveUp.value &&
     (srcFails.value > 0 || outFails.value > 0))
 
 watch([srcUrl, outUrl], () => {
   srcFails.value = 0
   outFails.value = 0
+  srcGaveUp.value = false
+  outGaveUp.value = false
   if (retryTimers.src) { clearTimeout(retryTimers.src); retryTimers.src = null }
   if (retryTimers.out) { clearTimeout(retryTimers.out); retryTimers.out = null }
 })
@@ -85,7 +95,7 @@ function tick() {
   const o = outV.value
   if (s && o) {
     // 任一路在 seek 中不校：o 的 currentTime 还是中间态，跟着对只会来回抖
-    if (!s.seeking && !o.seeking && !srcBroken.value) {
+    if (!s.seeking && !o.seeking && !srcGaveUp.value) {
       const drift = s.currentTime - o.currentTime
       if (Math.abs(drift) > HARD_DRIFT) {
         s.currentTime = o.currentTime
@@ -101,7 +111,7 @@ function tick() {
         s.playbackRate = 1
       }
     }
-    if (!o.paused && s.paused && !srcBroken.value) void s.play().catch(() => {})
+    if (!o.paused && s.paused && !srcGaveUp.value) void s.play().catch(() => {})
     if (o.paused && !s.paused) s.pause()
     playing.value = !o.paused
     if (Math.abs(o.currentTime - lastCur) > 0.05) {
@@ -220,8 +230,8 @@ onBeforeUnmount(() => {
       <div v-if="waitingAssets" class="broken pending">
         成片还在生成中，正在自动加载…
       </div>
-      <div v-else-if="srcBroken || outBroken" class="broken">
-        {{ srcBroken ? '源' : '超分' }}视频无法直接播放：可能是该模型的输出编码浏览器解不了，
+      <div v-else-if="srcGaveUp || outGaveUp" class="broken">
+        {{ srcGaveUp ? '源' : '超分' }}视频无法直接播放：可能是该模型的输出编码浏览器解不了，
         或资源地址已失效——可切回「静帧」模式对比
       </div>
     </div>
