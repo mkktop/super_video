@@ -65,6 +65,21 @@ def emit(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 
 
+def emit_failed(prefix: str, e: Exception) -> None:
+    """失败事件 + 完整堆栈落 sidecar.log（任务 error 保持单行可读）。
+
+    runner 把 log 事件打到 sidecar.log（日志页可见）——异常被本层捕获后
+    只有一行 error 上达任务卡，没有堆栈时「引擎加载失败 UnicodeDecodeError」
+    这类问题只能靠猜（1060 实机教训）；堆栈行号能直接定位裸奔的读取点。
+    注意 emit 的是 JSON 行：堆栈里不能有裸 \r，json.dumps 会转义，安全。
+    """
+    import traceback
+
+    tb = traceback.format_exc()
+    emit({"type": "log", "line": f"{prefix} {type(e).__name__} 堆栈:\n{tb.strip()}"})
+    emit({"type": "failed", "error": f"{prefix} {type(e).__name__}: {e}"})
+
+
 # ---- 超分性能日志（设置 sr_profiling 开启时生效）----
 # 任务结束把"引擎配置 + 分段耗时明细 + 汇总"落到 SR_LOG_DIR/<task_id>.log，
 # 供分析速度瓶颈（推理慢/解码跟不上/编码拖后腿/引擎加载占比）。旁路功能：
@@ -380,7 +395,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                 weight, spec, scale, variant, precision, tile,
                 (height, width), batch=1, log=emit)
     except Exception as e:  # noqa: BLE001 — worker 兜底，任何异常都要上报
-        emit({"type": "failed", "error": f"引擎加载失败 {type(e).__name__}: {e}"})
+        emit_failed("引擎加载失败", e)
         return 1
     load_s = time.perf_counter() - t_load
 
@@ -736,12 +751,16 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         })
         return 0
 
-    weight = model_file(spec, scale, precision, variant)
-    tile = int(params.get("tile") or spec.tile_hint)
-    t_load = time.perf_counter()
-    engine, used_precision = _load_onnx_engine(
-        weight, spec, scale, variant, precision, tile,
-        (info.height, info.width), batch=batch, log=emit)
+    try:
+        weight = model_file(spec, scale, precision, variant)
+        tile = int(params.get("tile") or spec.tile_hint)
+        t_load = time.perf_counter()
+        engine, used_precision = _load_onnx_engine(
+            weight, spec, scale, variant, precision, tile,
+            (info.height, info.width), batch=batch, log=emit)
+    except Exception as e:  # noqa: BLE001 — 与图片路径同：失败带堆栈落 sidecar.log
+        emit_failed("引擎加载失败", e)
+        return 1
     load_s = time.perf_counter() - t_load
     emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
 

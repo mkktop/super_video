@@ -42,7 +42,7 @@ def read_manifest(comp: Path | None = None) -> dict | None:
     p = (comp or COMPONENT_DIR) / "manifest.json"
     try:
         m = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError 兼盖 JSON/UTF-8 解码错误
         return None
     if not isinstance(m, dict) or m.get("component") != "trt":
         return None
