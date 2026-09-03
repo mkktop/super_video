@@ -131,3 +131,92 @@ def test_trt_provider_options_attached(monkeypatch):
         assert opts["trt_fp16_enable"] is True
     finally:
         _FakeSession.fail_trt = True
+
+
+def test_trt_cpu_chain_skips_cuda(monkeypatch):
+    """device=trt_cpu：TRT 主链保留、CUDA EP 被剔除（TRT 编不了的节点落 CPU）。
+
+    MangaJaNai 系 MxNet 导出的 Resize 在 CUDA kernel 有 fast_divmod 断言
+    崩溃缺陷（TRT 回退 CUDA 即触发），换链避开而不放弃 TRT 主图。"""
+    fake = types.SimpleNamespace(
+        get_available_providers=lambda: [
+            "TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
+        SessionOptions=lambda: types.SimpleNamespace(),
+        GraphOptimizationLevel=types.SimpleNamespace(
+            ORT_ENABLE_BASIC=1, ORT_DISABLE_ALL=0),
+        InferenceSession=_FakeSession,
+    )
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake)
+    _FakeSession.calls = []
+    _FakeSession.fail_trt = False  # TRT 本身可用，链按声明生效
+    eng = OnnxSrEngine("whatever.onnx", 2, device="trt_cpu")
+    eng.load()
+    assert _FakeSession.calls[0] == ["TensorrtExecutionProvider", "CPUExecutionProvider"]
+    _FakeSession.fail_trt = True  # 恢复默认（同文件其他测试依赖它模拟 TRT 失败）
+
+
+def test_worker_falls_back_on_cuda_kernel_fault(monkeypatch, tmp_path):
+    """worker 加载遇 CUDA 内核崩溃（非显存）：engine=trt 自动换 TRT+CPU 链重试。
+
+    回归：MangaJaNai 在 TRT/CUDA 后端 warmup 即崩（Resize fast_divmod 断言），
+    任务直接失败；换链后主图仍 TRT、坏节点落 CPU。"""
+    from sv.server import worker
+
+    calls: list[str] = []
+
+    class _BoomThenOk:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None):
+            calls.append(device)
+            if len(calls) == 1:
+                raise RuntimeError(
+                    "[ONNXRuntimeError] : 6 : RUNTIME_EXCEPTION : Resize node. "
+                    "E:\_work\1\s\onnxruntime\core/providers/cuda/shared_inc/"
+                    "fast_divmod.h:50 onnxruntime::cuda::DivMod<int>::DivMod "
+                    "d_ >= 1 was false.")
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            return frame
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
+    monkeypatch.setattr(worker, "OnnxSrEngine", _BoomThenOk)
+    monkeypatch.setattr(worker, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "trt"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
+    assert calls == ["trt", "trt_cpu"], f"应自动换 TRT+CPU 链重试: {calls}"
+    assert prec == "fp32"
+
+
+def test_worker_cuda_engine_fault_falls_to_cpu(monkeypatch, tmp_path):
+    """engine=cuda 场景同一崩溃：无 GPU 替代链，退 CPU 保出片。"""
+    from sv.server import worker
+
+    calls: list[str] = []
+
+    class _BoomThenOk:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None):
+            calls.append(device)
+            if len(calls) == 1:
+                raise RuntimeError(
+                    "RUNTIME_EXCEPTION providers/cuda/shared_inc/fast_divmod.h:50 "
+                    "DivMod d_ >= 1 was false.")
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            return frame
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
+    monkeypatch.setattr(worker, "OnnxSrEngine", _BoomThenOk)
+    monkeypatch.setattr(worker, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "cuda"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
+    # engine=cuda 映射的 ort_device 是 auto（provider 链自动含 CUDA），降级即 cpu
+    assert calls == ["auto", "cpu"], f"应退 CPU 重试: {calls}"

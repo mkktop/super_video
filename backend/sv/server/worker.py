@@ -204,6 +204,13 @@ def _load_onnx_engine(
         t = str(e).lower()
         return "memory" in t or "alloc" in t or "oom" in t
 
+    def _cuda_kernel_fault(e: Exception) -> bool:
+        """CUDA 执行层内核崩溃特征：报错串带 GPU 版 ORT 的 providers/cuda 源路径
+        （如 fast_divmod 断言的 Resize 缺陷）。只认精确特征，避免把普通
+        CUDA 初始化/驱动问题误判成「换链能救」。"""
+        t = str(e)
+        return "RUNTIME_EXCEPTION" in t and "providers/cuda" in t
+
     # 推理后端：设置 engine=trt 走 TensorRT 链（TRT 不可用引擎层自动回退）；
     # engine=cpu 显式锁 CPUExecutionProvider（CUGAN×DML 泄漏模型的兜底通道）
     _eng = settings.load().get("engine")
@@ -232,7 +239,8 @@ def _load_onnx_engine(
             log({"type": "log", "line":
                  "TensorRT 引擎加载中：新模型或新分辨率首次使用需编译引擎（约 1~2 分钟），完成后可直接加载"})
     engine = None
-    for attempt in range(3):  # 显存不足自动降档：tile 逐步减半
+    # 显存不足自动降档 tile 减半（最多 3 次）；CUDA 执行层内核崩溃换链重试（一次）
+    for attempt in range(4):
         try:
             engine = OnnxSrEngine(
                 weight, scale, io=spec.io, tile=tile, batch=batch,
@@ -245,9 +253,28 @@ def _load_onnx_engine(
             engine.process(np.zeros((warmup_hw[0], warmup_hw[1], 3), dtype=np.uint8))
             break
         except Exception as e:  # noqa: BLE001
+            # CUDA/TRT 执行层的内核崩溃（非显存问题）：MxNet 导出的 Resize 节点
+            # （MangaJaNai 系）在 CUDA EP 有 fast_divmod 断言缺陷，DML/CPU 正常。
+            # TRT 场景换「TRT+CPU 兜底」链重试（主图仍 TRT 编译，坏节点落 CPU，
+            # 速度几乎无损）；纯 CUDA 场景无 GPU 替代，退 CPU 保出片并说明。
+            # 用 eng_setting 判定（cuda 设置映射的 ort_device 是 auto）；
+            # 降链后 ort_device 离开初值，天然只降一次
+            if (not _oom(e) and _cuda_kernel_fault(e)
+                    and (ort_device == "trt" or eng_setting == "cuda")):
+                if eng_setting == "trt":
+                    ort_device = "trt_cpu"
+                    if log:
+                        log({"type": "log", "line":
+                             "CUDA 执行层在个别算子上崩溃，已切换为 TensorRT+CPU 混合执行重试"})
+                else:
+                    ort_device = "cpu"
+                    if log:
+                        log({"type": "log", "line":
+                             "CUDA 执行层在个别算子上崩溃，已切换为 CPU 推理重试（速度较慢）"})
+                continue
             # 最后一次尝试仍失败必须 raise：带着没加载成功的 engine 继续走，
             # 后面会以更难懂的方式崩（如 provider_used AttributeError）
-            if not _oom(e) or tile in (1,) or attempt == 2:
+            if not _oom(e) or tile in (1,) or attempt == 3:
                 raise
             new_tile = 256 if tile == 0 else max(64, tile // 2)
             if log:

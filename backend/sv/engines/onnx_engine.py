@@ -131,6 +131,13 @@ class OnnxSrEngine(BaseEngine):
         available = set(ort.get_available_providers())
         if self.device == "cpu":
             chosen: list[str] = ["CPUExecutionProvider"]
+        elif self.device == "trt_cpu":
+            # TRT 编译主图、CPU 兜底，跳过 CUDA EP——MxNet 导出的 Resize 节点
+            # （MangaJaNai 系 /model/model.5/Resize）在 CUDA kernel 有 fast_divmod
+            # 断言崩溃缺陷（DML/CPU 实现正常），TRT 编不了的节点回退 CUDA 即崩，
+            # 回退 CPU 则无损大局（Resize 是廉价算子，主图仍走 TRT）
+            chain = [p for p in _TRT_CHAIN if p != "CUDAExecutionProvider"]
+            chosen = [p for p in chain if p in available] or ["CPUExecutionProvider"]
         elif self.device == "trt":
             chosen = [p for p in _TRT_CHAIN if p in available] or ["CPUExecutionProvider"]
         else:
@@ -223,8 +230,11 @@ class OnnxSrEngine(BaseEngine):
         )
         # 复用主 session 的 provider 链构造（含 TRT 引擎缓存选项与逐级回退）
         available = set(ort.get_available_providers())
-        if self.device == "trt":
-            chosen: list = [p for p in _TRT_CHAIN if p in available] or ["CPUExecutionProvider"]
+        if self.device in ("trt", "trt_cpu"):
+            chain = _TRT_CHAIN
+            if self.device == "trt_cpu":
+                chain = [p for p in chain if p != "CUDAExecutionProvider"]
+            chosen: list = [p for p in chain if p in available] or ["CPUExecutionProvider"]
         elif self.device == "cpu":
             chosen = ["CPUExecutionProvider"]
         else:
