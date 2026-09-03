@@ -29,12 +29,19 @@ import fs from 'node:fs'
 let mainWindow: BrowserWindow | null = null
 let sidecar: ChildProcess | null = null
 let baseUrl = ''
-let apiToken = '' // 本地 API 令牌：写 dataRoot/.tmp/sidecar.token + spawn env，renderer 经 backend:info 取
+let apiToken = '' // 本地 API 令牌：新拉起/复用都轮换写入 token 文件 + 随 spawn env 注入，renderer 经 backend:info 取
 let closeConfirmed = false // 本次关窗已确认过（确认后放行真正的 close）
 let quittingForInstall = false // 更新安装拉起的退出：不能被关窗确认拦住
 let closeToTray = false // 设置「关闭时最小化到托盘」：关闭手势=隐藏窗口而非退出
 let explicitQuit = false // 托盘菜单「退出」：绕过托盘隐藏，走退出确认
 let tray: Tray | null = null
+
+/** 主进程直连后端的请求头：与 renderer（api.ts）同一个令牌。裸请求在打包版
+ * 会被 401 拒绝，且响应体是 {detail} 对象而非任务数组——下游 .some() 直接抛
+ * TypeError 走 catch（关窗确认/旧实例探测曾因此从未真正生效）。 */
+function apiHeaders(): Record<string, string> {
+  return apiToken ? { 'X-SV-Token': apiToken } : {}
+}
 
 /** 关窗确认：后端可达且有 running/queued 任务时问一次。
  *  后端不可达 = 没有可中断的任务，直接退出（否则坏后端时窗口关不掉）。 */
@@ -43,7 +50,7 @@ async function confirmClose(): Promise<void> {
   if (!win) return
   let active = false
   try {
-    const r = await fetch(`${baseUrl}/api/tasks`)
+    const r = await fetch(`${baseUrl}/api/tasks`, { headers: apiHeaders() })
     const tasks = (await r.json()) as Array<{ status: string }>
     active = tasks.some((t) => t.status === 'running' || t.status === 'queued')
   } catch {
@@ -223,6 +230,44 @@ async function killPortOwner(port: number): Promise<void> {
   }
 }
 
+/** 生成新令牌写入 token 文件；写失败退而沿用文件里的现有令牌（对齐 sidecar
+ *  正在使用的鉴权来源之一），两者皆失败 apiToken 置空并返回 false。
+ *
+ *  sidecar 侧鉴权是双源并集（spawn env 令牌 + 每请求实时读文件令牌），
+ *  「UI 重启换新令牌、复用中的旧 sidecar 靠文件实时校验接受」正是文件源的
+ *  设计用途——复用分支若不轮换，renderer 拿不到令牌，对开了鉴权的实例
+ *  全部 401，且重启仍复用同一实例（状态自锁）。返回 false 时调用方不注入
+ *  SV_TOKEN（空值 sidecar 不采信），sidecar 无令牌来源即不鉴权。 */
+function issueToken(dataRoot: string): boolean {
+  const file = path.join(dataRoot, '.tmp', 'sidecar.token')
+  apiToken = crypto.randomBytes(24).toString('hex')
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, apiToken, 'utf-8')
+    return true
+  } catch (e) {
+    console.warn('[sidecar] 令牌文件写入失败，尝试沿用现有令牌:', e)
+  }
+  try {
+    apiToken = fs.readFileSync(file, 'utf-8').trim()
+  } catch {
+    apiToken = ''
+  }
+  return !!apiToken
+}
+
+/** 复用已有 sidecar 前的令牌交接：必须在向它发任何业务请求之前调用
+ *  （hasActiveTasks 的任务探测也要过鉴权）。数据目录解析失败不阻断复用，
+ *  最坏情况是 UI 报初始化错误（与令牌文件彻底不可用时一致）。 */
+function adoptReuseToken(): void {
+  try {
+    issueToken(resolveDataRoot(findRoot()))
+  } catch (e) {
+    console.warn('[sidecar] 复用令牌交接失败（对该实例的请求将被 401 拒绝）:', e)
+    apiToken = ''
+  }
+}
+
 async function startOrReuseSidecar(): Promise<string> {
   // 1) 复用已有 sidecar（UI 重启场景，任务继续跑）——版本不一致的旧实例不复用：
   //    空闲则结束换新；正跑任务则暂用并在日志里提示（跑完重启应用完成切换）
@@ -231,6 +276,7 @@ async function startOrReuseSidecar(): Promise<string> {
     if (info) {
       if (info.version !== app.getVersion()) {
         baseUrl = `http://127.0.0.1:${p}`
+        adoptReuseToken() // 先交接令牌：随后的任务探测请求也要过鉴权
         if (await hasActiveTasks()) {
           console.log(
             `[sidecar] 复用旧版 ${info.version} 实例 ${baseUrl}（有任务在跑，` +
@@ -242,6 +288,7 @@ async function startOrReuseSidecar(): Promise<string> {
         continue
       }
       baseUrl = `http://127.0.0.1:${p}`
+      adoptReuseToken()
       console.log(`[sidecar] 复用已有实例 ${baseUrl}`)
       return baseUrl
     }
@@ -255,14 +302,10 @@ async function startOrReuseSidecar(): Promise<string> {
   fs.mkdirSync(path.dirname(logPath), { recursive: true })
   const logFd = fs.openSync(logPath, 'a')
 
-  // 本地 API 令牌：写 token 文件（复用中的旧 sidecar 按文件实时校验，能接受新令牌）
-  // + 随 spawn env 注入（本会话）。renderer 经 backend:info 取走，用于请求头/WS 参数
-  apiToken = crypto.randomBytes(24).toString('hex')
-  try {
-    fs.writeFileSync(path.join(dataRoot, '.tmp', 'sidecar.token'), apiToken, 'utf-8')
-  } catch (e) {
-    console.warn('[sidecar] 令牌文件写入失败（API 将不鉴权）:', e)
-    apiToken = ''
+  // 本地 API 令牌：写 token 文件 + 随 spawn env 注入（本会话）。
+  // renderer 经 backend:info 取走，用于请求头/WS 参数
+  if (!issueToken(dataRoot)) {
+    console.warn('[sidecar] 令牌不可用（不注入 SV_TOKEN，sidecar 侧不鉴权）')
   }
 
   const py = isPackaged
@@ -281,9 +324,11 @@ async function startOrReuseSidecar(): Promise<string> {
       detached: true,
       stdio: ['ignore', logFd, logFd],
       windowsHide: true,
-      env: isPackaged
-        ? { ...process.env, SV_ROOT: root, SV_DATA: dataRoot, SV_TOKEN: apiToken }
-        : { ...process.env, SV_TOKEN: apiToken },
+      env: {
+        ...process.env,
+        ...(isPackaged ? { SV_ROOT: root, SV_DATA: dataRoot } : {}),
+        ...(apiToken ? { SV_TOKEN: apiToken } : {}), // 置空=sidecar 无令牌来源，不鉴权
+      },
     })
     // 缺 exe/被杀软拦截时 spawn 异步抛 'error'；不挂监听会成为主进程未捕获异常，
     // 秒退也不再傻等满 60s 才报"启动超时"（exit 日志可见）
@@ -316,7 +361,7 @@ async function startOrReuseSidecar(): Promise<string> {
 
 async function hasActiveTasks(): Promise<boolean> {
   try {
-    const r = await fetch(`${baseUrl}/api/tasks`)
+    const r = await fetch(`${baseUrl}/api/tasks`, { headers: apiHeaders() })
     const tasks = (await r.json()) as Array<{ status: string }>
     return tasks.some((t) => t.status === 'running' || t.status === 'queued')
   } catch {
