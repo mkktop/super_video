@@ -32,8 +32,12 @@ def _opener() -> urllib.request.OpenerDirector:
 
 
 def _download_to(url: str, dest: Path, opener: urllib.request.OpenerDirector,
-                 progress_cb=None, done: int = 0, total: int = 0, label: str = "") -> None:
-    """流式下载 url 到 dest，实时回调进度（bytes_done, bytes_total, label）。"""
+                 progress_cb=None, done: int = 0, total: int = 0, label: str = "") -> int:
+    """流式下载 url 到 dest，实时回调进度（bytes_done, bytes_total, label）。
+
+    返回本次实际下载字节数——调用方据此累计多文件进度（done 按值传入，
+    不回写调用方的计数器，此前外层漏加导致多权重模型进度每个文件从 0 重爬）。
+    """
     req = urllib.request.Request(url, headers={"User-Agent": "super-video/0.1"})
     with opener.open(req, timeout=60) as resp, open(dest, "wb") as out:
         got = 0
@@ -46,6 +50,7 @@ def _download_to(url: str, dest: Path, opener: urllib.request.OpenerDirector,
             done += len(chunk)
             if progress_cb:
                 progress_cb(done, total, label)
+    return got
 
 
 def _extract_member(archive_path: Path, member: str, dest: Path) -> None:
@@ -128,7 +133,7 @@ def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = 
             opener = _opener()
             if source_cb:
                 source_cb(url, name)
-            _download_to(url, tmp, opener, progress_cb, done, total, name)
+            done += _download_to(url, tmp, opener, progress_cb, done, total, name)
         except (urllib.error.URLError, OSError) as e:
             mirrors = [u for u in f.get("mirror_urls", []) if u]
             if not mirrors:
@@ -140,7 +145,8 @@ def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = 
                 try:
                     if source_cb:
                         source_cb(m, name)
-                    _download_to(m, tmp, opener, progress_cb, done_at_file, total, name)
+                    done = done_at_file + _download_to(
+                        m, tmp, opener, progress_cb, done_at_file, total, name)
                     ok = True
                     break
                 except (urllib.error.URLError, OSError):
@@ -166,6 +172,11 @@ def download(spec: ModelSpec, progress_cb=None, only_files: list[dict] | None = 
             tmp.unlink(missing_ok=True)
             raise
         tmp.replace(dest)  # 原子落盘
+
+    # 收尾兜底：尾部跳过的本地文件（懒下载过的权重）在静默累加 done 后不再有
+    # 下载事件，末次回调停在 total 之前——UI 永远看不见 100%。补发终值
+    if progress_cb and total > 0:
+        progress_cb(total, total, targets[-1]["name"] if targets else "")
 
 
 def ensure_downloaded(spec: ModelSpec, progress_cb=None) -> None:

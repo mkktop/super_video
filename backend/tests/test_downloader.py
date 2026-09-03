@@ -201,3 +201,37 @@ def test_download_immediate_zero_progress_event(dl_client):
     assert any(e.get("type") == "model_download" and e.get("progress") == 0 for e in rec), \
         "端点返回前必须已广播 0% 进度事件"
     gate.set()
+
+
+def test_multi_file_progress_monotonic_to_full(tmp_path, monkeypatch):
+    """多权重模型（一张卡=多文件）的进度必须单调递增且收尾到 100%。
+
+    回归：_download_to 的 done 按值传递，外层循环从不累加已下载字节——
+    文件 2 的进度事件从 0 重新爬（只反映当前文件占比），11 权重的
+    Real-CUGAN 峰值=最大单文件/总量，UI 永远到不了 100%。
+    """
+    blobs = []
+    files = []
+    for i, n in enumerate((3, 2, 4)):  # 3 文件、单块 1MB 逐字节读到尾
+        src = tmp_path / f"w{i}.onnx"
+        src.write_bytes(bytes([0x40 + i]) * (n * 1024 * 1024))
+        blobs.append(src)
+        files.append({
+            "name": f"w{i}.onnx", "url": src.as_uri(),
+            "size": src.stat().st_size, "sha256": _sha(src),
+        })
+    spec = _spec(tmp_path, monkeypatch, files)
+
+    events = []
+    download(spec, progress_cb=lambda done, tot, label: events.append(done))
+
+    total = sum(f["size"] for f in files)
+    assert events, "必须产生进度事件"
+    assert events == sorted(events), f"进度回退：{events}"
+    assert events[-1] == total, f"末次进度 {events[-1]} != 总量 {total}"
+    # 混合场景：删掉中间一个权重再下（其余已在本地走跳过路径），仍须收尾满格
+    (tmp_path / "models" / "dl-test" / "w1.onnx").unlink()
+    events2 = []
+    download(spec, progress_cb=lambda done, tot, label: events2.append(done))
+    assert events2 == sorted(events2), f"含跳过文件时进度回退：{events2}"
+    assert events2[-1] == total, f"含跳过文件时末次进度 {events2[-1]} != {total}"
