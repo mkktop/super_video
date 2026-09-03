@@ -193,7 +193,9 @@ const updateMsg = computed(() => {
       u.notes ? '（悬浮在"检查更新"上可查看更新内容）' : ''
     }`
   if (u.status === 'latest') return `已是最新版本（${u.current}）`
-  if (u.status === 'error') return `检查失败：${u.error ?? '未知错误'}（发布前属正常，见 README 发布流程）`
+  // error 只出现在打包版（dev 模式走上面的 'dev' 分支）：真实网络/源问题，引导重试。
+  // 旧文案「发布前属正常」是尚无 Release 时代的 dev 语境，正式版用户看到会误判
+  if (u.status === 'error') return `检查失败：${u.error ?? '未知错误'}（请检查网络后重试）`
   return ''
 })
 const engineDirty = computed(() => engine.value !== savedEngine.value || precision.value !== savedPrecision.value)

@@ -478,7 +478,9 @@ function isNetworkError(e: unknown): boolean {
   if (!e || err.statusCode) return false
   const msg = String(err.message ?? '').toLowerCase()
   if (err.code && /^(econn|enotfound|etimedout|eai_again|epipe|err_)/i.test(err.code)) return true
-  return /fetch failed|socket|timed ?out|tunnel|network|getaddrinfo|abort/i.test(msg)
+  // net::err_：Electron 主进程走 Chromium net 栈，连接失败报 net::ERR_CONNECTION_TIMED_OUT
+  // 这类下划线格式（v0.4.1 实测因此漏判、R2 回退未触发）；timed[-_ ]?out 同理兼容三种写法
+  return /fetch failed|socket|timed[-_ ]?out|tunnel|network|getaddrinfo|abort|net::err_/i.test(msg)
 }
 
 function useUpdateSource(u: import('electron-updater').AppUpdater, src: 'github' | 'r2'): void {
