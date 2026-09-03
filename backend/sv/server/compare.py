@@ -127,8 +127,8 @@ def request_cancel(jid: str) -> bool:
 
 
 def asset_path(jid: str, key: str) -> Path | None:
-    """产物文件解析：key ∈ {seg, src_still/<i>, out/<model_id>,
-    still/<model_id>/<i>（视频多帧）| still/<model_id>（图片成品图）}，
+    """产物文件解析：key ∈ {seg, src_still（图片源图，平铺文件）, src_still/<i>（视频源静帧）,
+    out/<model_id>, still/<model_id>/<i>（视频多帧）| still/<model_id>（图片成品图）}，
     白名单标识，不开放任意路径（防目录穿越读任意文件）。"""
     job = JOBS.get(jid)
     if job is None:
@@ -136,6 +136,11 @@ def asset_path(jid: str, key: str) -> Path | None:
     root = COMPARE_ROOT / jid
     if key == "seg":
         p = root / "seg.mp4"
+        return p if p.exists() else None
+    if key == "src_still":
+        # 图片作业的源图是平铺的 src_still.png（v0.2.10 视频静帧迁 stills/ 子目录时
+        # 图片形态没有跟随，此前没有任何 key 能取到图片作业的源图）
+        p = root / "src_still.png"
         return p if p.exists() else None
     if key.startswith("src_still/"):
         i = key[len("src_still/"):]

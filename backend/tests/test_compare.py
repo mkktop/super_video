@@ -188,6 +188,12 @@ def test_image_compare_runs(client, tmp_path, fake_engines):
     # 图片模式：out 与 still 同为成品图
     assert client.get(f"/api/compare/{jid}/asset/out/{e['model_id']}").status_code == 200
     assert client.get(f"/api/compare/{jid}/asset/still/{e['model_id']}").status_code == 200
+    # 图片源图是平铺 src_still.png（无索引 key）——视频的带索引 key 在图片作业
+    # 全部 404（stills/ 子目录不存在）。前端静帧/总览曾照搬视频 key，
+    # 图片对比的源图与成品自 v0.2.10 起加载全失败
+    assert client.get(f"/api/compare/{jid}/asset/src_still").status_code == 200
+    assert client.get(f"/api/compare/{jid}/asset/src_still/0").status_code == 404
+    assert client.get(f"/api/compare/{jid}/asset/still/{e['model_id']}/0").status_code == 404
 
 
 def test_seg_too_long_auto_capped(client, tmp_path, fake_engines):

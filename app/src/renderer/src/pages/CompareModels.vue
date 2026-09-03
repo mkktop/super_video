@@ -244,11 +244,21 @@ const view = ref<'grid' | 'frames' | 'video'>('frames')
 const stillIdx = ref(0)
 const stillCount = computed(() => job.value?.still_count ?? 1)
 
+/** 资产 key 按作业形态分：视频的源静帧/成品多帧在 stills/ 子目录带索引；
+ * 图片作业源图是平铺 src_still、成品就是 <mid>.png（无索引）——图片此前
+ * 被照搬视频的带索引 key，静帧与总览全部 404（v0.2.10 起的存量缺陷） */
+function srcKey(i: number): string {
+  return job.value?.kind === 'image' ? 'src_still' : `src_still/${i}`
+}
+function outKey(mid: string, i: number): string {
+  return job.value?.kind === 'image' ? `still/${mid}` : `still/${mid}/${i}`
+}
+
 const srcStillUrl = computed(() =>
-  job.value ? compareAssetUrl(job.value.id, `src_still/${stillIdx.value}`) : '')
+  job.value ? compareAssetUrl(job.value.id, srcKey(stillIdx.value)) : '')
 const outStillUrl = computed(() =>
   job.value && curModel.value
-    ? compareAssetUrl(job.value.id, `still/${curModel.value}/${stillIdx.value}`) : '')
+    ? compareAssetUrl(job.value.id, outKey(curModel.value, stillIdx.value)) : '')
 const srcVideoUrl = computed(() =>
   job.value ? compareAssetUrl(job.value.id, 'seg') : '')
 const outVideoUrl = computed(() =>
@@ -480,7 +490,7 @@ function useModel(mid: string) {
               :title="'原片（点此回静帧细看）'"
               @click="view = 'frames'"
             >
-              <img :src="compareAssetUrl(job.id, 'src_still/0')" alt="原片" loading="lazy" />
+              <img :src="compareAssetUrl(job.id, srcKey(0))" alt="原片" loading="lazy" />
               <div class="g-name">原片</div>
               <div class="g-meta">{{ job.input.split(/[\\/]/).pop() }}</div>
             </div>
@@ -493,7 +503,7 @@ function useModel(mid: string) {
               :title="`点此进入分割线对比：${modelName(e.model_id)}`"
               @click="curModel = e.model_id; stillIdx = 0; view = 'frames'"
             >
-              <img :src="compareAssetUrl(job.id, `still/${e.model_id}/0`)" alt="" loading="lazy" />
+              <img :src="compareAssetUrl(job.id, outKey(e.model_id, 0))" alt="" loading="lazy" />
               <div class="g-name">{{ modelName(e.model_id) }}</div>
               <div class="g-meta">
                 {{ job.kind === 'video' ? `${e.fps.toFixed(1)} fps · ` : '' }}{{ e.out_w }}x{{ e.out_h }}
