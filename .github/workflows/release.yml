@@ -101,8 +101,12 @@ jobs:
       - name: 上传到 R2 备用源（GitHub 连通失败时客户端自动回退下载）
         # secrets 缺失（未配置备用源）时跳过，不阻塞发版；配置了 CLOUDFLARE_API_TOKEN
         # + CLOUDFLARE_ACCOUNT_ID 即生效。latest.yml 逐版覆盖（R2 上只有"最新正式版"），
-        # 安装包按原名平铺不重名；与 GitHub Release 同步同一次构建产物，sha512 跨源一致
-        if: startsWith(github.ref, 'refs/tags/')
+        # 安装包按原名平铺不重名；与 GitHub Release 同步同一次构建产物，sha512 跨源一致。
+        # 预览 tag 跳过：R2 无通道概念（GenericProvider 固定读 latest.yml），预览版覆盖
+        # 上去会让连不上 GitHub 的稳定通道用户在兜底路径收到预览版——违反
+        # "R2 只存正式版、预览兜底=降级到最新正式版"的设计（preview 发布只走 GitHub
+        # prerelease，转正发同号正式版时本步骤自然把 R2 接回正式版）
+        if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-preview.')
         shell: pwsh
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
