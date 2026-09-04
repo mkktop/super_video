@@ -281,7 +281,7 @@ export default { name: 'Trim' }
     <h2 class="title">视频剪切</h2>
     <p class="subtitle">精确转码 · 帧精确 · 剪切完成后可直接加入超分队列</p>
 
-    <div v-if="recents.length" class="recents">
+    <div v-if="recents.length && input" class="recents">
       <span class="recents-label">最近：</span>
       <button
         v-for="p in recents"
@@ -295,9 +295,30 @@ export default { name: 'Trim' }
       </button>
     </div>
 
-    <NButton v-if="!input" dashed block size="large" style="margin-top: 12px" @click="pick">
-      点击选择视频文件（也可直接拖进窗口）
-    </NButton>
+    <!-- 空态：整块拖放引导区（点击=选择文件，拖入=直接载入） -->
+    <div v-if="!input" class="dropzone" @click="pick">
+      <div class="dz-icon">
+        <svg width="34" height="34" viewBox="0 0 34 34">
+          <rect x="3" y="6.5" width="28" height="21" rx="4" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="M14.2 12.6l8 4.4-8 4.4z" fill="currentColor" />
+          <path d="M7 11.2h.01M7 17h.01M7 22.8h.01M27 11.2h.01M27 17h.01M27 22.8h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+        </svg>
+      </div>
+      <div class="dz-title">把视频拖进这里，或点击选择</div>
+      <div class="dz-sub">帧精确剪切 · 剪完可直接送去超分或模型对比</div>
+      <div class="dz-formats">MP4 · MKV · MOV · WebM · TS · AVI</div>
+      <div v-if="recents.length" class="dz-recents">
+        <button
+          v-for="p in recents"
+          :key="p"
+          class="recent-chip"
+          :title="p"
+          @click.stop="pickRecent(p)"
+        >
+          {{ baseName(p) }}
+        </button>
+      </div>
+    </div>
 
     <template v-else>
       <div class="head">
@@ -411,6 +432,68 @@ export default { name: 'Trim' }
 
 <style scoped>
 .trim-page { width: 100%; } /* 全屏铺满,预览跟随窗口放大 */
+/* ---- 空态拖放引导区 ---- */
+.dropzone {
+  position: relative;
+  margin-top: 14px;
+  min-height: 420px;
+  border: 1.5px dashed rgba(96, 130, 200, 0.42);
+  border-radius: 18px;
+  background:
+    radial-gradient(460px 240px at 50% -4%, rgba(79, 140, 255, 0.08), transparent 65%),
+    radial-gradient(320px 200px at 88% 108%, rgba(139, 92, 246, 0.06), transparent 65%),
+    linear-gradient(180deg, #171a21, #14161c);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  cursor: pointer;
+  overflow: hidden;
+  padding: 28px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.dropzone:hover {
+  border-color: rgba(79, 140, 255, 0.75);
+  box-shadow:
+    0 0 0 1px rgba(79, 140, 255, 0.22),
+    0 12px 34px rgba(0, 0, 0, 0.32),
+    inset 0 0 70px rgba(79, 140, 255, 0.05);
+}
+.dz-icon {
+  width: 74px;
+  height: 74px;
+  border-radius: 22px;
+  background: var(--sv-grad);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  box-shadow: 0 10px 28px rgba(79, 140, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition: transform 0.2s ease;
+}
+.dropzone:hover .dz-icon { transform: translateY(-5px); }
+.dz-title { font-size: 17.5px; font-weight: 700; color: #e9ecf2; letter-spacing: 0.3px; }
+.dz-sub { font-size: 12.5px; color: #9aa1ad; }
+.dz-formats {
+  margin-top: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #5f6a7d;
+}
+.dz-recents {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 20px;
+}
+.dz-recents .recent-chip.current { cursor: default; }
+
 .title { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; margin-bottom: 2px; }
 .subtitle { font-size: 13px; color: #9aa1ad; margin-bottom: 16px; }
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
@@ -464,8 +547,10 @@ export default { name: 'Trim' }
   max-height: min(62vh, 760px);
   min-height: 300px;
   background: #000;
-  border-radius: 12px;
+  border-radius: 14px;
   outline: none;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.35);
 }
 .preview-broken {
   position: absolute;
@@ -482,7 +567,16 @@ export default { name: 'Trim' }
 }
 .pb-title { font-size: 14px; font-weight: 600; color: #fbbf24; }
 .pb-desc { font-size: 12.5px; color: #9aa1ad; max-width: 520px; line-height: 1.7; }
-.mark-btns { display: flex; gap: 8px; justify-content: center; }
+.mark-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1c2027, #181b21);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
 .panel { background: linear-gradient(180deg, #1c2027, #181b21); }
 .row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .row:last-child { margin-bottom: 0; }
@@ -502,6 +596,11 @@ export default { name: 'Trim' }
 .out-input:focus { outline: none; border-color: #4f8cff; }
 .actions { display: flex; gap: 10px; margin: 16px 0; }
 .result { margin-top: 4px; }
+/* 结果卡状态脊线（inset 不挤布局）：与任务卡同语言 */
+.result.running, .result.queued { box-shadow: inset 3px 0 0 rgba(79, 140, 255, 0.85); }
+.result.done { box-shadow: inset 3px 0 0 rgba(52, 211, 153, 0.8); }
+.result.failed { box-shadow: inset 3px 0 0 rgba(248, 113, 113, 0.85); }
+.result.canceled { box-shadow: inset 3px 0 0 rgba(251, 191, 36, 0.75); }
 .res-line { font-size: 13.5px; margin-bottom: 8px; }
 .res-line.ok { color: #34d399; }
 .res-line.err { color: #f87171; }
