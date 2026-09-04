@@ -87,7 +87,11 @@ const rings = computed<Ring[]>(() => {
 </template>
 
 <style scoped>
-.gauge-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+/* 窄窗 4→2×2（与首页硬件区同断点），不出 3+1 孤行 */
+.gauge-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1280px) {
+  .gauge-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .gauge {
   padding: 16px 18px;
   display: flex;
@@ -139,8 +143,5 @@ const rings = computed<Ring[]>(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-@media (max-width: 900px) {
-  .gauge-grid { grid-template-columns: repeat(2, 1fr); }
 }
 </style>

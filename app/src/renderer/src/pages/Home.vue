@@ -492,12 +492,13 @@ h1 {
 @keyframes run-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .run-label { color: #6fa0ff; font-size: 13px; flex-shrink: 0; }
 .run-file { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.run-progress { min-width: 320px; display: flex; align-items: center; gap: 12px; flex: 1; }
+.run-progress { min-width: 220px; display: flex; align-items: center; gap: 12px; flex: 1; }
 .run-progress > div:first-child { flex: 1; }
 .run-pct { font-size: 12.5px; color: #9aa1ad; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ---- 统计卡 ---- */
-.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+/* 统计卡：窄窗 4→2×2（与硬件区同断点），auto-fit 会出 3+1 孤行故用显式断点 */
+.stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
 .stat {
   display: flex; align-items: center; gap: 14px; padding: 18px;
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
@@ -590,10 +591,24 @@ h1 {
 .sec-link:hover { text-decoration: underline; background: rgba(79, 140, 255, 0.08); }
 
 /* ---- 硬件卡 ---- */
-.hw-grid { display: grid; grid-template-columns: 1.6fr 1.2fr 0.7fr; gap: 14px; }
-.hw { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+/* 轨道必须 minmax(0,·)：fr 默认 min-size=auto，卡内 nowrap 长名（CPU 型号）会把
+   轨道撑破比例、横向溢出窗口（实测 1440 宽挤爆显卡卡），min-width:0 后交给省略号 */
+.hw-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.2fr) minmax(0, 0.7fr); gap: 14px; }
+.hw { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .hw-sub { font-size: 12px; color: #8a919d; }
-.hw-tags { display: flex; gap: 8px; }
+.hw-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 窄窗换行不挤压：显卡主卡独占一行，处理器/内存合一行；更窄全单列 */
+@media (max-width: 1280px) {
+  .hw-grid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.65fr); }
+  .hw-gpu { grid-column: 1 / -1; }
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 819px) {
+  .hw-grid { grid-template-columns: minmax(0, 1fr); }
+  .hw-gpu { grid-column: auto; }
+  .hero { padding: 26px 22px 24px; }
+}
 
 /* 处理器/内存卡：与显卡主卡同语言（小标签 + 金属名 + 实时条），辉光收敛让 GPU 当主角 */
 .hw-cpu {
@@ -612,7 +627,15 @@ h1 {
 .chip-icon { display: inline-flex; color: #7fb0ff; filter: drop-shadow(0 0 5px rgba(79, 140, 255, 0.45)); flex-shrink: 0; }
 .chip-icon.icon-amber { color: #fbbf24; filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.4)); }
 .chip-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.chip-kind { font-size: 9.5px; font-weight: 600; letter-spacing: 1.8px; color: #7c8ba8; }
+.chip-kind {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 1.8px;
+  color: #7c8ba8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* 金属名：静态银蓝渐变（流光是显卡卡专属，避免满屏动效） */
 .chip-name {
   font-size: 14.5px;
@@ -693,6 +716,10 @@ h1 {
   font-weight: 600;
   letter-spacing: 2px;
   color: #7c8ba8;
+  /* 轨道被压窄时按整行省略，不许 CJK 逐字竖排（实测小窗一列一字） */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* 型号名：银蓝金属渐变 + 缓速流光扫过 */
 .gpu-name {
@@ -768,6 +795,7 @@ h1 {
   color: #9aa1ad;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  overflow: hidden;
 }
 .vram-text b { color: #8ab4ff; font-weight: 650; }
 </style>
