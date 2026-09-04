@@ -50,6 +50,17 @@ const backendLabel = computed(() => {
       : 'DirectML'
 })
 
+// ---- 处理器/内存卡：实时占用（perf 2s 一拍；null=尚无采样，回落静态展示） ----
+const cpuPct = computed(() => {
+  const l = store.perf.latest
+  return l ? Math.round(l.cpu) : null
+})
+const procCpuPct = computed(() => {
+  const p = store.perf.latest?.task?.cpu_pct
+  return p != null ? Math.round(p) : null
+})
+const ramUsedGb = computed(() => store.perf.latest?.mem_used_gb ?? null)
+
 // 全新用户（还没跑过任何任务）：四宫格全 0 没有意义，换成三步上手引导
 const fresh = computed(() => store.stats.total === 0)
 </script>
@@ -204,25 +215,40 @@ const fresh = computed(() => store.stats.total === 0)
           </NTag>
         </div>
       </div>
-        <div class="card hw">
-          <div class="hw-head">
-            <span class="hw-icon">
+        <div class="card hw hw-cpu">
+          <div class="chip-head">
+            <span class="chip-icon">
               <svg width="17" height="17" viewBox="0 0 17 17"><rect x="3.5" y="3.5" width="10" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4" /><rect x="6.8" y="6.8" width="3.4" height="3.4" rx="0.7" fill="currentColor" /><path d="M6 1.5v2M11 1.5v2M6 13.5v2M11 13.5v2M1.5 6h2M1.5 11h2M13.5 6h2M13.5 11h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
             </span>
-            <span class="hw-name">处理器</span>
+            <div class="chip-title">
+              <span class="chip-kind">PROCESSOR · 处理器</span>
+              <span class="chip-name" :title="hw?.cpu ?? ''">{{ hw?.cpu || '—' }}</span>
+            </div>
           </div>
-          <div class="hw-detail">{{ hw?.cpu || '—' }}</div>
-          <div class="hw-sub">{{ hw?.cpu_cores ?? '—' }} 核心</div>
+          <div v-if="cpuPct != null" class="chip-live">
+            <div class="live-bar"><div class="live-fill fill-cpu" :style="{ width: cpuPct + '%' }" /></div>
+            <span class="live-text">
+              占用 <b>{{ cpuPct }}%</b><template v-if="procCpuPct != null"> · 进程 {{ procCpuPct }}%</template>
+            </span>
+          </div>
+          <div v-else class="hw-sub">{{ hw?.cpu_cores ?? '—' }} 核心</div>
+          <div v-if="cpuPct != null" class="hw-sub">{{ hw?.cpu_cores ?? '—' }} 核心</div>
         </div>
-        <div class="card hw">
-          <div class="hw-head">
-            <span class="hw-icon">
+        <div class="card hw hw-mem">
+          <div class="chip-head">
+            <span class="chip-icon icon-amber">
               <svg width="17" height="17" viewBox="0 0 17 17"><rect x="2" y="5" width="13" height="7" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M4.5 7.2v2.6M7 7.2v2.6M9.5 7.2v2.6M12 7.2v2.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
             </span>
-            <span class="hw-name">内存</span>
+            <div class="chip-title">
+              <span class="chip-kind">MEMORY · 内存</span>
+              <span class="chip-name">{{ hw?.ram_gb ?? '—' }} GB</span>
+            </div>
           </div>
-          <div class="hw-detail">{{ hw?.ram_gb ?? '—' }} GB</div>
-          <div class="hw-sub">系统内存</div>
+          <div v-if="ramUsedGb != null" class="chip-live">
+            <div class="live-bar"><div class="live-fill fill-mem" :style="{ width: Math.min(100, (ramUsedGb / (hw?.ram_gb || 1)) * 100) + '%' }" /></div>
+            <span class="live-text">已用 <b>{{ ramUsedGb.toFixed(1) }} GB</b></span>
+          </div>
+          <div v-else class="hw-sub">系统内存</div>
         </div>
       </div>
     </section>
@@ -526,12 +552,59 @@ h1 {
 /* ---- 硬件卡 ---- */
 .hw-grid { display: grid; grid-template-columns: 1.6fr 1.2fr 0.7fr; gap: 14px; }
 .hw { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
-.hw-head { display: flex; align-items: center; gap: 10px; }
-.hw-icon { display: inline-flex; color: #8fa8d8; }
-.hw-name { font-weight: 650; font-size: 14.5px; }
-.hw-tags { display: flex; gap: 8px; }
-.hw-detail { font-size: 13px; color: #c6cbd4; word-break: break-all; }
 .hw-sub { font-size: 12px; color: #8a919d; }
+.hw-tags { display: flex; gap: 8px; }
+
+/* 处理器/内存卡：与显卡主卡同语言（小标签 + 金属名 + 实时条），辉光收敛让 GPU 当主角 */
+.hw-cpu {
+  background:
+    radial-gradient(220px 120px at 92% -30%, rgba(79, 140, 255, 0.1), transparent 70%),
+    linear-gradient(180deg, #1b202a, #171a21);
+  border-color: rgba(96, 130, 200, 0.28);
+}
+.hw-mem {
+  background:
+    radial-gradient(180px 110px at 90% -30%, rgba(251, 191, 36, 0.09), transparent 70%),
+    linear-gradient(180deg, #1c2027, #181b21);
+  border-color: rgba(180, 150, 90, 0.24);
+}
+.chip-head { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.chip-icon { display: inline-flex; color: #7fb0ff; filter: drop-shadow(0 0 5px rgba(79, 140, 255, 0.45)); flex-shrink: 0; }
+.chip-icon.icon-amber { color: #fbbf24; filter: drop-shadow(0 0 5px rgba(251, 191, 36, 0.4)); }
+.chip-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.chip-kind { font-size: 9.5px; font-weight: 600; letter-spacing: 1.8px; color: #7c8ba8; }
+/* 金属名：静态银蓝渐变（流光是显卡卡专属，避免满屏动效） */
+.chip-name {
+  font-size: 14.5px;
+  font-weight: 750;
+  letter-spacing: 0.3px;
+  line-height: 1.2;
+  background: linear-gradient(100deg, #d4ddf0 0%, #9db8e8 45%, #e6edf9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip-live { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.live-bar {
+  flex: 1;
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.live-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease-out;
+}
+.fill-cpu { background: linear-gradient(90deg, #4f8cff, #22d3ee); box-shadow: 0 0 9px rgba(79, 140, 255, 0.5); }
+.fill-mem { background: linear-gradient(90deg, #f59e0b, #fbbf24); box-shadow: 0 0 9px rgba(251, 191, 36, 0.4); }
+.live-text { font-size: 12px; color: #9aa1ad; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hw-cpu .live-text b { color: #8ab4ff; font-weight: 650; }
+.hw-mem .live-text b { color: #fbbf24; font-weight: 650; }
 
 /* 显卡主卡：整机门面——暗色电路底 + 金属渐变型号名 + 实时显存条 */
 .hw-gpu {
