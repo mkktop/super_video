@@ -25,6 +25,7 @@ DEFAULTS = {
     "schedule_end": "08:00",  # window 结束时刻
     "idle_minutes": 15,  # idle 模式：键鼠静置多少分钟后才开始处理
     "output_name_template": "",  # 输出命名模板：空=沿用原名（冲突加_倍率后缀）；变量 {name}/{model}/{scale}/{res}/{date}
+    "delete_source_after_done": False,  # 超分任务成功完成后删除源文件（不进回收站；失败/取消不删）
 }
 
 SETTINGS_PATH = DATA_ROOT / "data" / "settings.json"
@@ -94,6 +95,8 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 notify_task_done 值: {v}")
             if k == "close_to_tray" and not isinstance(v, bool):
                 raise ValueError(f"非法 close_to_tray 值: {v}")
+            if k == "delete_source_after_done" and not isinstance(v, bool):
+                raise ValueError(f"非法 delete_source_after_done 值: {v}")
             if k == "sr_profiling" and not isinstance(v, bool):
                 raise ValueError(f"非法 sr_profiling 值: {v}")
             if k == "compare_still_count":

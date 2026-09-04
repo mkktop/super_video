@@ -198,6 +198,8 @@ export interface Task {
   updated_at: number
   /** 超分性能日志是否已落盘（sr_profiling 开启时完成的任务为 true） */
   has_sr_log?: boolean
+  /** 源素材是否仍在本机（图片批量=清单全部健在）；false 时全页对比入口置灰 */
+  input_exists?: boolean
 }
 
 /** 任务对比页多帧静帧状态（详见后端 sv/server/task_stills.py） */

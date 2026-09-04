@@ -66,6 +66,8 @@ const queueDoneOptions = [
   { label: '关机（60 秒可取消）', value: 'shutdown' },
   { label: '休眠（60 秒可取消）', value: 'sleep' },
 ]
+// 超分完成后删除源文件（危险项，默认关；删除不进回收站）
+const deleteSource = ref(false)
 async function saveQueueDone(v: 'none' | 'notify' | 'shutdown' | 'sleep') {
   const r = await api.saveSettings({ queue_done_action: v })
   if (!r.ok) {
@@ -75,6 +77,14 @@ async function saveQueueDone(v: 'none' | 'notify' | 'shutdown' | 'sleep') {
   }
   savedQueueDone.value = v
   message.success(v === 'none' ? '已关闭' : '已保存，当前队列跑完后生效')
+}
+
+async function saveDeleteSource(v: boolean) {
+  const r = await api.saveSettings({ delete_source_after_done: v })
+  if (!r.ok) {
+    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+    deleteSource.value = !v
+  }
 }
 
 const proxyOptions = [
@@ -143,6 +153,7 @@ onMounted(async () => {
     schedule_end?: string
     idle_minutes?: number
     output_name_template?: string
+    delete_source_after_done?: boolean
   }
   engine.value = s.engine ?? 'auto'
   precision.value = s.precision ?? 'fp16'
@@ -157,6 +168,7 @@ onMounted(async () => {
   queueDoneAction.value = s.queue_done_action ?? 'none'
   savedQueueDone.value = queueDoneAction.value
   srProfiling.value = s.sr_profiling === true
+  deleteSource.value = s.delete_source_after_done === true
   const p = s.download_proxy ?? ''
   if (p === 'direct') proxyMode.value = 'direct'
   else if (p.startsWith('http')) {
@@ -485,6 +497,13 @@ async function saveSrProfiling(v: boolean) {
                 />
                 <NButton size="small" :loading="savingNameTpl" @click="saveNameTemplate">保存</NButton>
               </NSpace>
+            </div>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                超分完成后删除源文件
+                <small>任务成功完成后自动删除该任务的源文件（图片批量=全部输入图），删除不进回收站；失败/取消的任务不删。对比功能依赖源文件，删除后该任务的对比入口会置灰</small>
+              </span>
+              <NSwitch v-model:value="deleteSource" size="small" @update:value="saveDeleteSource" />
             </div>
           </div>
         </section>

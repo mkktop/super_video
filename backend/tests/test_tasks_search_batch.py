@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -204,3 +205,121 @@ def test_trim_output_conflict(client, tiny):
         "input": str(tiny), "start_s": 0, "end_s": 0.3, "mode": "exact",
         "output": str(p), "overwrite": True})
     assert r.status_code == 201, r.text
+
+
+def test_input_exists_flags(client, tiny):
+    """全页对比入口的置灰依据：视频任务看 input_path，图片批量看清单全部健在。"""
+    alive = TEMP_DIR / "sb_input_alive.mp4"
+    shutil.copyfile(tiny, alive)
+    gone = TEMP_DIR / "sb_input_gone.mp4"
+    gone.unlink(missing_ok=True)
+
+    t_video = seed_task(alive, "C:/out/v_x2.mp4", status="done")
+    t_lost = seed_task(gone, "C:/out/g_x2.mp4", status="done")
+    t_img_ok = seed_task(
+        "C:/out/i_ok.png", "C:/out/i_ok_out.png", status="done",
+        params={"kind": "image", "images": [{"in": str(alive), "out": "a.png"}]})
+    t_img_part = seed_task(
+        "C:/out/i_part.png", "C:/out/i_part_out.png", status="done",
+        params={"kind": "image",
+                "images": [{"in": str(alive), "out": "a.png"},
+                           {"in": str(gone), "out": "b.png"}]})
+    try:
+        rows = {t["id"]: t for t in client.get("/api/tasks").json()}
+        assert rows[t_video["id"]]["input_exists"] is True
+        assert rows[t_lost["id"]]["input_exists"] is False
+        assert rows[t_img_ok["id"]]["input_exists"] is True
+        assert rows[t_img_part["id"]]["input_exists"] is False
+
+        # 单任务详情同语义，且源删除后即时反映
+        assert client.get(f"/api/tasks/{t_video['id']}").json()["input_exists"] is True
+        os.remove(alive)
+        assert client.get(f"/api/tasks/{t_video['id']}").json()["input_exists"] is False
+        assert client.get(f"/api/tasks/{t_img_ok['id']}").json()["input_exists"] is False
+    finally:
+        for t in (t_video, t_lost, t_img_ok, t_img_part):
+            client.delete(f"/api/tasks/{t['id']}")
+
+
+@pytest.fixture()
+def iso_settings(tmp_path, monkeypatch):
+    """设置文件隔离：删源开关的读写落在临时文件，不碰真实 settings.json。"""
+    from sv.server import settings as sv_settings
+
+    monkeypatch.setattr(sv_settings, "SETTINGS_PATH", tmp_path / "settings.json")
+    return sv_settings
+
+
+def test_delete_source_after_done(client, tiny, iso_settings):
+    """超分完成后删除源文件：默认关=保留；开启=成功任务删源、输出健在。"""
+    sfx = uuid.uuid4().hex[:6]  # 输出/源均唯一：任务记录删除不清用户输出文件，重跑不撞 409
+    keep_src = TEMP_DIR / f"sb_keep_src_{sfx}.mp4"
+    keep_out = TEMP_DIR / f"sb_keep_out_{sfx}.mp4"
+    del_src = TEMP_DIR / f"sb_del_src_{sfx}.mp4"
+    del_out = TEMP_DIR / f"sb_del_out_{sfx}.mp4"
+    keep_id = del_id = None
+    try:
+        # 默认关：源保留
+        shutil.copyfile(tiny, keep_src)
+        r = client.post("/api/tasks", json={
+            "input": str(keep_src), "output": str(keep_out),
+            "model_id": "realesr-animevideov3", "params": {"scale": 2, "target_scale": 2}})
+        assert r.status_code == 201, r.text
+        keep_id = r.json()["id"]
+        wait_status(client, keep_id, ("done", "failed"))
+        assert keep_src.exists(), "默认关：源文件必须保留"
+
+        # 开启：成功任务删源；详情端点即时反映 input_exists=false（对比入口置灰依据）
+        r = client.put("/api/settings", json={"delete_source_after_done": True})
+        assert r.status_code == 200, r.text
+        shutil.copyfile(tiny, del_src)
+        r = client.post("/api/tasks", json={
+            "input": str(del_src), "output": str(del_out),
+            "model_id": "realesr-animevideov3", "params": {"scale": 2, "target_scale": 2}})
+        assert r.status_code == 201, r.text
+        del_id = r.json()["id"]
+        done = wait_status(client, del_id, ("done", "failed"))
+        assert done["status"] == "done", done.get("error")
+        assert not del_src.exists(), "开启后成功任务应删除源文件"
+        assert Path(done["output_path"]).exists(), "输出文件必须健在"
+        assert client.get(f"/api/tasks/{del_id}").json()["input_exists"] is False
+    finally:
+        for p in (keep_src, keep_out, del_src, del_out):
+            p.unlink(missing_ok=True)
+        for tid in (keep_id, del_id):
+            if tid:
+                client.delete(f"/api/tasks/{tid}")
+
+
+def test_delete_source_image_batch_and_guard(tmp_path, monkeypatch, iso_settings):
+    """图片批量按清单逐张删；源=输出同路径护栏不误删；非 bool 值校验拒绝。"""
+    import sv.server.runner as runner_mod
+
+    src1 = tmp_path / "a.png"
+    src2 = tmp_path / "b.png"
+    out1 = tmp_path / "a_2x.png"
+    out2 = tmp_path / "b_2x.png"
+    for p in (src1, src2, out1, out2):
+        p.write_bytes(b"x")
+    task = {"id": "t_img", "input_path": str(src1), "output_path": str(out1),
+            "params": {"kind": "image",
+                       "images": [{"in": str(src1), "out": str(out1)},
+                                  {"in": str(src2), "out": str(out2)}]}}
+
+    runner_mod._delete_source_if_enabled(task)
+    assert src1.exists() and src2.exists(), "开关默认关：不动源文件"
+
+    with pytest.raises(ValueError):
+        iso_settings.save({"delete_source_after_done": "yes"})
+    assert iso_settings.save({"delete_source_after_done": True})["delete_source_after_done"] is True
+
+    runner_mod._delete_source_if_enabled(task)
+    assert not src1.exists() and not src2.exists(), "开启后按清单逐张删源"
+    assert out1.exists() and out2.exists(), "输出产物必须健在"
+
+    # 源=输出同路径（创建期命名纪律本会避开，这里钉死护栏不误删输出）
+    same = tmp_path / "same.mp4"
+    same.write_bytes(b"x")
+    runner_mod._delete_source_if_enabled(
+        {"id": "t_same", "input_path": str(same), "output_path": str(same), "params": {}})
+    assert same.exists(), "同路径护栏：不删"

@@ -36,6 +36,10 @@ const previewBroken = ref(false) // 预览 404/损坏时兜底（done 但预览�
 const canCompare = computed(
   () => !!props.task.preview_src && !!props.task.preview_path,
 )
+// 源文件被删/移动：对比页视频模式要直接播源、静帧从源抽取，都进行不下去——
+// 全页对比入口置灰禁点（预览缩略图是任务完成时落盘的，不受影响，仍可显示）
+const srcGone = computed(() => props.task.input_exists === false)
+const srcGoneTip = '源文件已删除或移动，无法对比'
 
 const fileName = computed(() => {
   const base = props.task.input_path.split(/[\\/]/).pop() ?? ''
@@ -220,12 +224,22 @@ function onOpenInputFolder() {
         v-if="(task.preview_path || task.status === 'done') && !previewBroken"
         :src="api.previewUrl(task.id, task.updated_at)"
         class="preview"
-        @click="canCompare && openCompare(task.id)"
+        :class="{ gone: srcGone }"
+        :title="srcGone ? srcGoneTip : undefined"
+        @click="canCompare && !srcGone && openCompare(task.id)"
         @error="previewBroken = true"
       />
       <div v-else-if="task.status === 'done'" class="preview-broken">无预览</div>
       <div class="spacer" />
-      <NButton v-if="canCompare" size="small" quaternary type="info" @click="openCompare(task.id)">
+      <NButton
+        v-if="canCompare"
+        size="small"
+        quaternary
+        type="info"
+        :disabled="srcGone"
+        :title="srcGone ? srcGoneTip : undefined"
+        @click="openCompare(task.id)"
+      >
         全页对比
       </NButton>
       <NButton
@@ -323,6 +337,8 @@ function onOpenInputFolder() {
   max-height: 96px; max-width: 45%; border-radius: 6px; border: 1px solid #2a2d31;
   object-fit: contain; cursor: pointer;
 }
+/* 源文件已删：预览不再充当对比入口（置灰+默认光标），缩略图本身仍保留 */
+.preview.gone { cursor: default; opacity: 0.45; }
 .spacer { flex: 1; }
 .qbtns {
   display: inline-flex;

@@ -413,6 +413,19 @@ def create_task(body: TaskCreate) -> dict:
     return task
 
 
+def _input_exists(t: dict) -> bool:
+    """源素材是否仍在本机：对比页视频模式直接播源文件、静帧从源抽取，
+    源被删/移动后入口就该置灰。图片批量任务看 params.images 全部清单。"""
+    imgs = t.get("params", {}).get("images")
+    if isinstance(imgs, list) and imgs:
+        return all(
+            isinstance(i, dict) and bool(i.get("in")) and Path(i["in"]).exists()
+            for i in imgs
+        )
+    ip = t.get("input_path") or ""
+    return bool(ip) and Path(ip).exists()
+
+
 def _with_queue_pos(tasks: list[dict]) -> list[dict]:
     qpos = 0
     for t in tasks:
@@ -438,6 +451,7 @@ def get_tasks(q: str = "") -> list[dict]:
     out = _with_queue_pos(db.list_tasks(q=q.strip()))
     for t in out:
         t["has_sr_log"] = t["id"] in logs
+        t["input_exists"] = _input_exists(t)
     return out
 
 
@@ -462,6 +476,7 @@ def get_task(task_id: str) -> dict:
     if t is None:
         raise HTTPException(404)
     t["has_sr_log"] = task_id in sr_log_ids()
+    t["input_exists"] = _input_exists(t)
     return t
 
 

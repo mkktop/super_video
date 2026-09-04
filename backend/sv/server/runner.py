@@ -124,6 +124,36 @@ def _worker_spawn_cmd(worker_py: str, task_id: str) -> list[str]:
     return [worker_py, "-m", "sv.server.worker", task_id, "--serve"]
 
 
+def _delete_source_if_enabled(task: dict) -> None:
+    """设置 delete_source_after_done 开启时，成功收尾后删除源文件。
+
+    视频任务删 input_path；图片批量任务按 params.images 清单逐张删。
+    删除是收尾附加动作，失败不回滚任务（成果已落盘），只落 sidecar 日志
+    留痕；输出与源同路径的假想碰撞（创建期命名纪律本就会避开）不删防误伤。
+    """
+    from .settings import load as load_settings
+
+    if not load_settings().get("delete_source_after_done"):
+        return
+    params = task.get("params") or {}
+    if params.get("kind") == "image":
+        items = [(i.get("in"), i.get("out"))
+                 for i in params.get("images") or [] if isinstance(i, dict)]
+    else:
+        items = [(task.get("input_path"), task.get("output_path"))]
+    for src, dst in items:
+        if not src:
+            continue
+        try:
+            # 输出与源同路径的假想碰撞（创建期命名纪律本就会避开）不删防误伤
+            if dst and os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(dst)):
+                continue
+            os.remove(src)
+            print(f"[task:{task['id'][:8]}] 已删除源文件 {src}", flush=True)
+        except (OSError, ValueError) as e:
+            print(f"[task:{task['id'][:8]}] 删除源文件失败 {src}: {e}", flush=True)
+
+
 class Runner:
     def __init__(self, bus: EventBus):
         self.bus = bus
@@ -533,6 +563,10 @@ class Runner:
         # 真实片尾修正：probe 估算偏大被解码 EOF 证伪时，worker 的 done 事件
         # 带 total_frames 实测值回填（旧 worker/图片路径无此键，按估算值兜底）
         done_total = final.get("total_frames") or t.get("total_frames", 0)
+        # 先删源再落 done：状态可见时删除已完成，「done」是自洽终态——
+        # UI 首次刷新即看到 input_exists=false，对比入口同帧置灰，
+        # 不存在"列表已显示完成、源却还在/点进对比才发现没了"的窗口
+        _delete_source_if_enabled(task)
         db.update_task(
             task_id, status="done", out_bytes=final.get("out_bytes", 0),
             preview_path=final.get("preview"),
