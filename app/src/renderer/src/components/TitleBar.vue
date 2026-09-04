@@ -66,11 +66,24 @@ onUnmounted(() => off?.())
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(180deg, #191c20, #16181c);
-  border-bottom: 1px solid #24272c;
+  background: linear-gradient(180deg, rgba(30, 34, 42, 0.92), rgba(22, 25, 31, 0.96));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  position: relative;
   -webkit-app-region: drag;
   user-select: none;
   flex-shrink: 0;
+}
+/* 底缘品牌流光：极低饱和，只给一条 1px 的呼吸感 */
+.titlebar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 8%, rgba(79, 140, 255, 0.4) 38%, rgba(139, 92, 246, 0.32) 62%, transparent 92%);
+  opacity: 0.55;
+  pointer-events: none;
 }
 .brand {
   display: flex;

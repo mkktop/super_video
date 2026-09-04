@@ -231,7 +231,7 @@ onUnmounted(() => {
 }
 /* 全屏态：整页铺满显示器，舞台吃掉头部以外全部空间 */
 .compare-page:fullscreen {
-  background: #0d0e10;
+  background: var(--sv-panel-deep);
   padding: 12px 16px;
 }
 :fullscreen .stage {
@@ -251,15 +251,16 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .file { font-weight: 600; white-space: nowrap; }
-.arrow, .out { color: #9aa0a6; font-size: 13px; white-space: nowrap; }
+.arrow, .out { color: #9aa1ad; font-size: 13px; white-space: nowrap; }
 .file, .out { overflow: hidden; text-overflow: ellipsis; }
 .tags { display: flex; gap: 6px; flex-shrink: 0; margin-left: auto; }
 .stage {
   flex: 1;
   min-height: 0;
-  border: 1px solid #2a2d31;
-  border-radius: 8px;
-  background: #0d0e10;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: var(--sv-panel-deep);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.015);
 }
 .empty { margin: auto; }
 /* 静帧样本条（样式与 CompareModels 同款，两页独立演化各自维护） */
@@ -275,15 +276,16 @@ onUnmounted(() => {
   width: 104px;
   height: 58px;
   padding: 0;
-  border: 2px solid #2a2d31;
-  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
-  background: #0d0e10;
+  background: var(--sv-panel-deep);
   flex-shrink: 0;
+  transition: border-color 0.15s, transform 0.15s;
 }
-.f-thumb:hover { border-color: #4a4f55; }
-.f-thumb.on { border-color: #4f8cff; }
+.f-thumb:hover { border-color: rgba(255, 255, 255, 0.22); transform: translateY(-1px); }
+.f-thumb.on { border-color: #4f8cff; box-shadow: 0 0 10px rgba(79, 140, 255, 0.35); }
 .f-thumb img {
   width: 100%;
   height: 100%;
@@ -303,7 +305,7 @@ onUnmounted(() => {
   color: #c8cdd4;
 }
 .f-thumb.on .f-idx { background: rgba(79, 140, 255, 0.85); color: #fff; }
-.strip-note { font-size: 12px; color: #9aa0a6; }
+.strip-note { font-size: 12px; color: #9aa1ad; }
 
 .share-modal {
   display: flex;
@@ -311,9 +313,9 @@ onUnmounted(() => {
   gap: 10px;
   width: min(760px, 86vw);
   max-height: 86vh;
-  background: #1a1c1f;
-  border: 1px solid #2c3138;
-  border-radius: 10px;
+  background: linear-gradient(180deg, #1c2027, #181b21);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
   padding: 14px 16px;
 }
 .share-head {
@@ -337,7 +339,7 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  color: #9aa0a6;
+  color: #9aa1ad;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

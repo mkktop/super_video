@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
+    "preview": "vite --config vite.preview.config.ts",
     "test": "vitest run",
     "build": "vue-tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json && electron-vite build",
     "start": "electron-vite preview",

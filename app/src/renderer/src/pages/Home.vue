@@ -21,6 +21,9 @@ const runPercent = computed(() => {
 
 const hw = computed(() => store.hardware)
 
+// naive Line 进度的渐变色只认 { stops: [from, to] } 对象形态（数组形态会崩）
+const gradFill: { stops: [string, string] } = { stops: ['#4f8cff', '#8b5cf6'] }
+
 // 全新用户（还没跑过任何任务）：四宫格全 0 没有意义，换成三步上手引导
 const fresh = computed(() => store.stats.total === 0)
 </script>
@@ -29,14 +32,22 @@ const fresh = computed(() => store.stats.total === 0)
   <div class="home">
     <!-- Hero -->
     <section class="hero">
-      <div class="glow glow-a" />
-      <div class="glow glow-b" />
       <div class="hero-text">
         <h1>视频超分<span class="grad">工作台</span></h1>
         <p>低分辨率视频 · AI 重建 · 高清输出　让老片重获新生</p>
         <div class="hero-actions">
           <NButton type="primary" size="large" @click="ui.page = 'newtask'">＋ 新建超分任务</NButton>
           <NButton size="large" quaternary @click="ui.page = 'tasks'">查看任务队列</NButton>
+        </div>
+      </div>
+      <!-- 低清 → 高清 的像素渐清晰示意（纯 CSS 装饰） -->
+      <div class="px-demo" aria-hidden="true">
+        <div class="px-screen">
+          <div class="px-sharp" />
+          <div class="px-mosaic" />
+          <div class="px-line" />
+          <span class="px-tag sd">480p</span>
+          <span class="px-tag hd">4K</span>
         </div>
       </div>
       <div class="hero-chip">
@@ -48,12 +59,20 @@ const fresh = computed(() => store.stats.total === 0)
     <!-- 运行状态 -->
     <section v-if="running" class="card run-card" @click="ui.page = 'tasks'">
       <div class="run-info">
+        <span class="run-pulse" />
         <span class="run-label">正在处理</span>
         <span class="run-file">{{ running.input_path.split(/[\\/]/).pop() }}</span>
         <NTag size="small" type="info" :bordered="false">{{ running.model_id }}</NTag>
       </div>
       <div class="run-progress">
-        <NProgress type="line" :percentage="runPercent" :show-indicator="false" :height="10" processing />
+        <NProgress
+          type="line"
+          :percentage="runPercent"
+          :show-indicator="false"
+          :height="10"
+          :color="gradFill"
+          processing
+        />
         <span class="run-pct">
           {{ runPercent }}% · {{ running.progress_frames }}/{{ running.total_frames }} 帧<template v-if="running.fps_run"> · {{ running.fps_run.toFixed(1) }} 帧/秒 · 剩余 {{ fmtEta(running.eta_sec) }}</template>
         </span>
@@ -86,28 +105,36 @@ const fresh = computed(() => store.stats.total === 0)
     <!-- 统计 -->
     <section v-if="!fresh" class="stat-grid">
       <div class="card stat">
-        <div class="stat-icon i-blue">▤</div>
+        <div class="stat-icon i-blue">
+          <svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="2.5" width="14" height="15" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M7 6.5h6M7 10h6M7 13.5h3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+        </div>
         <div>
           <div class="stat-num">{{ stats.total }}</div>
           <div class="stat-label">累计任务</div>
         </div>
       </div>
       <div class="card stat">
-        <div class="stat-icon i-green">✓</div>
+        <div class="stat-icon i-green">
+          <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 10.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </div>
         <div>
           <div class="stat-num">{{ stats.done }}</div>
           <div class="stat-label">已完成</div>
         </div>
       </div>
       <div class="card stat">
-        <div class="stat-icon i-purple">▦</div>
+        <div class="stat-icon i-purple">
+          <svg width="20" height="20" viewBox="0 0 20 20"><rect x="2.5" y="4.5" width="15" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M2.5 8h15M7 4.5v11M13 4.5v11" stroke="currentColor" stroke-width="1.2" /></svg>
+        </div>
         <div>
           <div class="stat-num">{{ fmtFrames(stats.frames) }}</div>
           <div class="stat-label">累计处理帧</div>
         </div>
       </div>
       <div class="card stat">
-        <div class="stat-icon i-amber">⬒</div>
+        <div class="stat-icon i-amber">
+          <svg width="20" height="20" viewBox="0 0 20 20"><ellipse cx="10" cy="5.2" rx="6.5" ry="2.7" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M3.5 5.2v9.6c0 1.5 2.9 2.7 6.5 2.7s6.5-1.2 6.5-2.7V5.2" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M3.5 10c0 1.5 2.9 2.7 6.5 2.7s6.5-1.2 6.5-2.7" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+        </div>
         <div>
           <div class="stat-num">{{ fmtBytes(stats.bytes) }}</div>
           <div class="stat-label">累计产出</div>
@@ -121,7 +148,9 @@ const fresh = computed(() => store.stats.total === 0)
       <div class="hw-grid">
         <div class="card hw hw-gpu">
           <div class="hw-head">
-            <span class="hw-icon">⚡</span>
+            <span class="hw-icon">
+              <svg width="18" height="18" viewBox="0 0 18 18"><rect x="2" y="4.5" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" /><circle cx="6.4" cy="9" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3" /><path d="M10.5 7.2l2.6 1.8-2.6 1.8z" fill="currentColor" /><path d="M4.5 13.5v1.6M13.5 13.5v1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+            </span>
             <span class="hw-name">{{ hw?.gpus?.[0]?.name ?? '—' }}</span>
           </div>
           <div class="hw-tags">
@@ -138,7 +167,9 @@ const fresh = computed(() => store.stats.total === 0)
         </div>
         <div class="card hw">
           <div class="hw-head">
-            <span class="hw-icon">◫</span>
+            <span class="hw-icon">
+              <svg width="17" height="17" viewBox="0 0 17 17"><rect x="3.5" y="3.5" width="10" height="10" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4" /><rect x="6.8" y="6.8" width="3.4" height="3.4" rx="0.7" fill="currentColor" /><path d="M6 1.5v2M11 1.5v2M6 13.5v2M11 13.5v2M1.5 6h2M1.5 11h2M13.5 6h2M13.5 11h2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
+            </span>
             <span class="hw-name">处理器</span>
           </div>
           <div class="hw-detail">{{ hw?.cpu || '—' }}</div>
@@ -146,7 +177,9 @@ const fresh = computed(() => store.stats.total === 0)
         </div>
         <div class="card hw">
           <div class="hw-head">
-            <span class="hw-icon">▩</span>
+            <span class="hw-icon">
+              <svg width="17" height="17" viewBox="0 0 17 17"><rect x="2" y="5" width="13" height="7" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M4.5 7.2v2.6M7 7.2v2.6M9.5 7.2v2.6M12 7.2v2.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
+            </span>
             <span class="hw-name">内存</span>
           </div>
           <div class="hw-detail">{{ hw?.ram_gb ?? '—' }} GB</div>
@@ -169,37 +202,42 @@ const fresh = computed(() => store.stats.total === 0)
 <style scoped>
 .home { display: flex; flex-direction: column; gap: 18px; }
 
+/* ---- Hero：极光 + 像素渐清晰示意 ---- */
 .hero {
   position: relative;
-  border-radius: 14px;
-  padding: 34px 30px 30px;
-  background: linear-gradient(135deg, #1b2130 0%, #191b1f 60%);
-  border: 1px solid #262b36;
+  display: flex;
+  align-items: center;
+  border-radius: 16px;
+  padding: 36px 32px 32px;
+  background:
+    radial-gradient(420px 260px at 82% -30%, rgba(79, 140, 255, 0.16), transparent 68%),
+    radial-gradient(360px 240px at 55% 130%, rgba(139, 92, 246, 0.1), transparent 68%),
+    linear-gradient(135deg, #1a2130 0%, #171920 55%, #191a26 100%);
+  border: 1px solid rgba(96, 120, 180, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 28px rgba(0, 0, 0, 0.28);
   overflow: hidden;
 }
-.glow { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.5; }
-.glow-a { width: 320px; height: 320px; background: #2b4c8f; top: -160px; right: -60px; }
-.glow-b { width: 240px; height: 240px; background: #4c2b8f; bottom: -140px; right: 180px; opacity: 0.35; }
-.hero-text { position: relative; }
+.hero-text { position: relative; z-index: 1; }
 h1 {
-  font-size: 30px;
-  font-weight: 700;
+  font-size: 31px;
+  font-weight: 750;
   letter-spacing: 1px;
-  color: #e8eaed;
+  color: #f2f4f8;
 }
 .grad {
-  background: linear-gradient(90deg, #4f8cff, #8b5cf6);
+  background: linear-gradient(90deg, #6fa0ff, #a78bfa);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   margin-left: 8px;
 }
-.hero-text p { margin: 10px 0 20px; color: #9aa0a6; font-size: 14px; letter-spacing: 0.5px; }
+.hero-text p { margin: 10px 0 22px; color: #9aa1ad; font-size: 14px; letter-spacing: 0.5px; }
 .hero-actions { display: flex; gap: 12px; }
 .hero-chip {
   position: absolute;
   right: 24px;
-  top: 24px;
+  top: 22px;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -217,12 +255,109 @@ h1 {
 }
 .chip-dot.off { background: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.8); }
 
-.card {
-  background: #1e2023;
-  border: 1px solid #26292e;
+/* 像素渐清晰示意：左 480p 马赛克 → 扫描线 → 右 4K 顺滑 */
+.px-demo { position: relative; z-index: 1; margin: 14px 84px 0 auto; flex-shrink: 0; }
+.px-screen {
+  --cut: 34%;
+  position: relative;
+  width: 224px;
+  height: 132px;
   border-radius: 12px;
+  border: 1px solid rgba(140, 160, 210, 0.3);
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  animation: px-sweep 7s ease-in-out infinite;
+}
+@property --cut {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 34%;
+}
+@keyframes px-sweep {
+  0%, 12% { --cut: 26%; }
+  48%, 60% { --cut: 62%; }
+  88%, 100% { --cut: 26%; }
+}
+.px-sharp {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(90px 70px at 74% 26%, rgba(255, 220, 150, 0.5), transparent 70%),
+    linear-gradient(165deg, #35567e 0%, #2b3f68 45%, #1d2b4a 100%);
+}
+.px-sharp::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, transparent 62%, rgba(16, 22, 38, 0.85) 62.5%),
+    linear-gradient(200deg, transparent 46%, rgba(20, 30, 52, 0.9) 46.5%);
+}
+.px-mosaic {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(90px 70px at 74% 26%, rgba(255, 220, 150, 0.5), transparent 70%),
+    linear-gradient(165deg, #35567e 0%, #2b3f68 45%, #1d2b4a 100%);
+  clip-path: inset(0 calc(100% - var(--cut)) 0 0);
+}
+/* 马赛克块：两层正交条纹叠出低分辨率色块感 */
+.px-mosaic::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.07) 0 8px, transparent 8px 16px),
+    repeating-linear-gradient(90deg, rgba(6, 10, 22, 0.28) 0 8px, transparent 8px 16px);
+}
+.px-mosaic::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, transparent 62%, rgba(16, 22, 38, 0.85) 62.5%),
+    linear-gradient(200deg, transparent 46%, rgba(20, 30, 52, 0.9) 46.5%);
+  background-size: 16px 16px, 16px 16px;
+}
+.px-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--cut);
+  width: 2px;
+  background: linear-gradient(180deg, transparent, #9fc0ff 18%, #c4d5ff 50%, #9fc0ff 82%, transparent);
+  box-shadow: 0 0 14px rgba(120, 165, 255, 0.95);
+}
+.px-tag {
+  position: absolute;
+  bottom: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(10, 14, 26, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.px-tag.sd { left: 8px; }
+.px-tag.hd {
+  right: 8px;
+  color: #bfe3ff;
+  border-color: rgba(140, 180, 255, 0.4);
+  box-shadow: 0 0 10px rgba(110, 160, 255, 0.35);
+}
+@media (max-width: 1180px) {
+  .px-demo { display: none; }
 }
 
+.card {
+  background: linear-gradient(180deg, #1c2027, #181b21);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+}
+
+/* ---- 运行卡 ---- */
 .run-card {
   padding: 16px 20px;
   display: flex;
@@ -230,31 +365,81 @@ h1 {
   justify-content: space-between;
   gap: 24px;
   cursor: pointer;
-  border-color: rgba(79, 140, 255, 0.35);
-  transition: border-color 0.15s;
+  border-color: rgba(79, 140, 255, 0.38);
+  background:
+    linear-gradient(90deg, rgba(79, 140, 255, 0.09), rgba(139, 92, 246, 0.04) 42%, transparent 70%),
+    linear-gradient(180deg, #1c2027, #181b21);
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
 }
-.run-card:hover { border-color: rgba(79, 140, 255, 0.7); }
+.run-card:hover {
+  border-color: rgba(79, 140, 255, 0.7);
+  box-shadow: 0 6px 22px rgba(79, 140, 255, 0.16);
+  transform: translateY(-1px);
+}
 .run-info { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.run-label { color: #4f8cff; font-size: 13px; flex-shrink: 0; }
+.run-pulse {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #4f8cff;
+  box-shadow: 0 0 8px rgba(79, 140, 255, 0.95);
+  animation: run-blink 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes run-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.run-label { color: #6fa0ff; font-size: 13px; flex-shrink: 0; }
 .run-file { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .run-progress { min-width: 320px; display: flex; align-items: center; gap: 12px; flex: 1; }
 .run-progress > div:first-child { flex: 1; }
-.run-pct { font-size: 12.5px; color: #9aa0a6; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.run-pct { font-size: 12.5px; color: #9aa1ad; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* ---- 统计卡 ---- */
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.stat { display: flex; align-items: center; gap: 14px; padding: 18px; }
-.stat-icon {
-  width: 42px; height: 42px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center; font-size: 18px;
+.stat {
+  display: flex; align-items: center; gap: 14px; padding: 18px;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  animation: rise-in 0.45s ease-out backwards;
 }
-.i-blue { background: rgba(79, 140, 255, 0.14); color: #4f8cff; }
-.i-green { background: rgba(52, 211, 153, 0.12); color: #34d399; }
-.i-purple { background: rgba(139, 92, 246, 0.14); color: #a78bfa; }
-.i-amber { background: rgba(251, 191, 36, 0.12); color: #fbbf24; }
-.stat-num { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.stat-label { font-size: 12px; color: #9aa0a6; margin-top: 2px; }
+.stat:nth-child(2) { animation-delay: 0.06s; }
+.stat:nth-child(3) { animation-delay: 0.12s; }
+.stat:nth-child(4) { animation-delay: 0.18s; }
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.stat:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
+}
+.stat-icon {
+  width: 42px; height: 42px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+.i-blue { background: rgba(79, 140, 255, 0.14); color: #6fa0ff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 16px rgba(79, 140, 255, 0.12); }
+.i-green { background: rgba(52, 211, 153, 0.12); color: #34d399; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 16px rgba(52, 211, 153, 0.1); }
+.i-purple { background: rgba(139, 92, 246, 0.14); color: #a78bfa; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 16px rgba(139, 92, 246, 0.12); }
+.i-amber { background: rgba(251, 191, 36, 0.12); color: #fbbf24; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 16px rgba(251, 191, 36, 0.1); }
+.stat-num { font-size: 22px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.stat-label { font-size: 12px; color: #9aa1ad; margin-top: 2px; }
 
-.sec-title { font-size: 15px; font-weight: 600; color: #c6cad0; margin-bottom: 12px; }
+/* ---- 分节标题：品牌渐变短线 ---- */
+.sec-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: #d5dae2;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.sec-title::before {
+  content: '';
+  width: 4px;
+  height: 15px;
+  border-radius: 3px;
+  background: var(--sv-grad);
+}
 
 /* 三步上手引导 */
 .guide { padding: 22px 24px; }
@@ -264,16 +449,16 @@ h1 {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  color: #9aa0a6;
+  color: #9aa1ad;
   font-size: 13px;
   line-height: 1.6;
 }
-.g-step b { color: #e8eaed; margin-right: 4px; }
+.g-step b { color: #e9ecf2; margin-right: 4px; }
 .g-num {
   width: 22px;
   height: 22px;
   border-radius: 7px;
-  background: linear-gradient(135deg, #4f8cff, #8b5cf6);
+  background: var(--sv-grad);
   color: #fff;
   font-size: 12px;
   font-weight: 600;
@@ -281,6 +466,7 @@ h1 {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  box-shadow: 0 0 12px rgba(79, 140, 255, 0.35);
 }
 .guide-actions { display: flex; gap: 12px; margin-top: 18px; }
 .sec-head { display: flex; align-items: center; justify-content: space-between; }
@@ -288,23 +474,42 @@ h1 {
 .sec-link {
   border: none;
   background: none;
-  color: #4f8cff;
+  color: #6fa0ff;
   font-size: 12.5px;
   cursor: pointer;
   padding: 4px 8px;
   margin-bottom: 6px;
+  border-radius: 6px;
+  transition: background 0.15s;
 }
-.sec-link:hover { text-decoration: underline; }
+.sec-link:hover { text-decoration: underline; background: rgba(79, 140, 255, 0.08); }
+
+/* ---- 硬件卡 ---- */
 .hw-grid { display: grid; grid-template-columns: 1.6fr 1.2fr 0.7fr; gap: 14px; }
 .hw { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
 .hw-gpu {
-  background: linear-gradient(135deg, #1e2531, #1e2023);
-  border-color: #2c3442;
+  position: relative;
+  background:
+    linear-gradient(120deg, rgba(79, 140, 255, 0.1), rgba(139, 92, 246, 0.05) 45%, transparent 75%),
+    linear-gradient(180deg, #1c2027, #181b21);
+  border-color: rgba(96, 130, 200, 0.32);
+  overflow: hidden;
+}
+.hw-gpu::after {
+  content: '';
+  position: absolute;
+  top: -60px;
+  right: -50px;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(79, 140, 255, 0.16), transparent 65%);
+  pointer-events: none;
 }
 .hw-head { display: flex; align-items: center; gap: 10px; }
-.hw-icon { font-size: 18px; }
-.hw-name { font-weight: 600; font-size: 14.5px; }
+.hw-icon { display: inline-flex; color: #8fa8d8; }
+.hw-name { font-weight: 650; font-size: 14.5px; }
 .hw-tags { display: flex; gap: 8px; }
-.hw-detail { font-size: 13px; color: #c6cad0; word-break: break-all; }
-.hw-sub { font-size: 12px; color: #8a919c; }
+.hw-detail { font-size: 13px; color: #c6cbd4; word-break: break-all; }
+.hw-sub { font-size: 12px; color: #8a919d; }
 </style>

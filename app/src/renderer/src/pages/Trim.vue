@@ -411,20 +411,20 @@ export default { name: 'Trim' }
 
 <style scoped>
 .trim-page { width: 100%; } /* 全屏铺满,预览跟随窗口放大 */
-.title { font-size: 20px; font-weight: 600; margin-bottom: 2px; }
-.subtitle { font-size: 13px; color: #9aa0a6; margin-bottom: 16px; }
+.title { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; margin-bottom: 2px; }
+.subtitle { font-size: 13px; color: #9aa1ad; margin-bottom: 16px; }
 .head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .recents { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
-.recents-label { font-size: 12px; color: #9aa0a6; }
+.recents-label { font-size: 12px; color: #9aa1ad; }
 .recent-chip {
   display: inline-flex;
   align-items: center;
   max-width: 240px;
   padding: 4px 12px;
   border-radius: 14px;
-  border: 1px solid #33373d;
-  background: #1c1e21;
-  color: #c6cad0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #c6cbd4;
   font-size: 12.5px;
   cursor: pointer;
   white-space: nowrap;
@@ -432,28 +432,39 @@ export default { name: 'Trim' }
   text-overflow: ellipsis;
   transition: border-color 0.15s, color 0.15s;
 }
-.recent-chip:hover { border-color: #4f8cff; color: #fff; }
-.recent-chip.current { border-color: #4f8cff; color: #fff; cursor: default; }
+.recent-chip:hover { border-color: rgba(79, 140, 255, 0.55); color: #fff; }
+.recent-chip.current { border-color: rgba(79, 140, 255, 0.7); color: #fff; cursor: default; background: rgba(79, 140, 255, 0.08); }
 /* 拖拽遮罩：拖文件进窗口时整页高亮 */
 .drop-mask {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgba(13, 14, 16, 0.72);
-  border: 2px dashed #4f8cff;
+  background: rgba(10, 12, 16, 0.78);
+  border: 2px dashed rgba(79, 140, 255, 0.75);
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  box-shadow: inset 0 0 120px rgba(79, 140, 255, 0.12);
 }
-.drop-tip { font-size: 18px; font-weight: 600; color: #e8eaed; letter-spacing: 1px; }
+.drop-tip {
+  font-size: 18px;
+  font-weight: 650;
+  color: #e9ecf2;
+  letter-spacing: 1px;
+  padding: 14px 28px;
+  border-radius: 14px;
+  border: 1px solid rgba(79, 140, 255, 0.45);
+  background: rgba(79, 140, 255, 0.08);
+  box-shadow: 0 0 40px rgba(79, 140, 255, 0.2);
+}
 .preview-wrap { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; position: relative; }
 .preview {
   width: 100%;
   max-height: min(62vh, 760px);
   min-height: 300px;
   background: #000;
-  border-radius: 8px;
+  border-radius: 12px;
   outline: none;
 }
 .preview-broken {
@@ -464,26 +475,26 @@ export default { name: 'Trim' }
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: #0d0e10;
-  border-radius: 8px;
+  background: var(--sv-panel-deep);
+  border-radius: 12px;
   padding: 20px;
   text-align: center;
 }
 .pb-title { font-size: 14px; font-weight: 600; color: #fbbf24; }
-.pb-desc { font-size: 12.5px; color: #9aa0a6; max-width: 520px; line-height: 1.7; }
+.pb-desc { font-size: 12.5px; color: #9aa1ad; max-width: 520px; line-height: 1.7; }
 .mark-btns { display: flex; gap: 8px; justify-content: center; }
-.panel { background: #1a1c1f; }
+.panel { background: linear-gradient(180deg, #1c2027, #181b21); }
 .row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .row:last-child { margin-bottom: 0; }
-.lbl { width: 64px; flex-shrink: 0; font-size: 13px; color: #9aa0a6; }
+.lbl { width: 64px; flex-shrink: 0; font-size: 13px; color: #9aa1ad; }
 .slider { flex: 1; }
-.dash { color: #9aa0a6; }
+.dash { color: #9aa1ad; }
 .out-input {
   flex: 1;
-  background: #141517;
-  border: 1px solid #2a2d31;
-  border-radius: 6px;
-  color: #e8eaed;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #e9ecf2;
   font-size: 13px;
   padding: 5px 10px;
   min-width: 0;
@@ -495,7 +506,7 @@ export default { name: 'Trim' }
 .res-line.ok { color: #34d399; }
 .res-line.err { color: #f87171; }
 .res-line.warn { color: #fbbf24; }
-.res-detail { font-size: 12.5px; color: #9aa0a6; margin-bottom: 6px; word-break: break-all; }
+.res-detail { font-size: 12.5px; color: #9aa1ad; margin-bottom: 6px; word-break: break-all; }
 .res-detail.warn { color: #fbbf24; }
 .res-btns { display: flex; gap: 8px; margin-top: 8px; }
 </style>

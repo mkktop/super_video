@@ -100,15 +100,15 @@ function onVisible() {
 <style scoped>
 .logs-page { display: flex; flex-direction: column; gap: 14px; }
 .page-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-h1 { font-size: 20px; font-weight: 700; }
-.sub { font-size: 12.5px; color: #9aa0a6; margin-top: 4px; }
+h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
+.sub { font-size: 12.5px; color: #9aa1ad; margin-top: 4px; }
 .head-actions { display: flex; align-items: center; gap: 10px; }
-.as-label { font-size: 12.5px; color: #9aa0a6; }
+.as-label { font-size: 12.5px; color: #9aa1ad; }
 
 .log-box {
-  background: #101113;
-  border: 1px solid #26292e;
-  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
   padding: 12px 14px;
   height: calc(100vh - 175px);
   min-height: 240px;
@@ -116,7 +116,7 @@ h1 { font-size: 20px; font-weight: 700; }
   font-family: Consolas, 'Courier New', monospace;
   font-size: 12px;
   line-height: 1.65;
-  color: #c9cdd4;
+  color: #c9cdd6;
 }
 .log-line { white-space: pre-wrap; word-break: break-all; }
 .log-line.err { color: #f87171; }

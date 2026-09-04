@@ -154,6 +154,16 @@ cd app && pnpm install && pnpm build && npx electron .
 
 开发模式下数据目录为仓库根目录（打包版才使用安装目录外的 `super_video_data`）。
 
+### 纯浏览器 UI 预览（不起 Electron/后端）
+
+```bash
+cd app && pnpm preview   # → http://localhost:5199/preview.html
+```
+
+渲染层连本地 mock（`src/renderer/src/preview/mock.ts` 编造 window.sv/后端 API/WS 事件流，
+预览图由 `vite.preview.config.ts` 中间件回 SVG 占位图），可脱离 Python 环境走查全部页面样式；
+数据仅存内存，刷新即还原。该入口不进打包产物。
+
 ### 测试
 
 ```bash

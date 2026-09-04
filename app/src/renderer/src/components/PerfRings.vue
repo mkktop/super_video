@@ -69,6 +69,7 @@ const rings = computed<Ring[]>(() => {
             r="36"
             class="ring-val"
             :stroke="r.color"
+            :style="{ color: r.color }"
             :stroke-dasharray="`${(RING_C * Math.min(r.pct, 100)) / 100} ${RING_C}`"
           />
         </svg>
@@ -92,12 +93,18 @@ const rings = computed<Ring[]>(() => {
   display: flex;
   align-items: center;
   gap: 14px;
-  background: #1e2023;
-  border: 1px solid #26292e;
-  border-radius: 12px;
+  background: linear-gradient(180deg, #1c2027, #181b21);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
+}
+.gauge:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
 }
 .ring-wrap { position: relative; width: 88px; height: 88px; flex-shrink: 0; }
-.ring-track { fill: none; stroke: #2a2d31; stroke-width: 8; }
+.ring-track { fill: none; stroke: rgba(255, 255, 255, 0.07); stroke-width: 8; }
 .ring-val {
   fill: none;
   stroke-width: 8;
@@ -105,6 +112,7 @@ const rings = computed<Ring[]>(() => {
   transform: rotate(-90deg);
   transform-origin: 44px 44px;
   transition: stroke-dasharray 0.5s ease-out;
+  filter: drop-shadow(0 0 5px currentColor);
 }
 .ring-pct {
   position: absolute;
@@ -113,21 +121,21 @@ const rings = computed<Ring[]>(() => {
   align-items: center;
   justify-content: center;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 750;
   font-variant-numeric: tabular-nums;
 }
 .gauge-body { min-width: 0; }
-.g-label { font-size: 12.5px; color: #9aa0a6; }
+.g-label { font-size: 12.5px; color: #9aa1ad; }
 .g-value {
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 750;
   margin: 3px 0 2px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .g-sub {
   font-size: 11.5px;
-  color: #8a919c;
+  color: #8a919d;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

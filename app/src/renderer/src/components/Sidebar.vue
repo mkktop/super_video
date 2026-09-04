@@ -103,63 +103,69 @@ const miniPerf = computed(() => {
 
 <style scoped>
 .sidebar {
-  width: 190px;
+  width: 196px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: var(--sv-panel);
-  border-right: 1px solid var(--sv-border);
-  padding: 14px 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012));
+  border-right: 1px solid var(--sv-border-soft);
+  padding: 14px 10px 12px;
 }
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 .nav-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
-  border: none;
-  border-radius: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
   background: transparent;
   color: var(--sv-text-dim);
   font-size: 13.5px;
   cursor: pointer;
   position: relative;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.16s, color 0.16s, border-color 0.16s, transform 0.16s;
   text-align: left;
 }
-.nav-item:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+.nav-item:hover:not(:disabled):not(.active) {
+  background: rgba(255, 255, 255, 0.045);
   color: var(--sv-text);
+  transform: translateX(2px);
 }
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(79, 140, 255, 0.16), rgba(139, 92, 246, 0.08));
+  background: linear-gradient(90deg, rgba(79, 140, 255, 0.17), rgba(139, 92, 246, 0.1));
+  border-color: rgba(79, 140, 255, 0.28);
   color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 14px rgba(79, 140, 255, 0.12);
 }
+.nav-item.active .icon { color: #7fb0ff; filter: drop-shadow(0 0 6px rgba(79, 140, 255, 0.55)); }
 .nav-item.active::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 22%;
-  height: 56%;
+  left: -1px;
+  top: 24%;
+  height: 52%;
   width: 3px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, #4f8cff, #8b5cf6);
+  border-radius: 3px;
+  background: var(--sv-grad);
+  box-shadow: 0 0 10px rgba(79, 140, 255, 0.8);
 }
 .nav-item:disabled {
   opacity: 0.42;
   cursor: default;
 }
-.icon { display: inline-flex; }
+.icon { display: inline-flex; transition: color 0.16s; }
 .label { flex: 1; }
 .badge {
-  background: #4f8cff;
+  background: var(--sv-grad);
   color: #fff;
   font-size: 11px;
+  font-weight: 600;
   min-width: 18px;
   height: 18px;
   border-radius: 9px;
@@ -167,32 +173,35 @@ const miniPerf = computed(() => {
   align-items: center;
   justify-content: center;
   padding: 0 5px;
+  box-shadow: 0 0 10px rgba(79, 140, 255, 0.45);
 }
 .badge-err {
-  background: transparent;
+  background: rgba(248, 113, 113, 0.12);
   color: #f87171;
   border: 1px solid rgba(248, 113, 113, 0.55);
-  min-width: 16px;
-  height: 16px;
-  border-radius: 8px;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 9px;
   margin-left: -2px;
+  box-shadow: none;
+  animation: err-breathe 2.4s ease-in-out infinite;
 }
-.soon {
-  font-size: 10px;
-  color: #8a919c;
-  border: 1px solid #3a3f45;
-  border-radius: 4px;
-  padding: 1px 4px;
+@keyframes err-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.25); }
+  50% { box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.12); }
 }
 .foot-col {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .foot-perf {
   font-size: 11px;
-  color: #8a919c;
-  padding: 0 12px;
+  color: var(--sv-text-faint);
+  padding: 6px 10px;
+  border: 1px solid var(--sv-border-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -200,20 +209,31 @@ const miniPerf = computed(() => {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 8px 12px;
+  padding: 6px 10px 2px;
   font-size: 12px;
-  color: #8a919c;
+  color: var(--sv-text-faint);
 }
 .dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
+  position: relative;
 }
 .dot.on {
   background: #34d399;
   box-shadow: 0 0 6px rgba(52, 211, 153, 0.8);
 }
-.dot.off {
-  background: #f87171;
+.dot.on::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid rgba(52, 211, 153, 0.55);
+  animation: dot-halo 2.2s ease-out infinite;
 }
+@keyframes dot-halo {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  70%, 100% { transform: scale(1.7); opacity: 0; }
+}
+.dot.off { background: #f87171; }
 </style>

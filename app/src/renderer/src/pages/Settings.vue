@@ -698,7 +698,7 @@ async function saveSrProfiling(v: boolean) {
   width: 100%;
   min-width: 560px; /* 窄于此宽度改为横向滚动,不挤压内部控件 */
 }
-h1 { font-size: 20px; font-weight: 700; }
+h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
 
 /* 两列按语义分组 + 高度配平（左≈右，全屏下底部对齐）：
    宽屏只把卡片撑宽,永远不挤第三列；窄窗口 auto-fit 回落单列,两列各自整列下移 */
@@ -712,23 +712,23 @@ h1 { font-size: 20px; font-weight: 700; }
 
 /* 统一卡片骨架：头部(标题+副题) + 分隔线行式主体 */
 .card {
-  background: #1a1c1f;
-  border: 1px solid #26292e;
-  border-radius: 12px;
+  background: linear-gradient(180deg, #1c2027, #181b21);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
   overflow: hidden;
 }
 .card-head {
   padding: 14px 18px 12px;
-  border-bottom: 1px solid #23262b;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent);
 }
-.card-title { font-size: 14px; font-weight: 650; color: #e8eaed; }
-.card-sub { font-size: 12px; color: #9aa0a6; margin-top: 3px; }
+.card-title { font-size: 14px; font-weight: 650; color: #e9ecf2; }
+.card-sub { font-size: 12px; color: #9aa1ad; margin-top: 3px; }
 .card-body { padding: 4px 18px 14px; }
 
 /* 行式布局：相邻行以发丝线分隔 */
 .row { padding: 12px 0; }
-.row.bordered-top { border-top: 1px solid #212429; margin-top: 4px; }
+.row.bordered-top { border-top: 1px solid rgba(255, 255, 255, 0.05); margin-top: 4px; }
 .row.stack {
   display: flex;
   flex-direction: column;
@@ -749,13 +749,13 @@ h1 { font-size: 20px; font-weight: 700; }
   gap: 12px;
   flex-wrap: wrap;
 }
-.row-label { font-weight: 600; font-size: 13px; color: #e8eaed; }
-.row-text { font-weight: 600; font-size: 13px; color: #e8eaed; }
+.row-label { font-weight: 600; font-size: 13px; color: #e9ecf2; }
+.row-text { font-weight: 600; font-size: 13px; color: #e9ecf2; }
 .row-text small {
   display: block;
   font-weight: 400;
   font-size: 12px;
-  color: #9aa0a6;
+  color: #9aa1ad;
   margin-top: 3px;
   max-width: 540px; /* 超宽卡片上限宽换行,避免 12px 文字拉满整行难读 */
 }
@@ -765,14 +765,14 @@ h1 { font-size: 20px; font-weight: 700; }
   gap: 8px;
   flex-wrap: wrap;
 }
-.hint { color: #9aa0a6; font-size: 12px; margin: 2px 0 6px; line-height: 1.55; max-width: 780px; }
-.hint-inline { color: #9aa0a6; font-size: 12px; }
+.hint { color: #9aa1ad; font-size: 12px; margin: 2px 0 6px; line-height: 1.55; max-width: 780px; }
+.hint-inline { color: #9aa1ad; font-size: 12px; }
 .save-row {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
-  border-top: 1px solid #212429;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
   margin-top: 2px;
   padding-top: 10px;
 }
@@ -783,9 +783,9 @@ h1 { font-size: 20px; font-weight: 700; }
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  background: #141517;
-  border: 1px solid #26292e;
-  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
   padding: 8px 12px;
   margin-top: 10px;
   min-height: 34px;
@@ -793,12 +793,12 @@ h1 { font-size: 20px; font-weight: 700; }
 .out-path {
   font-family: Consolas, 'Courier New', monospace;
   font-size: 12.5px;
-  color: #c9cdd4;
+  color: #c9cdd6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.out-path.empty { color: #7c838c; font-family: inherit; }
+.out-path.empty { color: #7c838f; font-family: inherit; }
 .out-actions { display: flex; gap: 8px; margin-top: 10px; }
 
 .version-line { display: inline-flex; align-items: center; gap: 8px; }
@@ -808,7 +808,7 @@ h1 { font-size: 20px; font-weight: 700; }
   white-space: pre-wrap;
   font-size: 12px;
   line-height: 1.6;
-  color: #c9cdd4;
+  color: #c9cdd6;
   max-height: 240px;
   overflow-y: auto;
 }
@@ -822,6 +822,6 @@ h1 { font-size: 20px; font-weight: 700; }
   align-items: baseline;
 }
 .spec-grid > span { display: inline-flex; gap: 10px; align-items: baseline; min-width: 0; }
-.spec-grid .k { color: #9aa0a6; font-size: 12.5px; flex-shrink: 0; width: 60px; }
-.spec-grid > span:nth-child(even) { color: #e8eaed; font-size: 13px; }
+.spec-grid .k { color: #9aa1ad; font-size: 12.5px; flex-shrink: 0; width: 60px; }
+.spec-grid > span:nth-child(even) { color: #e9ecf2; font-size: 13px; }
 </style>

@@ -348,15 +348,17 @@ function retryWithParams(t: Task) {
     </div>
 
     <div class="filter-bar">
-      <button
-        v-for="ft in filterTabs"
-        :key="ft.key"
-        class="filter-btn"
-        :class="{ on: filter === ft.key }"
-        @click="filter = ft.key"
-      >
-        {{ ft.label }}
-      </button>
+      <div class="seg">
+        <button
+          v-for="ft in filterTabs"
+          :key="ft.key"
+          class="filter-btn"
+          :class="{ on: filter === ft.key }"
+          @click="filter = ft.key"
+        >
+          {{ ft.label }}
+        </button>
+      </div>
       <span class="fb-spacer" />
       <NInput
         v-model:value="q"
@@ -416,38 +418,48 @@ function retryWithParams(t: Task) {
   gap: 16px;
   flex-wrap: wrap;
 }
-h1 { font-size: 20px; font-weight: 700; }
-.sub { font-size: 12.5px; color: #9aa0a6; margin-top: 4px; }
+h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
+.sub { font-size: 12.5px; color: #9aa1ad; margin-top: 4px; }
 .filter-bar { display: flex; gap: 6px; align-items: center; }
 .fb-spacer { flex: 1; }
+/* 分段式筛选：凹槽容器 + 浮起选中片 */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.filter-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9aa1ad;
+  font-size: 12.5px;
+  padding: 4px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.16s;
+}
+.filter-btn:hover { color: #e9ecf2; }
+.filter-btn.on {
+  background: linear-gradient(180deg, #2a3040, #232837);
+  border-color: rgba(79, 140, 255, 0.42);
+  color: #8ab4ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+.loading { margin-top: 30vh; text-align: center; color: #9aa1ad; }
 .batch-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
   border: 1px solid rgba(79, 140, 255, 0.4);
-  border-radius: 8px;
-  background: rgba(79, 140, 255, 0.07);
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(79, 140, 255, 0.09), rgba(79, 140, 255, 0.03) 60%, transparent);
 }
-.bb-count { font-size: 13px; color: #e8eaed; }
+.bb-count { font-size: 13px; color: #e9ecf2; }
 .bb-spacer { flex: 1; }
-.filter-btn {
-  border: 1px solid #2a2d31;
-  background: #1e2023;
-  color: #9aa0a6;
-  font-size: 12.5px;
-  padding: 5px 14px;
-  border-radius: 7px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.filter-btn:hover { color: #e8eaed; }
-.filter-btn.on {
-  background: rgba(79, 140, 255, 0.14);
-  border-color: rgba(79, 140, 255, 0.5);
-  color: #4f8cff;
-}
-.loading { margin-top: 30vh; text-align: center; color: #9aa0a6; }
 .task-dragging { opacity: 0.45; }
 .task-drag-over { box-shadow: 0 0 0 2px #4f8cff; }
 
@@ -458,10 +470,10 @@ h1 { font-size: 20px; font-weight: 700; }
   gap: 12px;
   padding: 10px 14px;
   border: 1px solid rgba(251, 191, 36, 0.45);
-  border-radius: 8px;
-  background: rgba(251, 191, 36, 0.08);
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(251, 191, 36, 0.1), rgba(251, 191, 36, 0.04) 60%, transparent);
   font-size: 13px;
-  color: #e8eaed;
+  color: #e9ecf2;
 }
 .qd-count {
   font-size: 16px;
@@ -472,9 +484,9 @@ h1 { font-size: 20px; font-weight: 700; }
 .gate-banner {
   padding: 10px 14px;
   border: 1px solid rgba(79, 140, 255, 0.4);
-  border-radius: 8px;
-  background: rgba(79, 140, 255, 0.07);
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(79, 140, 255, 0.08), rgba(79, 140, 255, 0.03) 60%, transparent);
   font-size: 13px;
-  color: #9aa0a6;
+  color: #9aa1ad;
 }
 </style>

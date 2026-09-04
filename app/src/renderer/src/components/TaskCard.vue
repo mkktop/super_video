@@ -144,6 +144,9 @@ async function onDelete() {
   }
 }
 
+// naive Line 进度的渐变色只认 { stops: [from, to] } 对象形态；完成态保持绿色
+const gradFill: { stops: [string, string] } = { stops: ['#4f8cff', '#8b5cf6'] }
+
 function onOpenFolder() {
   window.sv.showInFolder(props.task.output_path)
 }
@@ -155,7 +158,7 @@ function onOpenInputFolder() {
 </script>
 
 <template>
-  <n-card size="small" :bordered="true" class="task-card">
+  <n-card size="small" :bordered="true" class="task-card" :class="'st-' + task.status">
     <div class="row1">
       <NCheckbox
         v-if="selectMode"
@@ -199,6 +202,7 @@ function onOpenInputFolder() {
         :status="task.status === 'done' ? 'success' : 'default'"
         :show-indicator="false"
         :height="8"
+        :color="task.status === 'done' ? undefined : gradFill"
       />
       <div class="stats">
         <span>{{ scaleLabel }}</span>
@@ -305,19 +309,57 @@ function onOpenInputFolder() {
 </template>
 
 <style scoped>
-.task-card { background: #1e2023; }
+/* 卡片即画布：状态脊线 + 悬浮微抬；NCard 圆角经主题已是 14px */
+.task-card {
+  position: relative;
+  background: linear-gradient(180deg, #1c2027, #181b21);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  overflow: visible;
+}
+/* 状态脊线：一眼分清队列里的任务处于什么状态 */
+.task-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #3a4150;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+.task-card.st-running::before { background: var(--sv-grad); box-shadow: 0 0 10px rgba(79, 140, 255, 0.65); }
+.task-card.st-done::before { background: #34d399; opacity: 0.75; }
+.task-card.st-failed::before { background: #f87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.4); }
+.task-card.st-canceled::before { background: #fbbf24; opacity: 0.7; }
+.task-card:hover {
+  border-color: rgba(255, 255, 255, 0.13);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+}
 .row1 { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .sel-box { margin-left: 2px; flex-shrink: 0; }
 .names { flex: 1; }
 .names { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.arrow, .out { color: #9aa0a6; font-size: 13px; }
+.arrow, .out { color: #9aa1ad; font-size: 13px; }
 .out { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badges { display: flex; gap: 6px; flex-shrink: 0; }
 .progress-wrap { margin-top: 10px; }
+/* 运行中的进度条：渐变填充上叠一道流光 */
+.st-running :deep(.n-progress-graph-line-fill) { position: relative; overflow: hidden; }
+.st-running :deep(.n-progress-graph-line-fill)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  animation: fill-sheen 1.6s ease-in-out infinite;
+}
+@keyframes fill-sheen { 100% { transform: translateX(100%); } }
 .stats {
   display: flex; justify-content: space-between; margin-top: 6px;
-  font-size: 12px; color: #9aa0a6; font-variant-numeric: tabular-nums;
+  font-size: 12px; color: #9aa1ad; font-variant-numeric: tabular-nums;
 }
 .err { margin-top: 8px; }
 .err-text { color: #f87171; font-size: 12px; word-break: break-all; white-space: pre-wrap; }
@@ -325,17 +367,28 @@ function onOpenInputFolder() {
 .preview-broken {
   width: 88px;
   height: 50px;
-  border-radius: 6px;
-  background: #1d1f22;
-  color: #8a919c;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  color: #8a919d;
   font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .preview {
-  max-height: 96px; max-width: 45%; border-radius: 6px; border: 1px solid #2a2d31;
+  max-height: 96px; max-width: 45%; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.09);
   object-fit: contain; cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+/* 悬停放大预览：像捏住一角掀开看细节 */
+.preview:hover:not(.gone) {
+  transform: scale(1.6);
+  transform-origin: left bottom;
+  border-color: rgba(79, 140, 255, 0.55);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  z-index: 6;
+  position: relative;
 }
 /* 源文件已删：预览不再充当对比入口（置灰+默认光标），缩略图本身仍保留 */
 .preview.gone { cursor: default; opacity: 0.45; }
@@ -350,19 +403,19 @@ function onOpenInputFolder() {
 .qbtn {
   width: 22px;
   height: 22px;
-  border: 1px solid #2a2d31;
+  border: 1px solid var(--sv-border);
   border-radius: 6px;
-  background: #1a1c1f;
-  color: #9aa0a6;
+  background: #20242c;
+  color: #9aa1ad;
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-.qbtn:hover:not(:disabled) { border-color: #4f8cff; color: #4f8cff; }
+.qbtn:hover:not(:disabled) { border-color: #4f8cff; color: #6fa0ff; background: rgba(79, 140, 255, 0.1); }
 .qbtn:disabled { opacity: 0.35; cursor: default; }
 .srlog-pre {
   margin: 0;
@@ -372,9 +425,9 @@ function onOpenInputFolder() {
   font-family: Consolas, 'Courier New', monospace;
   font-size: 12px;
   line-height: 1.65;
-  color: #c9cdd4;
+  color: #c9cdd6;
   white-space: pre-wrap;
   word-break: break-all;
 }
-.srlog-msg { min-height: 120px; display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 12.5px; }
+.srlog-msg { min-height: 120px; display: flex; align-items: center; justify-content: center; color: #9aa1ad; font-size: 12.5px; }
 </style>

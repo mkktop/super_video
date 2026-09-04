@@ -156,31 +156,31 @@ const gpuEver = computed(
   align-items: center;
   justify-content: space-between;
 }
-h1 { font-size: 20px; font-weight: 700; }
+h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
 h2 { font-size: 15px; font-weight: 600; color: #c6cad0; }
 
 .range-btns { display: flex; gap: 6px; }
 .range-btns button {
-  border: 1px solid #2a2d31;
-  background: #1e2023;
-  color: #9aa0a6;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: #9aa1ad;
   font-size: 12.5px;
   padding: 5px 12px;
-  border-radius: 7px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s;
 }
-.range-btns button:hover { color: #e8eaed; }
+.range-btns button:hover { color: #e9ecf2; }
 .range-btns button.on {
-  background: rgba(79, 140, 255, 0.14);
+  background: rgba(79, 140, 255, 0.16);
   border-color: rgba(79, 140, 255, 0.5);
-  color: #4f8cff;
+  color: #8ab4ff;
 }
 
 .card {
-  background: #1e2023;
-  border: 1px solid #26292e;
-  border-radius: 12px;
+  background: linear-gradient(180deg, #1c2027, #181b21);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
 }
 
 .off-tip {
@@ -208,14 +208,14 @@ h2 { font-size: 15px; font-weight: 600; color: #c6cad0; }
   text-overflow: ellipsis;
   max-width: 260px;
 }
-.tc-progress { font-size: 12.5px; color: #9aa0a6; font-variant-numeric: tabular-nums; }
+.tc-progress { font-size: 12.5px; color: #9aa1ad; font-variant-numeric: tabular-nums; }
 .tc-proc { display: flex; gap: 22px; margin-left: auto; }
 .tc-proc > div { text-align: center; }
 .tc-proc b { font-size: 16px; font-weight: 700; display: block; font-variant-numeric: tabular-nums; }
-.tc-proc span { font-size: 11px; color: #8a919c; }
-.tc-proc-wait { font-size: 12px; color: #8a919c; }
+.tc-proc span { font-size: 11px; color: #8a919d; }
+.tc-proc-wait { font-size: 12px; color: #8a919d; }
 
 .chart-card { padding: 16px 18px 12px; }
 .chart-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
-.chart-note { font-size: 11.5px; color: #8a919c; }
+.chart-note { font-size: 11.5px; color: #8a919d; }
 </style>

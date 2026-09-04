@@ -177,8 +177,8 @@ function loupeTransform() {
   overflow: hidden;
   user-select: none;
   cursor: ew-resize;
-  background: #0d0e10;
-  border-radius: 8px;
+  background: var(--sv-panel-deep);
+  border-radius: 10px;
 }
 .compare.louping { cursor: crosshair; }
 /* 两层同尺寸 contain，clip-path 裁剪——像素级对齐，letterbox 也一致 */
@@ -203,8 +203,8 @@ function loupeTransform() {
   bottom: 0;
   left: -1px;
   width: 2px;
-  background: #4f8cff;
-  box-shadow: 0 0 8px rgba(79, 140, 255, 0.8);
+  background: linear-gradient(180deg, transparent, #6fa0ff 12%, #c4d5ff 50%, #6fa0ff 88%, transparent);
+  box-shadow: 0 0 10px rgba(79, 140, 255, 0.8);
 }
 .knob {
   position: absolute;
@@ -214,13 +214,13 @@ function loupeTransform() {
   height: 32px;
   margin-top: -16px;
   border-radius: 50%;
-  background: #4f8cff;
+  background: linear-gradient(135deg, #4f8cff, #7d5cf0);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5), 0 0 14px rgba(79, 140, 255, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .label {
   position: absolute;
