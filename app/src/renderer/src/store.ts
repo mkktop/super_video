@@ -396,6 +396,12 @@ export async function initStore() {
     window.sv.win.setCloseToTray(store.settings.close_to_tray === true)
     // 更新通道同样由主进程消费：须在下方启动自动检查之前同步，否则首查用错通道
     window.sv.setUpdateChannel(store.settings.update_channel === 'preview' ? 'preview' : 'stable')
+    // 下载源偏好同理（检查/下载的源顺序），也须先于首查
+    window.sv.setUpdateSource(
+      store.settings.update_source === 'r2' || store.settings.update_source === 'github'
+        ? store.settings.update_source
+        : 'auto',
+    )
     await Promise.all([refreshTasks(), refreshStats(), refreshPerf(), refreshTrt()])
     // renderer 中途重启：把已 running 的任务补进通知追踪集合
     for (const t of store.tasks) if (t.status === 'running') runningIds.add(t.id)

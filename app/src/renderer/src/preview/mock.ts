@@ -283,7 +283,8 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
         running: { backend: 'trt', detail: 'TensorRT 10.12 · CUDA 12.8' },
       }))
     }
-    if (method === 'GET' && path === '/api/settings') return Promise.resolve(json({}))
+    if (method === 'GET' && path === '/api/settings')
+      return Promise.resolve(json({ update_channel: 'stable', update_source: 'auto' }))
     if (method === 'PUT' && path === '/api/settings') return Promise.resolve(json({ ok: true }))
     if (method === 'GET' && path === '/api/tasks') {
       const q = (url.searchParams.get('q') ?? '').toLowerCase()
@@ -457,6 +458,7 @@ function installSvBridge(): void {
     installUpdate: () => Promise.resolve(),
     updateState: () => Promise.resolve({ ready: '', downloading: false, source: 'github' }),
     setUpdateChannel: () => {},
+    setUpdateSource: () => {},
     onUpdateProgress: () => () => {},
     onUpdateReady: () => () => {},
     pickVideo: () => Promise.resolve(['D:\\videos\\anime_ep01_1080p.mkv']),

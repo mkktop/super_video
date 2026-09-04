@@ -503,14 +503,19 @@ let downloadSource: 'github' | 'r2' = 'github'
 // 更新通道：renderer 读取设置后经 IPC 同步（照 close_to_tray 模式）。默认稳定——
 // 存量用户与未同步前（启动自动检查竞态）都只看正式版 Release，宁保守不尝鲜
 let updateChannel: 'stable' | 'preview' = 'stable'
+// 更新下载源偏好：auto=GitHub 主源、网络不通才切 R2（旧行为）；github=仅 GitHub
+// 不使用备用源（代理用户可能 R2 域不通）；r2=R2 优先、失败回落 GitHub（国内直连快）
+let updateSource: 'auto' | 'github' | 'r2' = 'auto'
 
 // ---- 备用下载源（R2 镜像，v0.5 起）----
 // 动机：国内网络对 GitHub 连通性时好时坏（本机裸连实测 GitHub Release 0/2、
-// R2 自定义域 5/5 全成）。GitHub 连不上时自动切 R2 兜底；GitHub 仍是事实源
-// （通道判定/更新说明/预发布语义都在 Release 上），每次检查先走 GitHub，
-// 网络恢复即自动回主源。R2 布局：安装包按原名平铺 + latest.yml（正式版覆盖
-// 上传）；channel 保持不设——GenericProvider 固定读 latest.yml，预览用户在
-// 兜底路径看到最新正式版属合理降级（版本比较仍由 newerVersion 防降级）。
+// R2 自定义域 5/5 全成）。默认 GitHub 连不上时自动切 R2 兜底；GitHub 仍是事实源
+// （通道判定/更新说明/预发布语义都在 Release 上），网络恢复即自动回主源。
+// 源优先级自 v0.4.8 起可选（update_source）。R2 布局：安装包按原名平铺，
+// 通道文件按通道分名——正式版 latest.yml、预览版 preview.yml（同名内容不同版，
+// GenericProvider 按 updater.channel 取 {channel}.yml 且 404 不回退，所以预览
+// 客户端设 channel 与 CI 同步 preview.yml 必须同版上线；旧版预览客户端不设
+// channel 读 latest.yml 只收正式版，属设计内降级）。
 const R2_UPDATE_URL = 'https://super-video.kaikun.top/'
 const GITHUB_FEED = { provider: 'github', owner: 'mkktop', repo: 'super_video' } as const
 // 最近一次成功检查所用的源：下载从该源发起，失败再切另一源重试
@@ -528,8 +533,18 @@ function isNetworkError(e: unknown): boolean {
   return /fetch failed|socket|timed[-_ ]?out|tunnel|network|getaddrinfo|abort|net::err_/i.test(msg)
 }
 
+/** R2 上没有该通道的 channel 文件（preview.yml 未随版同步/上传被跳过）：HTTP 404
+ * 语义。newError 包装后原始 statusCode 不一定保留，code 与文案都探一遍 */
+function isChannelFileMissing(e: unknown): boolean {
+  const err = e as { statusCode?: number; message?: string }
+  return (
+    err.statusCode === 404 ||
+    /CHANNEL_FILE_NOT_FOUND|Cannot find channel/i.test(String(err.message ?? ''))
+  )
+}
+
 function useUpdateSource(u: import('electron-updater').AppUpdater, src: 'github' | 'r2'): void {
-  // string = generic provider（R2）；对象 = GitHub provider。channel 均不设
+  // string = generic provider（R2）；对象 = GitHub provider
   u.setFeedURL(src === 'r2' ? R2_UPDATE_URL : GITHUB_FEED)
 }
 
@@ -680,13 +695,29 @@ async function checkUpdateManually(allowMirror: boolean): Promise<{
   if (updaterBusy) return { status: 'busy', current }
   updaterBusy = true
   try {
-    // 主源优先：仅手动检查（allowMirror）允许 GitHub 连通失败后切 R2 重查——
-    // 启动自动检查不打备用源（省 R2 请求），连不上就保持原样
-    let src: 'github' | 'r2' = 'github'
+    // 源顺序按用户偏好：仅 GitHub 不回落（明确不用备用源）；R2 优先 = R2 打头、
+    // 网络不通回落 GitHub；自动 = GitHub 打头，仅手动检查（allowMirror）允许切 R2
+    // （启动自动检查不打备用源，省 R2 请求，连不上就保持原样）
+    const order: ('github' | 'r2')[] =
+      updateSource === 'github'
+        ? ['github']
+        : updateSource === 'r2'
+          ? ['r2', 'github']
+          : allowMirror
+            ? ['github', 'r2']
+            : ['github']
+    let src: 'github' | 'r2' = order[0]
     let outcome = await checkAtSource(src)
-    if (allowMirror && outcome.err && isNetworkError(outcome.err)) {
-      console.warn('[updater] GitHub 检查失败，切换备用源 R2 重试:', outcome.err)
-      src = 'r2'
+    for (let i = 1; i < order.length && outcome.err && isNetworkError(outcome.err); i++) {
+      console.warn(`[updater] ${src} 检查失败，切换下一源重试:`, outcome.err)
+      src = order[i]
+      outcome = await checkAtSource(src)
+    }
+    // R2 上没有该通道文件（preview.yml 未随版同步）时回落 GitHub，
+    // 别把"备用源没这份"报成"检查失败"
+    if (outcome.err && src === 'r2' && isChannelFileMissing(outcome.err)) {
+      console.warn('[updater] R2 缺该通道的更新文件，回落 GitHub:', outcome.err)
+      src = 'github'
       outcome = await checkAtSource(src)
     }
     if (outcome.err) {
@@ -721,6 +752,11 @@ async function checkAtSource(
   // 稳定通道必须显式 false：electron-updater 的默认值是"装机版本带预发布段即
   // true"，预览版装机切回稳定通道时若不覆盖仍会收到预览推送
   autoUpdater.allowPrerelease = updateChannel === 'preview'
+  // 通道文件选择：GitHub provider 按 Release 的 prerelease 段本就取 preview.yml，
+  // 但 R2(GenericProvider) 固定读 {channel}.yml——预览通道必须显式置 channel 才
+  // 能吃到 R2 的 preview.yml。channel setter 会顺手打开 allowDowngrade，关回去防降级
+  autoUpdater.channel = updateChannel === 'preview' ? 'preview' : 'latest'
+  autoUpdater.allowDowngrade = false
   try {
     return { result: await autoUpdater.checkForUpdates() }
   } catch (err) {
@@ -734,9 +770,14 @@ async function downloadUpdate(): Promise<{ ok: boolean; error?: string }> {
   readyVersion = '' // 重新下载覆盖旧包，状态回到下载中
   try {
     // 从最近一次成功检查的源发起；网络错误则切另一源重试一次
-    // （国内常见"检查通、下载域不通"：github.com 可达但下载 CDN 连不上）
+    // （国内常见"检查通、下载域不通"：github.com 可达但下载 CDN 连不上）。
+    // 仅 GitHub 模式不使用备用源；其余按检查实际命中的源打头
     const sources: ('github' | 'r2')[] =
-      checkSource === 'github' ? ['github', 'r2'] : ['r2', 'github']
+      updateSource === 'github'
+        ? ['github']
+        : checkSource === 'github'
+          ? ['github', 'r2']
+          : ['r2', 'github']
     let lastErr: unknown = null
     for (const src of sources) {
       downloadSource = src // 每轮尝试都让进度事件带上真实源（切源后 UI 跟着变）
@@ -823,6 +864,11 @@ ipcMain.handle('app:update-state', () => ({
 // 更新通道同步：Settings 切换与 store 启动加载都会发；下次检查更新即生效
 ipcMain.on('app:set-update-channel', (_e, v: unknown) => {
   updateChannel = v === 'preview' ? 'preview' : 'stable'
+})
+
+// 更新下载源同步：同上，检查/下载的源顺序按它排
+ipcMain.on('app:set-update-source', (_e, v: unknown) => {
+  updateSource = v === 'r2' ? 'r2' : v === 'github' ? 'github' : 'auto'
 })
 
 // ---- 自绘标题栏的窗口控制 ----

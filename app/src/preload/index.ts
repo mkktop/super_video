@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('sv', {
   // 更新通道同步给主进程（electron-updater allowPrerelease 的开关来源）
   setUpdateChannel: (channel: 'stable' | 'preview') =>
     ipcRenderer.send('app:set-update-channel', channel),
+  // 更新下载源同步给主进程（检查/下载走哪个源：auto/github/r2）
+  setUpdateSource: (source: 'auto' | 'github' | 'r2') =>
+    ipcRenderer.send('app:set-update-source', source),
   onUpdateProgress: (cb: (p: { percent: number; source: 'github' | 'r2' }) => void) => {
     const fn = (_e: IpcRendererEvent, p: { percent: number; source: 'github' | 'r2' }) => cb(p)
     ipcRenderer.on('app:update-progress', fn)

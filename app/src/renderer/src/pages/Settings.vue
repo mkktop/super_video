@@ -55,9 +55,9 @@ const {
 } = useCompareCache()
 const { trcBusy, trcDownloadBytes, installTrc, uninstallTrc } = useTrtComponent()
 const {
-  checking, autoCheck, updateChannel, updateVersion, updateNotes, readyVersion,
+  checking, autoCheck, updateChannel, updateSource, updateVersion, updateNotes, readyVersion,
   downloading, downloadPercent, updateMsg, updateTag,
-  saveAutoCheck, saveUpdateChannel, checkUpdate, doDownload, doInstall, apply: applyUpdate,
+  saveAutoCheck, saveUpdateChannel, saveUpdateSource, checkUpdate, doDownload, doInstall, apply: applyUpdate,
 } = useAppUpdate()
 
 const queueDoneOptions = [
@@ -605,6 +605,17 @@ async function saveSrProfiling(v: boolean) {
               <NRadioGroup v-model:value="updateChannel" size="small" @update:value="saveUpdateChannel">
                 <NRadioButton value="stable">稳定版</NRadioButton>
                 <NRadioButton value="preview">预览版</NRadioButton>
+              </NRadioGroup>
+            </div>
+            <div class="row switch-row bordered-top">
+              <span class="row-text">
+                更新下载源
+                <small>R2 为自建备用镜像，国内直连通常更快；自动=默认 GitHub、连不上才切 R2；仅 GitHub 不使用备用源</small>
+              </span>
+              <NRadioGroup v-model:value="updateSource" size="small" @update:value="saveUpdateSource">
+                <NRadioButton value="auto">自动</NRadioButton>
+                <NRadioButton value="r2">R2 优先</NRadioButton>
+                <NRadioButton value="github">仅 GitHub</NRadioButton>
               </NRadioGroup>
             </div>
             <div class="row switch-row bordered-top">

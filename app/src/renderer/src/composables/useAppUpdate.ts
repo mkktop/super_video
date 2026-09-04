@@ -10,10 +10,12 @@ export function useAppUpdate() {
   const checking = ref(false)
   const autoCheck = ref(true)
   const updateChannel = ref<'stable' | 'preview'>('stable') // 预览版可收到 -preview.N 预发布推送
+  const updateSource = ref<'auto' | 'github' | 'r2'>('auto') // 更新下载源：auto=GitHub 失败切 R2 | r2=R2 优先 | github=仅 GitHub
 
   function apply(s: Record<string, unknown>) {
     autoCheck.value = s.auto_update_check !== false
     updateChannel.value = s.update_channel === 'preview' ? 'preview' : 'stable'
+    updateSource.value = s.update_source === 'r2' || s.update_source === 'github' ? s.update_source : 'auto'
   }
 
   // 仅 available 状态下 version 才有效——latest 时后端也回传版本号(=当前版),不能据此显示下载按钮
@@ -77,6 +79,20 @@ export function useAppUpdate() {
     void checkUpdate()
   }
 
+  async function saveUpdateSource(v: 'auto' | 'github' | 'r2') {
+    const prev = updateSource.value // v-model 已先改 ref，落库失败要回滚到切换前
+    const r = await api.saveSettings({ update_source: v })
+    if (!r.ok) {
+      message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
+      updateSource.value = prev
+      return
+    }
+    store.settings = { ...store.settings, update_source: v }
+    // 源顺序由主进程在检查/下载时消费：先同步，再立即重查让用户看到新源的结果
+    window.sv.setUpdateSource(v)
+    void checkUpdate()
+  }
+
   async function checkUpdate() {
     checking.value = true
     try {
@@ -104,8 +120,8 @@ export function useAppUpdate() {
   }
 
   return {
-    checking, autoCheck, updateChannel, updateVersion, updateNotes, readyVersion,
+    checking, autoCheck, updateChannel, updateSource, updateVersion, updateNotes, readyVersion,
     downloading, downloadPercent, updateMsg, updateTag,
-    saveAutoCheck, saveUpdateChannel, checkUpdate, doDownload, doInstall, apply,
+    saveAutoCheck, saveUpdateChannel, saveUpdateSource, checkUpdate, doDownload, doInstall, apply,
   }
 }

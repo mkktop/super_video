@@ -100,13 +100,13 @@ jobs:
 
       - name: 上传到 R2 备用源（GitHub 连通失败时客户端自动回退下载）
         # secrets 缺失（未配置备用源）时跳过，不阻塞发版；配置了 CLOUDFLARE_API_TOKEN
-        # + CLOUDFLARE_ACCOUNT_ID 即生效。latest.yml 逐版覆盖（R2 上只有"最新正式版"），
-        # 安装包按原名平铺不重名；与 GitHub Release 同步同一次构建产物，sha512 跨源一致。
-        # 预览 tag 跳过：R2 无通道概念（GenericProvider 固定读 latest.yml），预览版覆盖
-        # 上去会让连不上 GitHub 的稳定通道用户在兜底路径收到预览版——违反
-        # "R2 只存正式版、预览兜底=降级到最新正式版"的设计（preview 发布只走 GitHub
-        # prerelease，转正发同号正式版时本步骤自然把 R2 接回正式版）
-        if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-preview.')
+        # + CLOUDFLARE_ACCOUNT_ID 即生效。安装包按原名平铺不重名；与 GitHub Release
+        # 同步同一次构建产物，sha512 跨源一致。通道文件按通道分名：正式版 latest.yml、
+        # 预览版 preview.yml（内容即本次构建的 latest.yml 改名，exe 引用不变）——
+        # 客户端 GenericProvider 按 updater.channel 取 {channel}.yml（预览通道主进程
+        # 显式置 channel=preview，与本步骤同版生效），两通道各读各的互不越界：
+        # 稳定兜底只会收到正式版，预览兜底也能收到预览版。同名通道文件逐版覆盖。
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -132,9 +132,12 @@ jobs:
             Write-Host "::error::wrangler put $key 三次均失败"
             exit 1
           }
-          Put-R2 "latest.yml" "dist-app/latest.yml"
+          $isPreview = $env:GITHUB_REF_NAME -match '-preview\.'
+          $channelYml = if ($isPreview) { "preview.yml" } else { "latest.yml" }
+          if ($isPreview) { Copy-Item "dist-app/latest.yml" "dist-app/preview.yml" }
+          Put-R2 $channelYml "dist-app/$channelYml"
           Put-R2 "super_video_${ver}_setup.exe" "dist-app/super_video_${ver}_setup.exe"
-          Write-Host "R2 备用源已更新 latest.yml + super_video_${ver}_setup.exe"
+          Write-Host "R2 备用源已更新 $channelYml + super_video_${ver}_setup.exe"
 
       - name: 模型资产同步到 models-v1 Release（注册表驱动，缺什么补什么）
         # 仅 tag 发版时执行：workflow_dispatch 的 commit 上移动 models-v1 tag 是意外行为
