@@ -33,7 +33,8 @@ def test_engine_display_follows_setting(client, monkeypatch):
         calls.append(force)
         return EngineChoice("directml" if force is None else str(force), "py", "")
 
-    monkeypatch.setattr(appmod, "select_engine", fake_select)
+    from sv.server.routes import system as system_mod
+    monkeypatch.setattr(system_mod, "select_engine", fake_select)
 
     orig = client.get("/api/settings").json().get("engine", "auto")
     try:
@@ -61,7 +62,8 @@ def test_engine_display_while_running(client, monkeypatch):
     def fake_select(force=None):
         return EngineChoice("directml" if force is None else str(force), "py", "")
 
-    monkeypatch.setattr(appmod, "select_engine", fake_select)
+    from sv.server.routes import system as system_mod
+    monkeypatch.setattr(system_mod, "select_engine", fake_select)
     monkeypatch.setattr(appmod.runner, "current_id", "fake-task")
     monkeypatch.setattr(appmod.runner, "engine",
                         EngineChoice("trt", "py", "组件 CUDA + TensorRT"))

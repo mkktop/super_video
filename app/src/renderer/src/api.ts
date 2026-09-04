@@ -19,6 +19,17 @@ function _fetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, headers })
 }
 
+/** GET 并解析 JSON：非 2xx 抛 ApiError（带后端 detail）。此前多数 GET 不查
+ *  response.ok，sidecar 5xx/代理拦截时错误体被当数据静默吞、页面显示空态无因 */
+async function _get_json<T>(url: string): Promise<T> {
+  const r = await _fetch(url)
+  if (!r.ok) {
+    const body = (await r.json().catch(() => ({}))) as { detail?: string }
+    throw new ApiError(body.detail ?? `HTTP ${r.status}`, r.status)
+  }
+  return r.json() as Promise<T>
+}
+
 /** 无需鉴权的资源地址（<img>/<video> 等无法带请求头）追加 token 查询参数 */
 function withToken(url: string): string {
   return token ? `${url}${url.includes('?') ? '&' : '?'}token=${token}` : url
@@ -270,10 +281,10 @@ export interface PerfSample {
 
 export const api = {
   async models(): Promise<ModelInfo[]> {
-    return (await _fetch(`${baseUrl}/api/models`)).json()
+    return _get_json(`${baseUrl}/api/models`)
   },
   async hardware(): Promise<Record<string, unknown>> {
-    return (await _fetch(`${baseUrl}/api/hardware`)).json()
+    return _get_json(`${baseUrl}/api/hardware`)
   },
   async engine(): Promise<{
     backend: string
@@ -282,10 +293,10 @@ export const api = {
     /** 任务进行中才有：当前任务实际所用后端（设置热切换下一任务生效，可能与 backend 不同） */
     running?: { backend: string; detail: string }
   }> {
-    return (await _fetch(`${baseUrl}/api/engine`)).json()
+    return _get_json(`${baseUrl}/api/engine`)
   },
   async presets(): Promise<Preset[]> {
-    return (await _fetch(`${baseUrl}/api/presets`)).json()
+    return _get_json(`${baseUrl}/api/presets`)
   },
   /** 保存用户自定义预设（当前任务页参数的快照） */
   async createPreset(body: {
@@ -321,7 +332,7 @@ export const api = {
     })
   },
   async settings(): Promise<Record<string, unknown>> {
-    return (await _fetch(`${baseUrl}/api/settings`)).json()
+    return _get_json(`${baseUrl}/api/settings`)
   },
   async saveSettings(body: Record<string, unknown>): Promise<Response> {
     return _fetch(`${baseUrl}/api/settings`, {
@@ -331,7 +342,7 @@ export const api = {
     })
   },
   async logTail(n = 120): Promise<{ lines: string[] }> {
-    return (await _fetch(`${baseUrl}/api/log-tail?n=${n}`)).json()
+    return _get_json(`${baseUrl}/api/log-tail?n=${n}`)
   },
   async downloadModel(id: string): Promise<Response> {
     return _fetch(`${baseUrl}/api/models/${id}/download`, { method: 'POST' })
@@ -356,16 +367,16 @@ export const api = {
   },
   async tasks(q = ''): Promise<Task[]> {
     const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
-    return (await _fetch(`${baseUrl}/api/tasks${qs}`)).json()
+    return _get_json(`${baseUrl}/api/tasks${qs}`)
   },
   async stats(): Promise<Stats> {
-    return (await _fetch(`${baseUrl}/api/stats`)).json()
+    return _get_json(`${baseUrl}/api/stats`)
   },
   async perfHistory(): Promise<{ interval_s: number; samples: PerfSample[] }> {
-    return (await _fetch(`${baseUrl}/api/perf/history`)).json()
+    return _get_json(`${baseUrl}/api/perf/history`)
   },
   async trtComponent(): Promise<TrcStatus> {
-    return (await _fetch(`${baseUrl}/api/trt-component`)).json()
+    return _get_json(`${baseUrl}/api/trt-component`)
   },
   async installTrtComponent(): Promise<Response> {
     return _fetch(`${baseUrl}/api/trt-component/install`, { method: 'POST' })
@@ -456,7 +467,7 @@ export const api = {
   },
   /** 取消"队列完成后关机/休眠"倒计时（无倒计时=幂等成功） */
   async cancelQueueAction(): Promise<{ ok: boolean }> {
-    return (await _fetch(`${baseUrl}/api/queue-done/cancel`, { method: 'POST' })).json()
+    return _get_json(`${baseUrl}/api/queue-done/cancel`)
   },
 
   // ---- 模型对比 ----
@@ -478,7 +489,7 @@ export const api = {
     return r.json()
   },
   async compareStatus(id: string): Promise<CompareJob> {
-    return (await _fetch(`${baseUrl}/api/compare/${id}`)).json()
+    return _get_json(`${baseUrl}/api/compare/${id}`)
   },
   async cancelCompare(id: string): Promise<Response> {
     return _fetch(`${baseUrl}/api/compare/${id}/cancel`, { method: 'POST' })

@@ -112,7 +112,7 @@ const runningIds = new Set<string>()
 
 /** 任务逐字段相等（params 深比较）。相等时保留旧对象引用，TaskCard 的 props
  *  不变即可整体跳过重渲染——高频轮询下只有真正变化的卡片会重新渲染。 */
-function sameTask(a: Task, b: Task): boolean {
+export function sameTask(a: Task, b: Task): boolean {
   if (a === b) return true
   const keys = Object.keys(a) as (keyof Task)[]
   if (keys.length !== Object.keys(b).length) return false
@@ -124,12 +124,18 @@ function sameTask(a: Task, b: Task): boolean {
   return true
 }
 
-function mergeTasks(incoming: Task[]): void {
+export function mergeTasks(incoming: Task[]): void {
   const old = new Map(store.tasks.map((t) => [t.id, t]))
   store.tasks = incoming.map((t) => {
     const o = old.get(t.id)
     return o && sameTask(o, t) ? o : t
   })
+}
+
+/** 任务栏进度条：有运行中任务按帧数百分比，否则清除（<0） */
+function updateTaskbarProgress() {
+  const r = store.tasks.find((t) => t.status === 'running')
+  window.sv.taskProgress(r && r.total_frames ? Math.min(1, r.progress_frames / r.total_frames) : -1)
 }
 
 export async function refreshTasks() {
@@ -139,9 +145,7 @@ export async function refreshTasks() {
   } catch {
     store.connected = false
   }
-  // 任务栏进度条：有运行中任务按帧数百分比，否则清除（<0）
-  const r = store.tasks.find((t) => t.status === 'running')
-  window.sv.taskProgress(r && r.total_frames ? Math.min(1, r.progress_frames / r.total_frames) : -1)
+  updateTaskbarProgress()
 }
 
 function scheduleRefresh() {
@@ -216,7 +220,7 @@ function handleWsEvent(raw: MessageEvent) {
         if (ev.phase === 'done') {
           // 安装完成:重拉完整状态(版本/体积/资产)与引擎探测结果
           refreshTrt()
-          api.engine().then((e) => (store.engine = e))
+          api.engine().then((e) => (store.engine = e)).catch(() => {})
         }
       }
       return
@@ -269,12 +273,27 @@ function handleWsEvent(raw: MessageEvent) {
       store.queueAction = null
       return
     }
+    // progress 高频事件（每帧回调节流后仍秒级多拍）：进度字段就地 patch，
+    // TaskCard/任务栏即时更新；updated_at/预览图等口径字段不在事件里，
+    // 由 8s 兜底轮询与状态切换事件保持最终一致——不再每拍全量拉任务表
+    if (ev.type === 'progress') {
+      const t = store.tasks.find((x) => x.id === ev.task_id)
+      if (t && t.status === 'running') {
+        if (typeof ev.frames === 'number') t.progress_frames = ev.frames
+        if (typeof ev.fps === 'number') t.fps_run = ev.fps
+        if (typeof ev.eta_sec === 'number') t.eta_sec = ev.eta_sec
+        updateTaskbarProgress()
+        return
+      }
+      scheduleRefresh() // 列表滞后（刚启动/刚切搜索）：落回全量刷新
+      return
+    }
     // 统计只在状态切换时刷新（低频）；progress 高频事件只驱动列表刷新
     if (ev.type === 'task_status') {
       refreshStats()
       // 任务落终态：设置页「当前任务仍使用 X」提示需退场（仅在有 running 标记时重拉）
       if (ev.status !== 'running' && store.engine?.running) {
-        api.engine().then((e) => (store.engine = e))
+        api.engine().then((e) => (store.engine = e)).catch(() => {})
       }
       // running→终态迁移 → 系统通知+任务栏闪烁（主进程判定窗口焦点）。
       // 事件先于列表刷新到达，此时 store 里还是旧态：任务名从列表取得到。

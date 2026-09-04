@@ -73,9 +73,16 @@ sv/
 │  ├─ u8_wrap.py       uint8 直进直出图手术（前后处理 GPU 化）
 │  └─ rife.py          RIFE 补帧（RGB uint8 契约）
 ├─ server/
-│  ├─ app.py           FastAPI 路由 + 本地 token 鉴权 + 任务/剪切/对比入口
+│  ├─ app.py           FastAPI 装配（lifespan/token 鉴权/WS）；路由在 routes/ 按域拆分
+│  ├─ routes/          system / models / tasks / trim / compare 五域路由
+│  ├─ state.py         进程级单例（bus/runner/perf/下载锁/硬件缓存）
+│  ├─ consts.py        任务与预设校验共用常量
+│  ├─ gpu_lease.py     GPU 租约：队列任务与对比/剪切作业显存互斥（辅助作业插队）
 │  ├─ runner.py        串行任务调度（取消杀树、退出语义、孤儿清杀）
-│  ├─ worker.py        任务 worker 子进程（stdout JSON 事件协议；视频与图片两类）
+│  ├─ worker.py        任务 worker 进程入口（视频路径+双路编排）
+│  ├─ worker_common.py worker 事件输出 + 性能日志
+│  ├─ worker_engine.py onnx 引擎装配（fp16/TRT 激活/降档重试）
+│  ├─ worker_image.py  图片作业（单张/批量）
 │  ├─ db.py            SQLite 任务表（WAL）
 │  ├─ settings.py      应用设置持久化与校验（含默认输出目录）
 │  ├─ hardware.py      GPU/CPU 硬件检测
@@ -93,7 +100,7 @@ sv/
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
 scripts/               calibrate_color.py（IO 校准）、convert_fp16.py / export_onnx_x4plus.py、build_trt_component.py、bench_*.py（基准）
-tests/                 42 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归）
+tests/                 50 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/GPU 租约/DB 迁移/回归）
 ```
 
 ## HTTP API 一览

@@ -50,10 +50,16 @@ onMounted(() => {
   timer = setInterval(() => {
     if (!document.hidden) load()
   }, 3000)
+  // 隐藏期间跳过了若干拍：恢复可见立即补一次，不等下个周期
+  document.addEventListener('visibilitychange', onVisible)
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  document.removeEventListener('visibilitychange', onVisible)
 })
+function onVisible() {
+  if (!document.hidden) void load()
+}
 </script>
 
 <template>

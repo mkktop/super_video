@@ -9,38 +9,38 @@ import {
   zhCN,
   type GlobalThemeOverrides,
 } from 'naive-ui'
-import { computed, onMounted, onUnmounted, type Component } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, type Component } from 'vue'
 import { initStore, retryInit, store, ui } from './store'
 import TitleBar from './components/TitleBar.vue'
 import Sidebar from './components/Sidebar.vue'
-import Home from './pages/Home.vue'
+// KeepAlive 常驻页保持静态导入：KeepAlive 对首次渲染时还未 resolve 的 async
+// 包装组件不匹配 include（取 __asyncResolved.name），首切草稿会丢
 import NewTask from './pages/NewTask.vue'
 import Trim from './pages/Trim.vue'
 import ImageSR from './pages/ImageSR.vue'
 import CompareModels from './pages/CompareModels.vue'
-import Tasks from './pages/Tasks.vue'
-import Models from './pages/Models.vue'
-import Perf from './pages/Perf.vue'
-import Logs from './pages/Logs.vue'
-import Settings from './pages/Settings.vue'
-import Compare from './pages/Compare.vue'
+
+/** 即挂即卸的页面异步加载：首屏不解析，首次切入才拉自己的 chunk */
+function page(loader: () => Promise<Component>): Component {
+  return defineAsyncComponent(loader)
+}
 
 /** 页面名 → 组件（动态 <component :is> 是 KeepAlive+Transition 的正确组合方式：
  *  v-if 链在 KeepAlive 内切换时外层 Transition 感知不到） */
 const PAGES: Record<string, Component> = {
   newtask: NewTask,
-  home: Home,
+  home: page(() => import('./pages/Home.vue')),
   trim: Trim,
   imagesr: ImageSR,
   mcompare: CompareModels,
-  tasks: Tasks,
-  models: Models,
-  perf: Perf,
-  logs: Logs,
-  compare: Compare,
-  settings: Settings,
+  tasks: page(() => import('./pages/Tasks.vue')),
+  models: page(() => import('./pages/Models.vue')),
+  perf: page(() => import('./pages/Perf.vue')),
+  logs: page(() => import('./pages/Logs.vue')),
+  compare: page(() => import('./pages/Compare.vue')),
+  settings: page(() => import('./pages/Settings.vue')),
 }
-const pageComp = computed(() => PAGES[ui.page] ?? Home)
+const pageComp = computed(() => PAGES[ui.page] ?? PAGES.home)
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {

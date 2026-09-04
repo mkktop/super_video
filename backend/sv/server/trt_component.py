@@ -275,7 +275,7 @@ def start_install(bus: EventBus) -> tuple[bool, str]:
             return False, "组件正在安装中"
         _state.update(installing=True, phase="download", file="", done=0,
                       total=0, error=None, source=None)
-    from .app import runner  # 循环导入延迟到调用点
+    from .state import runner  # 共享单例（原自 app 延迟导入解循环）
 
     if runner.current_id is not None:
         with _state_lock:
@@ -294,7 +294,7 @@ def uninstall() -> tuple[bool, str]:
     with _state_lock:
         if _state["installing"]:
             return False, "组件正在安装中"
-    from .app import runner
+    from .state import runner
 
     if runner.current_id is not None:
         return False, "有任务正在处理，请待任务结束后再卸载"

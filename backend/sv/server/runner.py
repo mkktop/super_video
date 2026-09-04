@@ -12,6 +12,8 @@ from ..paths import TEMP_DIR
 from ..utils.process import WINDOWS_CREATE_FLAGS, kill_tree
 from . import db
 from .engine_select import EngineChoice, select_engine
+from .gpu_lease import release as _gpu_release
+from .gpu_lease import try_acquire as _gpu_try
 from .events import EventBus
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -112,6 +114,14 @@ def error_hint(line: str) -> str | None:
     if not line or line.startswith("[engine]"):
         return None
     return line[-300:]
+
+
+def _worker_spawn_cmd(worker_py: str, task_id: str) -> list[str]:
+    """worker 拉起命令。--serve=常驻模式：done 后经 stdin 接续下一任务，
+    进程内引擎缓存跨任务生效；frozen 复用 sidecar.exe 自身（cli.py worker）。"""
+    if getattr(sys, "frozen", False):
+        return [worker_py, "worker", task_id, "--serve"]
+    return [worker_py, "-m", "sv.server.worker", task_id, "--serve"]
 
 
 class Runner:
@@ -341,6 +351,27 @@ class Runner:
         return True
 
     async def _run_one(self, task: dict) -> None:
+        """GPU 租约门卫：拿到租约才进真实执行（_run_one_guarded），全程持有。
+
+        等待期间（compare/trim 作业在跑）任务已置 running、可正常取消；
+        finally 释放保证任何异常路径都不把租约带给下一个任务。
+        """
+        task_id = task["id"]
+        self.current_id = task_id
+        while not _gpu_try("task"):
+            if self._cancel_requested == task_id:
+                self._cancel_requested = None
+                self._cleanup_partial(task)
+                db.update_task(task_id, status="canceled")
+                self.bus.publish({"type": "task_status", "task_id": task_id, "status": "canceled"})
+                return
+            await asyncio.sleep(0.5)
+        try:
+            await self._run_one_guarded(task)
+        finally:
+            _gpu_release("task")
+
+    async def _run_one_guarded(self, task: dict) -> None:
         task_id = task["id"]
         self.current_id = task_id
         self.bus.publish({"type": "task_status", "task_id": task_id, "status": "running"})
@@ -385,29 +416,79 @@ class Runner:
         # 强制 worker 全链 UTF-8（emit 的 JSON 行才是可信的 UTF-8）
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
-        # 打包版复用 sidecar.exe 自身作为 worker（cli.py worker 子命令）
+        spawn_cmd = _worker_spawn_cmd(worker_py, task_id)
         if getattr(sys, "frozen", False):
-            spawn_cmd = [worker_py, "worker", task_id]
             env.pop("PYTHONPATH", None)
-        else:
-            spawn_cmd = [worker_py, "-m", "sv.server.worker", task_id]
         self.proc = await asyncio.create_subprocess_exec(
             *spawn_cmd,
             cwd=str(BACKEND_DIR) if not getattr(sys, "frozen", False) else None,
             env=env,
             stdout=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE,  # 常驻模式：done 后经此喂下一任务 id
             stderr=asyncio.subprocess.STDOUT,  # stderr 混入 stdout 按日志行处理
             creationflags=WINDOWS_CREATE_FLAGS,
         )
         # owner.pid：sidecar 被强杀后，下个实例靠它清杀孤儿 worker（_reap_orphan_workers）
+        self._write_owner_pid(task_id)
+
+        # 常驻 worker 事件泵：done 且队列还有任务且闸门放行 → 经 stdin 续喂下一个
+        # 任务（进程不退出，进程内引擎缓存跳过同签名任务的加载+预热）；其余终态
+        # 关 stdin 丢弃进程——失败/取消后会话健康度不可信（OOM 即损坏级联）。
+        cur = task
+        final: dict = {}
+        writer = self.proc.stdin
+        while True:
+            final = await self._pump_until_final(cur)
+            reuse_ok = (
+                final.get("type") == "done"
+                and not self._stopping.is_set()
+                and self._queue_gate()[0]
+            )
+            if not reuse_ok:
+                break
+            nxt = db.next_queued()
+            if nxt is None:
+                break
+            self._finalize_done(cur, final)
+            cur = nxt
+            self.current_id = nxt["id"]
+            self._write_owner_pid(nxt["id"])  # 每个续喂任务各留自己的孤儿清杀依据
+            self.bus.publish({"type": "task_status", "task_id": nxt["id"], "status": "running"})
+            try:
+                writer.write((nxt["id"] + "\n").encode())
+                await writer.drain()
+            except (ConnectionResetError, BrokenPipeError, RuntimeError):
+                break  # worker 意外退出：下一轮 wait() 按退出码收尾
         try:
-            pid_file = TEMP_DIR / "segmented" / task_id / "owner.pid"
-            pid_file.parent.mkdir(parents=True, exist_ok=True)
-            pid_file.write_text(str(self.proc.pid))
-        except OSError:
+            if writer is not None:
+                writer.close()  # 结束常驻：worker 读到 EOF 优雅退出
+        except (ConnectionResetError, BrokenPipeError, RuntimeError):
             pass
 
-        final: dict = {}
+        rc = await self.proc.wait()
+        canceled_by_user = self._cancel_requested == cur["id"]
+        self._cancel_requested = None
+
+        # 以 worker 显式上报的事件为准；Windows 硬杀时靠取消标记兜底
+        if final.get("type") == "done":
+            self._finalize_done(cur, final)
+        elif final.get("type") == "canceled" or rc == 3 or canceled_by_user:
+            self._cleanup_partial(cur)
+            db.update_task(cur["id"], status="canceled")
+            self.bus.publish({"type": "task_status", "task_id": cur["id"], "status": "canceled"})
+        else:
+            self._cleanup_partial(cur)
+            err = final.get("error") or f"worker 异常退出 (rc={rc})"
+            db.update_task(cur["id"], status="failed", error=err)
+            self.bus.publish({"type": "task_status", "task_id": cur["id"],
+                              "status": "failed", "error": err})
+
+    async def _pump_until_final(self, task: dict) -> dict:
+        """泵当前任务的 worker 事件直到终态事件（started/progress/log 转发并落库）。
+
+        常驻模式下 stdout 是跨任务连续流：终态事件只标记本任务结束、不断流，
+        下一任务的事件由下一次调用继续消费。"""
+        task_id = task["id"]
         assert self.proc.stdout is not None
         async for raw in self.proc.stdout:
             line = raw.decode("utf-8", "replace").strip()
@@ -429,45 +510,40 @@ class Runner:
                 )
                 self.bus.publish(ev | {"task_id": task_id})
             elif et in ("done", "failed", "canceled"):
-                final = ev
+                return ev
             elif et == "log":
                 # 状态类日志（TRT 编译提示等）落 sidecar 日志（日志页可见），不进任务 error
                 print(f"[task:{task_id[:8]}] {ev.get('line', '')}", flush=True)
                 self.bus.publish(ev | {"task_id": task_id})
             else:
                 self.bus.publish(ev | {"task_id": task_id})
+        return {}  # 流意外结束（硬杀/崩溃）：无终态事件，调用方按退出码兜底
 
-        rc = await self.proc.wait()
-        canceled_by_user = self._cancel_requested == task_id
-        self._cancel_requested = None
+    def _write_owner_pid(self, task_id: str) -> None:
+        try:
+            pid_file = TEMP_DIR / "segmented" / task_id / "owner.pid"
+            pid_file.parent.mkdir(parents=True, exist_ok=True)
+            pid_file.write_text(str(self.proc.pid))
+        except OSError:
+            pass
 
-        # 以 worker 显式上报的事件为准；Windows 硬杀时靠取消标记兜底
-        if final.get("type") == "done":
-            t = db.get_task(task_id) or {}
-            # 真实片尾修正：probe 估算偏大被解码 EOF 证伪时，worker 的 done 事件
-            # 带 total_frames 实测值回填（旧 worker/图片路径无此键，按估算值兜底）
-            done_total = final.get("total_frames") or t.get("total_frames", 0)
-            db.update_task(
-                task_id, status="done", out_bytes=final.get("out_bytes", 0),
-                preview_path=final.get("preview"),
-                preview_src=final.get("src_preview"),
-                elapsed_s=final.get("elapsed", 0) or 0,
-                fps_avg=fps_avg(final.get("frames", 0), final.get("elapsed", 0) or 0),
-                total_frames=done_total,
-                progress_frames=done_total,
-                error=None,  # 成功任务不能残留运行期的日志尾部
-            )
-            self.bus.publish({"type": "task_status", "task_id": task_id, "status": "done"})
-        elif final.get("type") == "canceled" or rc == 3 or canceled_by_user:
-            self._cleanup_partial(task)
-            db.update_task(task_id, status="canceled")
-            self.bus.publish({"type": "task_status", "task_id": task_id, "status": "canceled"})
-        else:
-            self._cleanup_partial(task)
-            err = final.get("error") or f"worker 异常退出 (rc={rc})"
-            db.update_task(task_id, status="failed", error=err)
-            self.bus.publish({"type": "task_status", "task_id": task_id,
-                              "status": "failed", "error": err})
+    def _finalize_done(self, task: dict, final: dict) -> None:
+        task_id = task["id"]
+        t = db.get_task(task_id) or {}
+        # 真实片尾修正：probe 估算偏大被解码 EOF 证伪时，worker 的 done 事件
+        # 带 total_frames 实测值回填（旧 worker/图片路径无此键，按估算值兜底）
+        done_total = final.get("total_frames") or t.get("total_frames", 0)
+        db.update_task(
+            task_id, status="done", out_bytes=final.get("out_bytes", 0),
+            preview_path=final.get("preview"),
+            preview_src=final.get("src_preview"),
+            elapsed_s=final.get("elapsed", 0) or 0,
+            fps_avg=fps_avg(final.get("frames", 0), final.get("elapsed", 0) or 0),
+            total_frames=done_total,
+            progress_frames=done_total,
+            error=None,  # 成功任务不能残留运行期的日志尾部
+        )
+        self.bus.publish({"type": "task_status", "task_id": task_id, "status": "done"})
 
     def _cleanup_partial(self, task: dict) -> None:
         """取消/失败时删除半成品输出文件，不留给用户。

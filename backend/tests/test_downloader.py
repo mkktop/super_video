@@ -120,7 +120,10 @@ def test_download_skips_existing_valid_file(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def dl_client(monkeypatch):
-    import sv.server.app as app_mod
+    # manager 单例随下载路由迁移,patch 对象属性对同对象全局生效
+    from sv.server import app as sv_app
+    from sv.server.routes import models as models_mod
+    app_mod = models_mod
 
     rec: list[dict] = []
 
@@ -128,7 +131,7 @@ def dl_client(monkeypatch):
         rec.append(ev)
 
     monkeypatch.setattr(app_mod.bus, "publish", rec_publish)
-    with TestClient(app_mod.app) as c:  # lifespan：db/runner（队列空转，无干扰）
+    with TestClient(sv_app.app) as c:  # lifespan：db/runner（队列空转，无干扰）
         yield app_mod, c, rec, monkeypatch
 
 

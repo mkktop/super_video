@@ -11,6 +11,7 @@ import asyncio
 import subprocess
 import threading
 import time
+import traceback
 from collections import deque
 
 import psutil
@@ -60,13 +61,23 @@ class PerfSampler:
     # ---- 主循环 ----
 
     def _run(self) -> None:
+        fail_streak = 0
         while not self._stop.wait(self._interval):
             try:
                 if not self._enabled():
                     continue  # 开关关闭:线程保活等待重新开启
                 self.tick()
+                fail_streak = 0
             except Exception:  # noqa: BLE001 — 单拍失败不能杀死采样器
-                pass
+                # 不能纯静默:持续故障会藏成"perf 页永远没数据"的排障盲区
+                fail_streak += 1
+                if fail_streak == 1 or fail_streak % 30 == 0:
+                    self._log_failure(fail_streak)
+
+    def _log_failure(self, streak: int) -> None:
+        """首败与每 30 连败落 sidecar 日志一行(线程内,只能走 print)。"""
+        tail = traceback.format_exc(limit=1).strip().splitlines()[-1]
+        print(f"[perf] 采样失败×{streak}: {tail}", flush=True)
 
     def _enabled(self) -> bool:
         return bool(load_settings().get("perf_sampling", True))

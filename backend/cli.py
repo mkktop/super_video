@@ -181,7 +181,7 @@ def cmd_worker(args):
 
     sh = args.shard[0] if args.shard else None
     ns = args.shard[1] if args.shard else 1
-    sys.exit(worker_main(args.task_id, sh, ns))
+    sys.exit(worker_main(args.task_id, sh, ns, serve=getattr(args, "serve", False)))
 
 
 def cmd_ort_check(args):
@@ -325,6 +325,8 @@ def main():
     p.add_argument("task_id")
     p.add_argument("--shard", nargs=2, type=int, metavar=("I", "N"), default=None,
                    help="[内部] 双路并行分片：本进程跑第 I 路(0基)/共 N 路")
+    p.add_argument("--serve", action="store_true",
+                   help="[内部] runner 常驻模式：任务成功后经 stdin 接续下一任务")
     p.set_defaults(func=cmd_worker)
 
     p = sub.add_parser(

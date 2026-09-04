@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "test": "vitest run",
+    "build": "vue-tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json && electron-vite build",
     "start": "electron-vite preview",
     "dist": "electron-vite build && electron-builder --win nsis"
   },
@@ -71,7 +72,9 @@
     "electron": "^43.4.1",
     "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
+    "jsdom": "^30.0.1",
     "typescript": "~5.8.3",
+    "vitest": "^4.1.11",
     "vue-tsc": "^2.2.12"
   },
   "dependencies": {

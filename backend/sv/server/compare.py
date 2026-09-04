@@ -27,6 +27,7 @@ from pathlib import Path
 from ..paths import DATA_ROOT, ffmpeg_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS
 from .events import EventBus
+from .gpu_lease import acquire as _gpu_acquire, release as _gpu_release
 
 COMPARE_ROOT = DATA_ROOT / "compare"
 MAX_MODELS = 6
@@ -62,7 +63,11 @@ def _worker() -> None:
         if job is None or job["status"] not in ("queued",):
             continue
         try:
-            _run_job(job)
+            _gpu_acquire("compare")  # 与队列任务/trim 显存互斥（见 gpu_lease 模块注释）
+            try:
+                _run_job(job)
+            finally:
+                _gpu_release("compare")
         except Exception as e:  # noqa: BLE001 — 单作业异常不能杀死 worker
             job["status"] = "failed"
             job["error"] = f"{type(e).__name__}: {e}"

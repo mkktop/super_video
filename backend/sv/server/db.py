@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at);
 """
 
+# user_version 语义:0=未迁移老库/全新库,≥1=已完成补列时代迁移。
+# 此后 schema 演进按版本号分支(加列同时在 _SCHEMA 建表语句里补上),
+# 不再往补列循环里堆 ALTER。
+_SCHEMA_VERSION = 1
+
 
 def db_path() -> Path:
     env = os.environ.get("SV_DB")
@@ -63,7 +68,9 @@ def db_conn():
 def init_db() -> None:
     with db_conn() as c:
         c.executescript(_SCHEMA)
-        # 轻量迁移：老库补列（已存在则忽略）
+        if c.execute("PRAGMA user_version").fetchone()[0] >= _SCHEMA_VERSION:
+            return
+        # v0 → v1：老库补列（已存在则忽略；全新库部分列已在 _SCHEMA 中）
         for ddl in (
             "ALTER TABLE tasks ADD COLUMN preview_src TEXT",
             "ALTER TABLE tasks ADD COLUMN elapsed_s REAL DEFAULT 0",
@@ -76,6 +83,7 @@ def init_db() -> None:
                 pass
         # queue_order 回填为创建时间：老库保持原有 FIFO 相对顺序
         c.execute("UPDATE tasks SET queue_order = created_at WHERE queue_order = 0")
+        c.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
 
 def new_task(input_path: str, output_path: str, model_id: str, params: dict,

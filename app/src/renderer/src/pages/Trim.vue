@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -12,6 +12,7 @@ import {
 } from 'naive-ui'
 import { api, ApiError, mediaSrc, type ProbeInfo, type TrimJob } from '../api'
 import { openWizardWith, ui } from '../store'
+import { useFileDrop, useRecentVideos } from '../composables/videoPicks'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -29,59 +30,19 @@ const videoEl = ref<HTMLVideoElement | null>(null)
 const previewBroken = ref(false) // 浏览器解不了的格式（AVI/WMV 等）：无预览但剪切不受影响
 let probeSeq = 0 // 快速重选文件时丢弃迟到的旧 probe 响应（旧数据覆盖新文件的竞态）
 
-// ---- 最近输入（与新建任务页共用 sv_recent_videos；点芯片直接切换，不必重开系统对话框） ----
-const RECENT_KEY = 'sv_recent_videos'
-const VIDEO_EXT = /\.(mp4|mkv|mov|avi|webm|flv|ts|m4v|wmv)$/i
-const recents = ref<string[]>([])
-
-const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p
-
-onMounted(async () => {
-  try {
-    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
-    recents.value = Array.isArray(list) ? list.filter((x) => typeof x === 'string') : []
-  } catch {
-    recents.value = []
-  }
-  const ok: string[] = []
-  for (const p of recents.value) {
-    if (await window.sv.fsExists(p)) ok.push(p)
-  }
-  recents.value = ok.slice(0, 6)
-})
-
-function pushRecent(paths: string[]) {
-  const list = [...paths, ...recents.value.filter((x) => !paths.includes(x))].slice(0, 6)
-  recents.value = list
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list))
-  } catch {
-    /* 存储不可用只是少了快捷入口 */
-  }
-}
+// ---- 最近输入与拖拽换片（与新建任务页共用，见 composables/videoPicks） ----
+const baseName = (p: string) => p.split(/[\/]/).pop() ?? p
+const { recents, pushRecent } = useRecentVideos()
 
 function pickRecent(p: string) {
   if (busy.value || p === input.value) return
   void load(p)
 }
 
-// ---- 拖拽换片：整个页面都是放置区（File.path 已移除，路径经 webUtils 取） ----
-const dragDepth = ref(0)
-function onDragEnter(e: DragEvent) {
-  if (!e.dataTransfer?.types.includes('Files')) return
-  dragDepth.value++
-}
-function onDragLeave() {
-  dragDepth.value = Math.max(0, dragDepth.value - 1)
-}
-function onDropFiles(e: DragEvent) {
-  dragDepth.value = 0
-  if (busy.value) return
-  const vids = [...(e.dataTransfer?.files ?? [])]
-    .filter((f) => VIDEO_EXT.test(f.name))
-    .map((f) => window.sv.pathForFile(f))
-  if (vids.length) void load(vids[0])
-}
+// 作业进行中忽略换片（busy 为运行时求值，回调里判断）
+const { dragDepth, onDragEnter, onDragLeave, onDropFiles } = useFileDrop((vids) => {
+  if (!busy.value) void load(vids[0])
+})
 
 const videoUrl = computed(() => (input.value ? mediaSrc(input.value) : ''))
 const duration = computed(() => probeInfo.value?.duration_s ?? 0)

@@ -225,15 +225,15 @@ def fake_engine(monkeypatch):
 
     eng = _Nearest2x()
     monkeypatch.setattr(
-        "sv.server.worker._load_onnx_engine",
+        "sv.server.worker_image._load_onnx_engine",
         lambda *a, **k: (eng, "fp32"))
-    monkeypatch.setattr("sv.server.worker.model_file",
+    monkeypatch.setattr("sv.server.worker_image.model_file",
                         lambda *a, **k: Path("fake.onnx"))
     monkeypatch.setattr("sv.models.registry.file_for_scale",
                         lambda spec, scale, variant=None: Path("fake.onnx"))
     monkeypatch.setattr("sv.models.manager.ensure_files", lambda spec, needs: None)
     events: list[dict] = []
-    monkeypatch.setattr("sv.server.worker.emit", events.append)
+    monkeypatch.setattr("sv.server.worker_image.emit", events.append)
     eng.events = events
     return eng
 

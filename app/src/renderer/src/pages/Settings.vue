@@ -16,86 +16,50 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api } from '../api'
-import { checkAppUpdate, refreshTrt, store } from '../store'
+import { refreshTrt, store } from '../store'
 import { fmtBytes } from '../utils'
+import { useAppUpdate } from '../composables/useAppUpdate'
+import { useCompareCache } from '../composables/useCompareCache'
+import { useOutputSettings } from '../composables/useOutputSettings'
+import { useScheduleGate } from '../composables/useScheduleGate'
+import { fmtGB, trtSrcText, useTrtComponent } from '../composables/useTrtComponent'
 
 const message = useMessage()
 const engine = ref<'auto' | 'cuda' | 'trt' | 'directml' | 'cpu'>('auto')
 const precision = ref<'fp16' | 'fp32'>('fp16')
 const saving = ref(false)
 const appVersion = ref('')
-const checking = ref(false)
 const proxyMode = ref<'auto' | 'direct' | 'custom'>('auto')
 const proxyAddr = ref('')
 const savingProxy = ref(false)
 const perfSampling = ref(true)
-const autoCheck = ref(true)
-const updateChannel = ref<'stable' | 'preview'>('stable') // 更新通道：预览版可收到 -preview.N 预发布推送
-const trcBusy = ref(false)
 const parallelStreams = ref(false)
-const outputDir = ref('') // 全局输出目录（空 = 源视频同目录）
-const savingOutDir = ref(false)
 const notifyTask = ref(true) // 任务完成/失败系统通知
 const closeToTray = ref(false) // 关闭按钮=最小化到托盘
 const queueDoneAction = ref<'none' | 'notify' | 'shutdown' | 'sleep'>('none') // 队列全部完成后
 const savedQueueDone = ref<'none' | 'notify' | 'shutdown' | 'sleep'>('none') // 回滚基准
+const srProfiling = ref(false) // 超分性能日志（完成的任务可查看瓶颈分析日志）
 
-// ---- 处理时机（定时/闲时：只拦"开始下一个任务"，不打断进行中） ----
-const queueSchedule = ref<'always' | 'window' | 'idle'>('always')
-const scheduleStart = ref('22:00')
-const scheduleEnd = ref('08:00')
-const idleMinutes = ref(15)
-const savingSchedule = ref(false)
-const scheduleOptions = [
-  { label: '立即处理', value: 'always' },
-  { label: '指定时段', value: 'window' },
-  { label: '电脑空闲时', value: 'idle' },
-]
-const isValidHHMM = (s: string) => {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(s.trim())
-  if (!m) return false
-  const h = Number(m[1]), mi = Number(m[2])
-  return h <= 23 && mi <= 59
-}
-async function saveSchedule() {
-  if (queueSchedule.value === 'window'
-    && (!isValidHHMM(scheduleStart.value) || !isValidHHMM(scheduleEnd.value))) {
-    message.error('时段需为 HH:MM 格式（如 22:00）')
-    return
-  }
-  savingSchedule.value = true
-  const r = await api.saveSettings({
-    queue_schedule: queueSchedule.value,
-    schedule_start: scheduleStart.value.trim(),
-    schedule_end: scheduleEnd.value.trim(),
-    idle_minutes: Math.round(idleMinutes.value) || 15,
-  })
-  savingSchedule.value = false
-  if (r.ok) {
-    message.success('已保存，下一个任务起按此规则领取（进行中的任务不受影响）')
-  } else {
-    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
-  }
-}
+// ---- 各设置域（状态+保存动作内聚在 composables，本页只做装配） ----
+const {
+  queueSchedule, scheduleStart, scheduleEnd, idleMinutes, savingSchedule,
+  scheduleOptions, saveSchedule, apply: applySchedule,
+} = useScheduleGate()
+const {
+  outputDir, savingOutDir, nameTemplate, savingNameTpl, outDirShown,
+  persistOutDir, pickOutDir, clearOutDir, openOutDir, saveNameTemplate, apply: applyOutput,
+} = useOutputSettings()
+const {
+  cacheStats, clearingCache, stillCount, savingStillCount,
+  saveStillCount, loadCacheStats, doClearCache, apply: applyCompare,
+} = useCompareCache()
+const { trcBusy, trcDownloadBytes, installTrc, uninstallTrc } = useTrtComponent()
+const {
+  checking, autoCheck, updateChannel, updateVersion, updateNotes, readyVersion,
+  downloading, downloadPercent, updateMsg, updateTag,
+  saveAutoCheck, saveUpdateChannel, checkUpdate, doDownload, doInstall, apply: applyUpdate,
+} = useAppUpdate()
 
-// ---- 输出命名模板 ----
-const nameTemplate = ref('')
-const savingNameTpl = ref(false)
-async function saveNameTemplate() {
-  const v = nameTemplate.value.trim()
-  if (/[<>:"/\\|?*]/.test(v)) {
-    message.error('模板含文件名非法字符（<>:"/\\|?*）')
-    return
-  }
-  savingNameTpl.value = true
-  const r = await api.saveSettings({ output_name_template: v })
-  savingNameTpl.value = false
-  if (r.ok) {
-    message.success(v ? '已保存，新任务按模板命名' : '已恢复默认命名（沿用原文件名）')
-  } else {
-    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
-  }
-}
 const queueDoneOptions = [
   { label: '不做任何事', value: 'none' },
   { label: '系统通知', value: 'notify' },
@@ -112,92 +76,15 @@ async function saveQueueDone(v: 'none' | 'notify' | 'shutdown' | 'sleep') {
   savedQueueDone.value = v
   message.success(v === 'none' ? '已关闭' : '已保存，当前队列跑完后生效')
 }
-const srProfiling = ref(false) // 超分性能日志（完成的任务可查看瓶颈分析日志）
 
-// ---- 对比缓存：产物不自动清理（见 sv/server/compare.py），这里手动清 ----
-const cacheStats = ref<{ jobs: number; bytes: number } | null>(null)
-const clearingCache = ref(false)
-// 对比静帧样本数（1~8）：模型对比创建作业时快照；任务对比页打开时按当前值即时构建
-const stillCount = ref(4)
-const savingStillCount = ref(false)
-async function saveStillCount() {
-  const v = Math.round(stillCount.value)
-  if (!Number.isFinite(v) || v < 1 || v > 8) {
-    message.error('静帧样本数需在 1~8 之间')
-    return
-  }
-  savingStillCount.value = true
-  const r = await api.saveSettings({ compare_still_count: v })
-  savingStillCount.value = false
-  if (r.ok) {
-    stillCount.value = v
-    message.success('已保存，下次开始对比时生效')
-  } else {
-    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
-  }
-}
-async function loadCacheStats() {
-  try {
-    cacheStats.value = await api.compareCacheStats()
-  } catch {
-    /* 统计失败不致命：按钮显示禁用态 */
-  }
-}
-async function doClearCache() {
-  clearingCache.value = true
-  try {
-    const r = await api.clearCompareCache()
-    message.success(
-      r.removed_jobs > 0
-        ? `已清理 ${r.removed_jobs} 个对比作业，释放 ${fmtBytes(r.freed_bytes)}`
-        : '没有可清理的对比产物',
-    )
-    void loadCacheStats()
-  } catch (e) {
-    message.error(`清理失败: ${(e as Error).message}`)
-  } finally {
-    clearingCache.value = false
-  }
-}
-// 已保存的引擎/精度（脏状态对比用；保存成功后同步）
-const savedEngine = ref<'auto' | 'cuda' | 'trt' | 'directml' | 'cpu'>('auto')
-const savedPrecision = ref<'fp16' | 'fp32'>('fp16')
 const proxyOptions = [
   { label: '跟随系统代理', value: 'auto' },
   { label: '直连（不走代理）', value: 'direct' },
   { label: '自定义代理', value: 'custom' },
 ]
-// 更新状态全部从全局 store 派生：事件监听在 store 层注册，
-// 切页/重进设置页不丢"已下载待安装"与下载进度
-// 仅 available 状态下 version 才有效——latest 时后端也回传版本号(=当前版),不能据此显示下载按钮
-const updateVersion = computed(() => (store.update.status === 'available' ? store.update.version : ''))
-const updateNotes = computed(() => store.update.notes)
-const readyVersion = computed(() => store.update.ready)
-const downloading = computed(() => store.update.downloading)
-const downloadPercent = computed(() => store.update.percent)
-const updateMsg = computed(() => {
-  const u = store.update
-  if (u.ready) return `新版本 v${u.ready} 已下载完成，点击"立即重启"生效`
-  if (u.downloading) {
-    // 进度条下方明示当前下载源；切源（GitHub → R2 备用源）时进度回零重下，来源跟着变
-    const src = u.downloadSource === 'r2' ? 'R2 备用源' : u.downloadSource === 'github' ? 'GitHub' : ''
-    return src
-      ? `正在从 ${src} 下载更新…（下载完成后可点击"立即重启"）`
-      : '正在下载更新…（连接下载源中）'
-  }
-  if (u.downloadError) return `下载失败：${u.downloadError}`
-  if (!u.checked) return ''
-  if (u.status === 'dev') return '开发模式不检查更新（打包版自动检查 GitHub Releases）'
-  if (u.status === 'available')
-    return `发现新版本 v${u.version}，点击"下载更新"获取（全量安装包）${
-      u.notes ? '（悬浮在"检查更新"上可查看更新内容）' : ''
-    }`
-  if (u.status === 'latest') return `已是最新版本（${u.current}）`
-  // error 只出现在打包版（dev 模式走上面的 'dev' 分支）：真实网络/源问题，引导重试。
-  // 旧文案「发布前属正常」是尚无 Release 时代的 dev 语境，正式版用户看到会误判
-  if (u.status === 'error') return `检查失败：${u.error ?? '未知错误'}（请检查网络后重试）`
-  return ''
-})
+// 已保存的引擎/精度（脏状态对比用；保存成功后同步）
+const savedEngine = ref<'auto' | 'cuda' | 'trt' | 'directml' | 'cpu'>('auto')
+const savedPrecision = ref<'fp16' | 'fp32'>('fp16')
 const engineDirty = computed(() => engine.value !== savedEngine.value || precision.value !== savedPrecision.value)
 /** 后端取值 → 展示名（当前生效值与运行中实况共用） */
 const backendText = (b?: string) =>
@@ -211,15 +98,6 @@ const runningBackend = computed(() => {
 const backendType = computed(() =>
   store.engine?.backend === 'trt' || store.engine?.backend === 'cuda' ? 'success' : 'default',
 )
-/** 更新状态标签：挂在版本行右侧,一眼可辨 */
-const updateTag = computed(() => {
-  if (readyVersion.value) return { text: `v${readyVersion.value} 已就绪`, type: 'success' as const }
-  if (downloading.value) return { text: '下载中', type: 'info' as const }
-  const u = store.update
-  if (u.status === 'available') return { text: `可更新 v${u.version}`, type: 'warning' as const }
-  if (u.status === 'latest' && u.checked) return { text: '已是最新', type: 'success' as const }
-  return null
-})
 /** 硬件编码能力汇总（无任何硬编时提示软编兜底） */
 const encSummary = computed(() => {
   const h = store.hardware
@@ -240,16 +118,13 @@ const decSummary = computed(() => {
   if (h.d3d11va) parts.push('D3D11VA（AMD / Intel）')
   return parts.length ? parts.join(' · ') : '无（使用软件解码）'
 })
-/** 长路径中段省略：保留盘符开头与末级文件夹名 */
-const outDirShown = computed(() => {
-  const p = outputDir.value
-  if (!p || p.length <= 48) return p
-  return `${p.slice(0, 22)} … ${p.slice(-22)}`
-})
 
 onMounted(async () => {
   void loadCacheStats()
-  const s = (await api.settings()) as {
+  const s = (await api.settings().catch(() => {
+    message.error('设置读取失败，按默认值展示')
+    return {}
+  })) as {
     engine?: 'auto' | 'cuda' | 'trt' | 'directml' | 'cpu'
     precision?: 'fp16' | 'fp32'
     download_proxy?: string
@@ -273,20 +148,15 @@ onMounted(async () => {
   precision.value = s.precision ?? 'fp16'
   parallelStreams.value = s.parallel_streams === true
   perfSampling.value = s.perf_sampling !== false
-  autoCheck.value = s.auto_update_check !== false
-  updateChannel.value = s.update_channel === 'preview' ? 'preview' : 'stable'
-  outputDir.value = String(s.output_dir ?? '').trim()
+  applySchedule(s)
+  applyOutput(s)
+  applyCompare(s)
+  applyUpdate(s)
   notifyTask.value = s.notify_task_done !== false
   closeToTray.value = s.close_to_tray === true
   queueDoneAction.value = s.queue_done_action ?? 'none'
   savedQueueDone.value = queueDoneAction.value
-  queueSchedule.value = s.queue_schedule ?? 'always'
-  scheduleStart.value = s.schedule_start ?? '22:00'
-  scheduleEnd.value = s.schedule_end ?? '08:00'
-  idleMinutes.value = Math.min(240, Math.max(1, Math.round(Number(s.idle_minutes) || 15)))
-  nameTemplate.value = String(s.output_name_template ?? '')
   srProfiling.value = s.sr_profiling === true
-  stillCount.value = Math.min(8, Math.max(1, Math.round(Number(s.compare_still_count) || 4)))
   const p = s.download_proxy ?? ''
   if (p === 'direct') proxyMode.value = 'direct'
   else if (p.startsWith('http')) {
@@ -324,27 +194,6 @@ async function savePerfSampling(v: boolean) {
   }
 }
 
-async function saveAutoCheck(v: boolean) {
-  const r = await api.saveSettings({ auto_update_check: v })
-  if (!r.ok) {
-    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
-    autoCheck.value = !v
-  }
-}
-
-async function saveUpdateChannel(v: 'stable' | 'preview') {
-  const r = await api.saveSettings({ update_channel: v })
-  if (!r.ok) {
-    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
-    updateChannel.value = v === 'preview' ? 'stable' : 'preview'
-    return
-  }
-  store.settings = { ...store.settings, update_channel: v }
-  // 通道由主进程在检查时消费：先同步过去，再立即重查一次让用户看到新通道结果
-  window.sv.setUpdateChannel(v)
-  void checkUpdate()
-}
-
 async function saveNotifyTask(v: boolean) {
   const r = await api.saveSettings({ notify_task_done: v })
   if (!r.ok) {
@@ -367,32 +216,6 @@ async function saveCloseToTray(v: boolean) {
   window.sv.win.setCloseToTray(v)
 }
 
-async function checkUpdate() {
-  checking.value = true
-  try {
-    await checkAppUpdate(true) // 手动检查允许切 R2 备用源；结果进 store.update,本页文案由 computed 派生
-  } finally {
-    checking.value = false
-  }
-}
-
-async function doDownload() {
-  store.update.downloading = true
-  store.update.percent = 0
-  store.update.downloadSource = '' // 首个进度事件到达前来源未知（连接下载源阶段）
-  store.update.downloadError = ''
-  const r = await window.sv.downloadUpdate()
-  if (!r.ok) {
-    store.update.downloading = false
-    store.update.downloadError = r.error ?? '未知错误'
-  }
-  // 成功时 update-ready 事件会把 downloading 置 false 并写入 ready
-}
-
-function doInstall() {
-  void window.sv.installUpdate() // 静默安装后自动拉起新版本
-}
-
 async function saveEngine() {
   saving.value = true
   const r = await api.saveSettings({ engine: engine.value, precision: precision.value })
@@ -402,7 +225,11 @@ async function saveEngine() {
     message.success('已保存，从下一个任务起生效')
     // 回拉含真探测（会话内首次切 CUDA/TRT 可达数秒）：loading 一直盖到标签刷新，
     // 避免"保存完了当前后端迟迟不动"的观感
-    store.engine = await api.engine()
+    try {
+      store.engine = await api.engine()
+    } catch {
+      message.error('引擎状态刷新失败')
+    }
     saving.value = false
   } else {
     saving.value = false
@@ -427,73 +254,6 @@ async function saveSrProfiling(v: boolean) {
     srProfiling.value = !v
   } else {
     message.success(v ? '已开启，从下一个任务起生效' : '已关闭，已有日志仍可在任务卡查看')
-  }
-}
-
-/** 立即持久化输出目录并同步全局 store（新建任务页实时读取该值推导默认路径） */
-async function persistOutDir(v: string) {
-  savingOutDir.value = true
-  const r = await api.saveSettings({ output_dir: v })
-  savingOutDir.value = false
-  if (r.ok) {
-    outputDir.value = v
-    store.settings = { ...store.settings, output_dir: v }
-    message.success(v ? '已保存，从下一个任务起生效' : '已恢复默认（源视频同目录）')
-  } else {
-    message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
-  }
-}
-
-async function pickOutDir() {
-  const p = await window.sv.pickDir()
-  if (p) await persistOutDir(p)
-}
-
-function clearOutDir() {
-  if (outputDir.value) void persistOutDir('')
-}
-
-function openOutDir() {
-  if (outputDir.value) void window.sv.openPath(outputDir.value)
-}
-
-// ---- TRT 可选组件 ----
-
-function fmtGB(b: number): string {
-  return (b / 1e9).toFixed(2) + ' GB'
-}
-
-// TRT 下载当前渠道：后端按实际命中的 URL 透出（主源 ModelScope，回落 GitHub 镜像）
-const trtSrcText = (s: string | null | undefined) =>
-  s === 'modelscope' ? 'ModelScope' : s === 'github' ? 'GitHub 镜像' : ''
-
-/** 安装需下载的体积（core + 匹配架构的 builder 包） */
-const trcDownloadBytes = computed(() => {
-  const t = store.trt
-  if (!t || t.installed || t.installing) return 0
-  const a = t.assets?.assets ?? {}
-  const core = a.core?.size ?? 0
-  const key = t.gpu_arch && a[`builder-${t.gpu_arch}`] ? `builder-${t.gpu_arch}` : 'builder-ptx'
-  return core + (a[key]?.size ?? 0)
-})
-
-async function installTrc() {
-  trcBusy.value = true
-  const r = await api.installTrtComponent()
-  if (!r.ok) message.error(`无法开始安装: ${(await r.json()).detail ?? r.status}`)
-  // 成功则进度走 WS trt_component 事件;失败恢复按钮
-  trcBusy.value = r.ok
-}
-
-async function uninstallTrc() {
-  trcBusy.value = true
-  const r = await api.uninstallTrtComponent()
-  trcBusy.value = false
-  if (r.ok) {
-    message.success('已卸载，推理回退 DirectML')
-    await refreshTrt()
-  } else {
-    message.error(`${(await r.json()).detail ?? r.status}`)
   }
 }
 </script>

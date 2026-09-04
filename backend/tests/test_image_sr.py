@@ -45,9 +45,10 @@ def fake_engine(monkeypatch):
         return eng, "fp32"
 
     import sv.server.worker as worker_mod
+    import sv.server.worker_image as worker_image_mod
 
-    monkeypatch.setattr(worker_mod, "_load_onnx_engine", _fake_load)
-    monkeypatch.setattr(worker_mod, "model_file", lambda *a, **k: Path("fake.onnx"))
+    monkeypatch.setattr(worker_image_mod, "_load_onnx_engine", _fake_load)
+    monkeypatch.setattr(worker_image_mod, "model_file", lambda *a, **k: Path("fake.onnx"))
     # 模块内局部导入：直接改注册表源
     import sv.models.registry as reg
     import sv.models.manager as mgr
@@ -55,7 +56,7 @@ def fake_engine(monkeypatch):
     monkeypatch.setattr(reg, "file_for_scale", lambda spec, scale, variant=None: Path("fake.onnx"))
     monkeypatch.setattr(mgr, "ensure_files", lambda spec, needs: None)
     events: list[dict] = []
-    monkeypatch.setattr(worker_mod, "emit", events.append)
+    monkeypatch.setattr(worker_image_mod, "emit", events.append)
     eng.events = events
     return eng
 

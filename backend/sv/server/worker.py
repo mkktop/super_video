@@ -47,6 +47,24 @@ from sv.pipeline.stream import (
 )
 from sv.server import db, settings
 
+from sv.server.worker_common import (  # noqa: F401 — 事件/性能日志协议（含测试 re-export）
+    SR_LOG_DIR,
+    _prof_collect,
+    _prof_enabled,
+    _prof_write,
+    _prof_write_video_header,
+    emit,
+    emit_failed,
+)
+from sv.server.worker_engine import (  # noqa: F401 — 引擎装配（含测试 re-export）
+    _cugan_alt_hint,
+    _load_onnx_engine,
+)
+from sv.server.worker_image import (  # noqa: F401 — 图片作业（含测试 re-export）
+    _batch_heights,
+    _run_image_job,
+)
+
 
 def _encode_opts(params: dict, out_kind: str) -> EncodeOpts:
     """任务参数 → 编码选项（app.py 已做过白名单校验，此处 defensive 再夹一层默认值）。"""
@@ -59,78 +77,6 @@ def _encode_opts(params: dict, out_kind: str) -> EncodeOpts:
         container=params.get("container", "mp4"),
         out_kind=out_kind,
     )
-
-
-def emit(obj: dict) -> None:
-    print(json.dumps(obj, ensure_ascii=False), flush=True)
-
-
-def emit_failed(prefix: str, e: Exception) -> None:
-    """失败事件 + 完整堆栈落 sidecar.log（任务 error 保持单行可读）。
-
-    runner 把 log 事件打到 sidecar.log（日志页可见）——异常被本层捕获后
-    只有一行 error 上达任务卡，没有堆栈时「引擎加载失败 UnicodeDecodeError」
-    这类问题只能靠猜（1060 实机教训）；堆栈行号能直接定位裸奔的读取点。
-    注意 emit 的是 JSON 行：堆栈里不能有裸 \r，json.dumps 会转义，安全。
-    """
-    import traceback
-
-    tb = traceback.format_exc()
-    emit({"type": "log", "line": f"{prefix} {type(e).__name__} 堆栈:\n{tb.strip()}"})
-    emit({"type": "failed", "error": f"{prefix} {type(e).__name__}: {e}"})
-
-
-# ---- 超分性能日志（设置 sr_profiling 开启时生效）----
-# 任务结束把"引擎配置 + 分段耗时明细 + 汇总"落到 SR_LOG_DIR/<task_id>.log，
-# 供分析速度瓶颈（推理慢/解码跟不上/编码拖后腿/引擎加载占比）。旁路功能：
-# 任何写入失败静默忽略，绝不影响任务本身。
-
-
-def _prof_enabled() -> bool:
-    return bool(settings.load().get("sr_profiling"))
-
-
-def _prof_write(task_id: str, text: str) -> None:
-    try:
-        SR_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        with (SR_LOG_DIR / f"{task_id}.log").open("a", encoding="utf-8") as f:
-            f.write(text)
-    except OSError:
-        pass
-
-
-def _prof_write_video_header(task_id: str, ctx: dict) -> None:
-    seg_txt = (f"分段 ≈{ctx['seg']}帧 x {ctx['n_segs']}段" if ctx["n_segs"]
-               else f"分块 {ctx['seg']}帧")
-    lines = [
-        f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} 运行开始 ====",
-        f"模型 {ctx['model']} · 推理后端 {ctx['provider']} · 精度 {ctx['precision']}"
-        f" · GPU前后处理包装 {'开' if ctx['u8'] else '关'}",
-        f"设置 engine={ctx['engine_setting']} · tile={ctx['tile']} · batch={ctx['batch']}"
-        f" · 补帧={ctx['interp']} · 解码={ctx.get('decoder', 'sw')}"
-        f" · 预处理={ctx.get('prefilter') or '无'}",
-        f"源 {ctx['src_w']}x{ctx['src_h']} @{ctx['fps']:.3f}fps {ctx['frames']}帧"
-        f" → 目标 {ctx['target']}",
-        f"引擎加载+预热 {ctx['load_s']:.1f}s · {seg_txt}"
-        f" · 双路并行 {'是(2进程)' if ctx['parallel'] else '否'}"
-        f" · 断点续跑 {'是(跳过已完成段)' if ctx['resumed'] else '否'}",
-    ]
-    _prof_write(task_id, "\n".join(lines) + "\n")
-
-
-def _prof_collect(task_id: str, work: Path) -> None:
-    """任务成功收尾：把工作目录里的分段耗时明细（SegmentedPipeline 逐段落盘）
-    并入持久日志。工作目录本身的清理仍由调用方原逻辑负责。"""
-    perf_file = work / "perf_stages.jsonl"
-    try:
-        if perf_file.exists():
-            body = perf_file.read_text(encoding="utf-8")
-            _prof_write(task_id,
-                        "---- 分段耗时明细（jsonl，每行一段；summary 行 ms_per_frame"
-                        " 为各阶段毫秒/帧拆解，infer=推理 read=解码 write=编码）----\n"
-                        + body)
-    except OSError:
-        pass
 
 
 def _spawn_shard_child(task_id: str):
@@ -171,427 +117,33 @@ def _read_child_events(proc, state: dict, started_cb=None) -> None:
             state["done"] = True
         elif et == "failed":
             state["error"] = ev.get("error", "并行分片失败")
-        # started 等其余事件忽略（本进程已上报过）
 
 
-def _load_onnx_engine(
-    weight: Path,
-    spec,
-    scale: int,
-    variant: str | None,
-    precision: str,
-    tile: int,
-    warmup_hw: tuple[int, int],
-    *,
-    batch: int = 1,
-    log=None,
-) -> tuple["OnnxSrEngine", str]:
-    """构建并预热 onnx 推理引擎（视频/图片任务共用）。
+def main(task_id: str, shard: int | None = None, nshards: int = 1,
+         serve: bool = False) -> int:
+    """任务入口。serve=常驻模式（runner 拉起时带 --serve）：
 
-    含 fp16 惰性补转、TRT 组件激活与编译提示、显存不足自动减半 tile 重试。
-    warmup 必须用源帧真实尺寸：DML 会话跑过小形状后拖慢真实尺寸且不可逆。
-    返回 (engine, 实际使用精度)。失败向上抛，由调用方转 failed 事件。
+    任务成功（rc=0）后不退出，从 stdin 读下一行 task_id 继续处理——
+    进程内引擎缓存（worker_engine._ENGINE_CACHE）让同签名任务的
+    「加载+预热」从每任务一次降为每签名一次（TRT 反序列化 5-8s/路）。
+    非 0 退出码（failed/canceled）直接返回：失败/取消后会话健康度不可信
+    （OOM 即损坏级联），runner 收到非 done 终态会关闭 stdin 丢弃本进程。
+    stdin EOF（runner 关闭/死亡）= 正常退出。
     """
-    # 惰性补转 fp16（一次），失败回退 fp32；spec.fp16=False 的模型（如 real-cugan，
-    # 转换后 ShapeInference 崩）直接用 fp32 原件
-    if precision == "fp16" and spec.fp16 and not weight.stem.endswith("_fp16"):
-        if log:
-            log({"type": "log", "line": f"生成 fp16 变体: {weight.name}"})
-        weight = ensure_fp16_file(weight)
-    used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
-
-    def _oom(e: Exception) -> bool:
-        t = str(e).lower()
-        if "memory" in t or "alloc" in t or "oom" in t:
-            return True
-        # DML 显存不足在中文 Windows 上被 UnicodeDecodeError 掩盖：ORT 的错误
-        # 消息 bytes 内嵌系统 GBK 错误描述（0x8007000E「存储空间不足…」），
-        # Python 绑定层按 UTF-8 硬解直接抛解码错误——str(e) 只剩无用的解码
-        # 报文。原始 bytes 挂在 UnicodeDecodeError.args[1]：GBK/UTF-8 双解
-        # 后按错误码/关键字识别（MangaJaNai 大图 4x 全尺寸 warmup 实锤，
-        # 此前降 tile 重试被假象骗过直接失败）
-        for a in e.args:
-            if not isinstance(a, (bytes, bytearray)):
-                continue
-            blob = bytes(a)
-            s = blob.decode("gbk", "replace") + blob.decode("utf-8", "replace")
-            s = s.lower()
-            if ("8007000e" in s or "e_outofmemory" in s or "out of memory" in s
-                    or "存储空间不足" in s):
-                return True
-        return False
-
-    def _cuda_kernel_fault(e: Exception) -> bool:
-        """CUDA 执行层内核崩溃特征：报错串带 GPU 版 ORT 的 providers/cuda 源路径
-        （如 fast_divmod 断言的 Resize 缺陷）。只认精确特征，避免把普通
-        CUDA 初始化/驱动问题误判成「换链能救」。"""
-        t = str(e)
-        return "RUNTIME_EXCEPTION" in t and "providers/cuda" in t
-
-    # 推理后端：设置 engine=trt 走 TensorRT 链（TRT 不可用引擎层自动回退）；
-    # engine=cpu 显式锁 CPUExecutionProvider（CUGAN×DML 泄漏模型的兜底通道）
-    _eng = settings.load().get("engine")
-    ort_device = _eng if _eng in ("trt", "cpu") else "auto"
-    # 大图输出像素预算：无 tile 且放大后像素超 36M（1080p x4=33M 不动、
-    # 漫画扫描页 2133p x4≈51M 命中）时预设 512 分块——全尺寸会话会把 GPU
-    # 打爆（中文 Windows 上 OOM 被 GBK 错误消息的解码异常掩盖成
-    # UnicodeDecodeError），且 OOM 后同进程 DML 会话已损坏，降档重建只会
-    # 被静默回退 CPU（实测 gc 释放也救不回）——干净会话一次到位才是正解
-    if tile == 0 and warmup_hw[0] * warmup_hw[1] * scale * scale > 36_000_000:
-        tile = 512
-        if log:
-            log({"type": "log", "line":
-                 "输出分辨率较大，自动启用 512px 分块处理（避免显存不足）"})
-    # CUGAN×DML 逐帧显存泄漏（实测 1080p BASIC≈8 帧、ALL≈30 帧即 0x887A0006
-    # 设备摘除，全 GPU 会话连坐；540p 阈值更高但终会爆；与线程/包装/内容无关），
-    # CUDA EP 实测同样挂起。仅 TRT 与显式 CPU 可用（TRT 端到端 14.9fps 验证）。
-    # 证据链 BENCH.md §13。此处直接拒绝，避免用户任务跑到一半设备崩溃。
-    eng_setting = settings.load().get("engine")
-    if "cugan" in spec.id.lower() and eng_setting not in ("trt", "cpu"):
-        raise RuntimeError(
-            f"模型 {spec.id} 在 DirectML/CUDA 后端存在 GPU 显存泄漏崩溃（实测高分辨率"
-            f"约 8~30 帧即设备摘除），当前设置 engine={eng_setting or 'auto'} 不可用。"
-            f"请安装 TensorRT 组件并将引擎设为 TensorRT，或显式切换到 CPU 后端（较慢）。")
-    if ort_device == "trt":
-        if getattr(sys, "frozen", False):
-            # 安装版：激活 TRT 组件（GPU 版 onnxruntime 重定向）。必须在
-            # 进程内首次 import onnxruntime 之前（OnnxSrEngine.load 惰性导入）；
-            # 组件缺失/不兼容返回 False → 引擎层自然回退 DML
-            from sv.engines.trt_runtime import activate_component
-
-            if activate_component():
-                if log:
-                    log({"type": "log", "line": "TensorRT 加速组件已加载"})
-        if log:
-            log({"type": "log", "line":
-                 "TensorRT 引擎加载中：新模型或新分辨率首次使用需编译引擎（约 1~2 分钟），完成后可直接加载"})
-    engine = None
-    # 显存不足自动降档 tile 减半（最多 3 次）；CUDA 执行层内核崩溃换链重试（一次）
-    for attempt in range(4):
+    while True:
+        rc = _main_once(task_id, shard, nshards)
+        if not serve or rc != 0:
+            return rc
         try:
-            engine = OnnxSrEngine(
-                weight, scale, io=spec.io, tile=tile, batch=batch,
-                device=ort_device, validate_hw=warmup_hw)
-            engine.load()
-            import numpy as np
-            # 预热兼显存探测。必须用源帧真实尺寸：DML 会话一旦跑过 64x64 这类
-            # 小形状，后续真实尺寸的执行路径被拖慢且不可逆（实测 960x720：
-            # 25.7ms -> 38.5ms/帧，+50%；先小后大也无法自愈）
-            engine.process(np.zeros((warmup_hw[0], warmup_hw[1], 3), dtype=np.uint8))
-            break
-        except Exception as e:  # noqa: BLE001
-            # CUDA/TRT 执行层的内核崩溃（非显存问题）：MxNet 导出的 Resize 节点
-            # （MangaJaNai 系）在 CUDA EP 有 fast_divmod 断言缺陷，DML/CPU 正常。
-            # TRT 场景换「TRT+CPU 兜底」链重试（主图仍 TRT 编译，坏节点落 CPU，
-            # 速度几乎无损）；纯 CUDA 场景无 GPU 替代，退 CPU 保出片并说明。
-            # 用 eng_setting 判定（cuda 设置映射的 ort_device 是 auto）；
-            # 降链后 ort_device 离开初值，天然只降一次
-            if (not _oom(e) and _cuda_kernel_fault(e)
-                    and (ort_device == "trt" or eng_setting == "cuda")):
-                if eng_setting == "trt":
-                    ort_device = "trt_cpu"
-                    if log:
-                        log({"type": "log", "line":
-                             "CUDA 执行层在个别算子上崩溃，已切换为 TensorRT+CPU 混合执行重试"})
-                else:
-                    ort_device = "cpu"
-                    if log:
-                        log({"type": "log", "line":
-                             "CUDA 执行层在个别算子上崩溃，已切换为 CPU 推理重试（速度较慢）"})
-                continue
-            # 最后一次尝试仍失败必须 raise：带着没加载成功的 engine 继续走，
-            # 后面会以更难懂的方式崩（如 provider_used AttributeError）
-            if not _oom(e) or tile in (1,) or attempt == 3:
-                raise
-            new_tile = 256 if tile == 0 else max(64, tile // 2)
-            # 先释放失败引擎再降档重建：OOM 的旧 session 仍攥着 DML/CUDA 资源，
-            # 不放手时降 tile 后的新会话会接着爆（DML 资源回收依赖对象析构）
-            engine = None
-            import gc
-
-            gc.collect()
-            if log:
-                log({"type": "log", "line":
-                     f"显存不足，分块大小调整为 {new_tile} 后重试"})
-            tile = new_tile
-    return engine, used_precision
+            line = sys.stdin.readline()
+        except OSError:
+            return rc
+        if not line.strip():
+            return rc  # runner 关闭 stdin：优雅退出
+        task_id = line.strip()
 
 
-def _batch_heights(images: list[dict]) -> list[int]:
-    """批量图片的展示高度（EXIF 方向转正后）：只读头部，不解码像素。
-
-    读不出的图返回时略过——坏图由主循环按张跳过并记日志，这里不重复报错。
-    """
-    from PIL import Image
-
-    out: list[int] = []
-    for meta in images:
-        try:
-            with Image.open(str(meta["in"])) as im:
-                w, h = im.size
-                if im.getexif().get(274, 1) in (5, 6, 7, 8):  # 横竖互换方向
-                    w, h = h, w
-            out.append(h)
-        except Exception:  # noqa: BLE001
-            pass
-    return out
-
-
-def _run_image_job(task: dict, params: dict, spec) -> int:
-    """图片超分作业（单张或批量一个任务）：一次模型加载，逐图 解码（含 EXIF
-    方向）→ 推理 → 原子落盘（.part + replace，取消/中断不留半个文件）。
-
-    单图失败跳过并记日志（个别坏图不拖垮整批），全部失败才算任务失败。
-    merge_pdf：全部图片落盘后把成功页无损封装成一份 PDF（PNG→Flate 逐像素
-    一致，JPG→原样直嵌）；合并失败任务判失败——图片产物保留（清理链对图片
-    任务豁免），错误信息说明这一层。
-    不走分段/checkpoint（单帧无意义）；取消靠 runner 杀进程兜底，已完成
-    的输出文件保留（runner._cleanup_partial 对图片任务豁免）。
-    """
-    import numpy as np
-    from PIL import Image, ImageOps
-
-    fmt = str(params.get("format") or "png").lower()
-    if fmt not in ("png", "jpg"):
-        emit({"type": "failed", "error": f"图片格式仅支持 png / jpg，当前 {fmt}"})
-        return 1
-    jpg_quality = int(params.get("jpg_quality", 92))
-    jpg_quality = min(100, max(60, jpg_quality))
-
-    images = params.get("images") or [
-        {"in": task["input_path"], "out": task["output_path"]}]
-    n = len(images)
-    if n == 0:
-        emit({"type": "failed", "error": "任务不含任何图片"})
-        return 1
-
-    # 首图尺寸：started 事件、自定义分辨率边界、引擎预热共用
-    try:
-        with Image.open(images[0]["in"]) as im:
-            width, height = ImageOps.exif_transpose(im).size
-    except Exception as e:  # noqa: BLE001
-        emit({"type": "failed", "error": f"无法读取图片 {Path(images[0]['in']).name}: {e}"})
-        return 1
-
-    scale = int(params.get("scale") or max(spec.scale))
-    if scale not in spec.scale:
-        emit({"type": "failed", "error": f"模型不支持 x{scale}"})
-        return 1
-    target = int(params.get("target_scale") or scale)
-    if not (1 <= target <= scale):
-        emit({"type": "failed", "error": f"目标倍率 x{target} 无效（1 ~ x{scale}）"})
-        return 1
-    # 自定义目标分辨率：仍只允许"原生超分后缩小"；批量已由创建端拒绝
-    tw = params.get("target_w")
-    th = params.get("target_h")
-    target_size = None
-    if tw is not None or th is not None:
-        if not (isinstance(tw, int) and isinstance(th, int)):
-            emit({"type": "failed", "error": "target_w/target_h 需同时提供整数宽高"})
-            return 1
-        if n > 1:
-            emit({"type": "failed", "error": "批量图片不支持自定义分辨率"})
-            return 1
-        if not (width <= tw <= width * scale and height <= th <= height * scale):
-            emit({"type": "failed", "error": (
-                f"目标分辨率 {tw}x{th} 超出范围（源 {width}x{height} ~ "
-                f"原生上限 {width * scale}x{height * scale}）"
-            )})
-            return 1
-        target_size = (tw, th)
-    tile = int(params.get("tile") or spec.tile_hint)
-
-    denoise = params.get("denoise")
-    variant = f"denoise{int(denoise)}" if denoise is not None else None
-    if variant is None:
-        from sv.models.registry import auto_variant
-        variant = auto_variant(spec, scale, height)  # MangaJaNai 系按源高度选权重
-        if variant:
-            emit({"type": "log", "line": f"按源高度 {height}p 自动选择权重档: {variant}"})
-            if n > 1:
-                heights = _batch_heights(images)
-                tiers = {auto_variant(spec, scale, h) for h in heights} - {None}
-                if len(tiers) > 1:
-                    # 逐图换档 = 逐档换 engine（销毁旧 session 再建新的），DML 下
-                    # 「创建后再析构」会话有原生崩溃前科（CUGAN/V3.1 实证）——
-                    # 统一首图档 + 明示取舍，要逐档精确就按高度分批
-                    emit({"type": "log", "line":
-                          f"批量图片高度不一（{min(heights)}~{max(heights)}p），"
-                          f"理想档含 {'/'.join(sorted(tiers))}，"
-                          f"已统一按首图 {height}p 的 {variant} 档处理；"
-                          "如需逐档精确请按高度分批创建任务"})
-    try:
-        from sv.models.registry import file_for_scale
-        need = file_for_scale(spec, scale, variant)
-        manager.ensure_files(spec, [need])
-    except Exception as e:  # 下载/校验失败
-        emit({"type": "failed", "error": f"模型文件不可用: {e}"})
-        return 1
-
-    emit({
-        "type": "started", "total_frames": n,
-        "src_w": width, "src_h": height,
-        "out_w": target_size[0] if target_size else width * target,
-        "out_h": target_size[1] if target_size else height * target,
-        "output": images[0]["out"],
-    })
-    t0 = time.perf_counter()
-    t_load = time.perf_counter()
-    used_prec = "fp16-autocast"
-
-    # ---- 引擎一次性加载（首图真实尺寸预热，后续图各自形状自然重配）----
-    try:
-        if spec.engine == "torch":
-            from sv.engines.torch_engine import TorchSrEngine
-
-            engine = TorchSrEngine(
-                model_file(spec, scale), scale, io=spec.io,
-                tile=tile or 512)
-            engine.load()
-        else:
-            precision = settings.load().get("precision", "fp32")
-            weight = model_file(spec, scale, precision, variant)
-            engine, used_prec = _load_onnx_engine(
-                weight, spec, scale, variant, precision, tile,
-                (height, width), batch=1, log=emit)
-    except Exception as e:  # noqa: BLE001 — worker 兜底，任何异常都要上报
-        emit_failed("引擎加载失败", e)
-        return 1
-    load_s = time.perf_counter() - t_load
-
-    ok = 0
-    out_bytes_total = 0
-    failed_names: list[str] = []
-    written: list[Path] = []  # 本轮成功落盘的输出（PDF 按此清单与顺序封装）
-    t_dec = t_inf = t_sav = 0.0  # 剖析口径：解码 / 推理 / 编码落盘 合计
-    first_pair: tuple[np.ndarray, np.ndarray] | None = None
-
-    for k, meta in enumerate(images):
-        src_p = Path(meta["in"])
-        name = src_p.name
-        _t = time.perf_counter()
-        try:
-            with Image.open(str(src_p)) as im:
-                img = ImageOps.exif_transpose(im)  # 手机竖拍按 EXIF 转正
-                frame = np.asarray(img.convert("RGB"), dtype=np.uint8)
-        except Exception as e:  # noqa: BLE001
-            emit({"type": "log", "line": f"跳过 {name}（无法读取: {e}）"})
-            failed_names.append(name)
-        else:
-            t_dec += time.perf_counter() - _t
-            _t = time.perf_counter()
-            try:
-                out = engine.process(frame)  # 引擎统一 RGB 进 RGB 出
-                if target_size is not None and (out.shape[1], out.shape[0]) != target_size:
-                    out = np.asarray(
-                        Image.fromarray(out).resize(target_size, Image.LANCZOS).convert("RGB"))
-            except Exception as e:  # noqa: BLE001
-                emit({"type": "log", "line": f"跳过 {name}（推理失败: {type(e).__name__}: {e}）"})
-                failed_names.append(name)
-            else:
-                t_inf += time.perf_counter() - _t
-                _t = time.perf_counter()
-                dst = Path(meta["out"])
-                tmp = dst.with_name(dst.name + f".{os.getpid()}.part")
-                try:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    result = Image.fromarray(out)
-                    if fmt == "jpg":
-                        result.save(str(tmp), "JPEG", quality=jpg_quality)
-                    else:
-                        result.save(str(tmp), "PNG")
-                    os.replace(tmp, dst)  # 原子：取消/中断不留半个文件
-                except Exception as e:  # noqa: BLE001
-                    tmp.unlink(missing_ok=True)
-                    emit({"type": "log", "line": f"跳过 {name}（写入失败: {e}）"})
-                    failed_names.append(name)
-                else:
-                    t_sav += time.perf_counter() - _t
-                    ok += 1
-                    written.append(dst)
-                    out_bytes_total += dst.stat().st_size
-                    if first_pair is None:
-                        first_pair = (frame, out)
-        done_now = k + 1  # 进度按处理位数计（含失败），保证走满 total
-        el = time.perf_counter() - t0
-        emit({"type": "progress", "frames": done_now, "total": n,
-              "fps": round(done_now / el, 2) if el > 0 else 0,
-              "eta_sec": int((n - done_now) * el / done_now) if done_now else 0})
-
-    if ok == 0:
-        err = f"全部 {n} 张图片处理失败" + (f"（如 {failed_names[0]}）" if failed_names else "")
-        emit({"type": "failed", "error": err})
-        return 1
-
-    if failed_names:
-        emit({"type": "log", "line":
-              f"{len(failed_names)} 张失败/跳过: {', '.join(failed_names[:10])}"
-              + ("…" if len(failed_names) > 10 else "")})
-
-    # ---- 合并输出 PDF（merge_pdf）：成功页按处理顺序无损封装 ----
-    pdf_pages = 0
-    if params.get("merge_pdf") and written:
-        if not params.get("pdf_out"):
-            emit({"type": "failed", "error": "merge_pdf 任务缺少 pdf_out 参数"})
-            return 1
-        pdf_out = Path(str(params["pdf_out"]))
-        _t = time.perf_counter()
-        try:
-            from sv.pdfmerge import write_pdf
-
-            pdf_pages = write_pdf(written, pdf_out)["pages"]
-        except Exception as e:  # noqa: BLE001 — 合并失败必须显式上报，不静默
-            emit({"type": "failed", "error":
-                  f"图片已全部产出（{ok} 张保留在输出目录），但 PDF 合并失败: "
-                  f"{type(e).__name__}: {e}"})
-            return 1
-        dt = time.perf_counter() - _t
-        out_bytes_total += pdf_out.stat().st_size
-        emit({"type": "log", "line":
-              f"已无损合并 {pdf_pages} 页 → {pdf_out.name}"
-              f"（{pdf_out.stat().st_size / 1048576:.1f} MB，用时 {dt:.1f}s"
-              + (f"，另 {len(failed_names)} 张失败图未含" if failed_names else "")
-              + "）"})
-
-    if _prof_enabled():
-        el = time.perf_counter() - t0
-        _prof_write(task["id"], "\n".join([
-            f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} 图片超分任务 ====",
-            f"模型 {spec.id} · 推理后端 {'/'.join(engine.provider_used) if hasattr(engine, 'provider_used') else 'torch'}"
-            f" · 精度 {used_prec} · tile={tile} · {n}张 → {fmt.upper()}",
-            f"引擎加载 {load_s:.1f}s · 解码合计 {t_dec:.2f}s · 推理合计 {t_inf:.2f}s"
-            f" · 编码落盘合计 {t_sav:.2f}s",
-            f"成功 {ok}/{n} 张 · 总用时 {el:.1f}s · 平均 {ok / el if el > 0 else 0:.2f} 张/秒（端到端口径）",
-            *([f"PDF 合并 {pdf_pages} 页（无损封装）"] if pdf_pages else []),
-        ]) + "\n\n")
-
-    # 预览缩略图（对照页/任务卡，取第一张成功的），失败不影响主流程
-    preview_dir = TEMP_DIR / "previews"
-    preview_dir.mkdir(parents=True, exist_ok=True)
-
-    def _thumb(arr: np.ndarray, path: Path) -> None:
-        try:
-            t = Image.fromarray(arr).convert("RGB")
-            t.thumbnail((960, 960))
-            t.save(str(path), quality=88)
-        except Exception:  # noqa: BLE001
-            pass
-
-    assert first_pair is not None
-    _thumb(first_pair[1], preview_dir / f"{task['id']}.jpg")
-    _thumb(first_pair[0], preview_dir / f"{task['id']}_src.jpg")
-
-    emit({
-        "type": "done", "frames": ok,
-        "elapsed": round(time.perf_counter() - t0, 1),
-        "out_bytes": out_bytes_total,
-        "preview": str(preview_dir / f"{task['id']}.jpg"),
-        "src_preview": str(preview_dir / f"{task['id']}_src.jpg"),
-    })
-    return 0
-
-
-def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
+def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     task = db.get_task(task_id)
     if task is None:
         emit({"type": "failed", "error": f"任务 {task_id} 不存在"})
@@ -979,7 +531,6 @@ def main(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     })
     return 0
 
-
 if __name__ == "__main__":
     import argparse
 
@@ -996,7 +547,9 @@ if __name__ == "__main__":
     ap.add_argument("task_id")
     ap.add_argument("--shard", nargs=2, type=int, metavar=("I", "N"),
                     default=None, help="[内部] 双路并行：本进程跑第 I 路(0基)/共 N 路")
+    ap.add_argument("--serve", action="store_true",
+                    help="[内部] runner 常驻模式：任务成功后经 stdin 接续下一任务")
     args = ap.parse_args()
     sh = args.shard[0] if args.shard else None
     ns = args.shard[1] if args.shard else 1
-    sys.exit(main(args.task_id, sh, ns))
+    sys.exit(main(args.task_id, sh, ns, serve=args.serve))

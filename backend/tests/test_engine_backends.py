@@ -161,6 +161,7 @@ def test_worker_falls_back_on_cuda_kernel_fault(monkeypatch, tmp_path):
     回归：MangaJaNai 在 TRT/CUDA 后端 warmup 即崩（Resize fast_divmod 断言），
     任务直接失败；换链后主图仍 TRT、坏节点落 CPU。"""
     from sv.server import worker
+    from sv.server import worker_engine
 
     calls: list[str] = []
 
@@ -182,8 +183,8 @@ def test_worker_falls_back_on_cuda_kernel_fault(monkeypatch, tmp_path):
             return frame
 
     spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
-    monkeypatch.setattr(worker, "OnnxSrEngine", _BoomThenOk)
-    monkeypatch.setattr(worker, "settings",
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _BoomThenOk)
+    monkeypatch.setattr(worker_engine, "settings",
                         types.SimpleNamespace(load=lambda: {"engine": "trt"}))
     eng, prec = worker._load_onnx_engine(
         tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
@@ -194,6 +195,7 @@ def test_worker_falls_back_on_cuda_kernel_fault(monkeypatch, tmp_path):
 def test_worker_cuda_engine_fault_falls_to_cpu(monkeypatch, tmp_path):
     """engine=cuda 场景同一崩溃：无 GPU 替代链，退 CPU 保出片。"""
     from sv.server import worker
+    from sv.server import worker_engine
 
     calls: list[str] = []
 
@@ -213,8 +215,8 @@ def test_worker_cuda_engine_fault_falls_to_cpu(monkeypatch, tmp_path):
             return frame
 
     spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
-    monkeypatch.setattr(worker, "OnnxSrEngine", _BoomThenOk)
-    monkeypatch.setattr(worker, "settings",
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _BoomThenOk)
+    monkeypatch.setattr(worker_engine, "settings",
                         types.SimpleNamespace(load=lambda: {"engine": "cuda"}))
     eng, prec = worker._load_onnx_engine(
         tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
@@ -227,6 +229,7 @@ def test_worker_unicode_masked_oom_falls_back_tile(monkeypatch, tmp_path):
     bytes 内嵌系统 GBK 描述，Python 绑定层 utf-8 硬解失败）——_oom 必须能从
     e.args 的原始 bytes 识别 0x8007000E，降 tile 重试不被假象骗过直接失败。"""
     from sv.server import worker
+    from sv.server import worker_engine
 
     calls: list[tuple[str, int]] = []
 
@@ -249,8 +252,8 @@ def test_worker_unicode_masked_oom_falls_back_tile(monkeypatch, tmp_path):
             return frame
 
     spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
-    monkeypatch.setattr(worker, "OnnxSrEngine", _OomThenOk)
-    monkeypatch.setattr(worker, "settings",
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _OomThenOk)
+    monkeypatch.setattr(worker_engine, "settings",
                         types.SimpleNamespace(load=lambda: {"engine": "auto"}))
     eng, prec = worker._load_onnx_engine(
         tmp_path / "w.onnx", spec, 4, None, "fp32", 0, (2133, 1510), log=lambda ev: None)
@@ -262,6 +265,7 @@ def test_worker_large_output_preset_tile(monkeypatch, tmp_path):
     """大图输出像素超预算（2133p x4≈51M > 36M）自动预设 512 分块：
     干净会话一次到位，避免全尺寸 OOM 后同进程 DML 损坏只能退 CPU。"""
     from sv.server import worker
+    from sv.server import worker_engine
 
     calls: list[int] = []
 
@@ -277,8 +281,8 @@ def test_worker_large_output_preset_tile(monkeypatch, tmp_path):
             return frame
 
     spec = types.SimpleNamespace(io={}, fp16=False, id="x")
-    monkeypatch.setattr(worker, "OnnxSrEngine", _Ok)
-    monkeypatch.setattr(worker, "settings",
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _Ok)
+    monkeypatch.setattr(worker_engine, "settings",
                         types.SimpleNamespace(load=lambda: {"engine": "auto"}))
     # 大图：预设 512；1080p x4（33M）不动保持全尺寸性能
     worker._load_onnx_engine(

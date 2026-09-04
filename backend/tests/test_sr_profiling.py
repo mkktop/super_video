@@ -9,6 +9,7 @@ from sv.paths import TEMP_DIR, ffmpeg_bin
 from sv.server import db
 from sv.server import settings as settings_mod
 from sv.server import worker as worker_mod
+from sv.server import worker_common
 from sv.server.runner import fps_avg
 from sv.utils.process import WINDOWS_CREATE_FLAGS
 
@@ -39,7 +40,7 @@ def test_fps_avg_math():
 
 
 def test_prof_write_and_collect(tmp_path, monkeypatch):
-    monkeypatch.setattr(worker_mod, "SR_LOG_DIR", tmp_path)
+    monkeypatch.setattr(worker_common, "SR_LOG_DIR", tmp_path)
     worker_mod._prof_write("t1", "头部\n")
     worker_mod._prof_write("t1", "尾部\n")
     f = tmp_path / "t1.log"
@@ -58,12 +59,13 @@ def test_prof_write_and_collect(tmp_path, monkeypatch):
 
 
 def test_sr_log_api_and_annotation(tmp_path, monkeypatch):
-    monkeypatch.setattr(worker_mod, "SR_LOG_DIR", tmp_path)
+    monkeypatch.setattr(worker_common, "SR_LOG_DIR", tmp_path)
     from fastapi.testclient import TestClient
 
     from sv.server import app as app_mod
+    from sv.server.routes import tasks as tasks_mod
 
-    monkeypatch.setattr(app_mod, "SR_LOG_DIR", tmp_path)
+    monkeypatch.setattr(tasks_mod, "SR_LOG_DIR", tmp_path)
     db.init_db()
     task = db.new_task("in.mp4", "out.mp4", "realesr-animevideov3", {})
     assert task["fps_avg"] == 0  # 新库迁移出 fps_avg 列且默认 0
@@ -87,10 +89,11 @@ def test_sr_log_api_and_annotation(tmp_path, monkeypatch):
 def test_gc_sr_logs(tmp_path, monkeypatch):
     from sv.server.app import gc_sr_logs
 
-    monkeypatch.setattr(worker_mod, "SR_LOG_DIR", tmp_path)
+    monkeypatch.setattr(worker_common, "SR_LOG_DIR", tmp_path)
     from sv.server import app as app_mod
+    from sv.server.routes import tasks as tasks_mod
 
-    monkeypatch.setattr(app_mod, "SR_LOG_DIR", tmp_path)
+    monkeypatch.setattr(tasks_mod, "SR_LOG_DIR", tmp_path)
     for i in range(5):
         p = tmp_path / f"t{i}.log"
         p.write_text("x", encoding="utf-8")
@@ -106,7 +109,7 @@ def test_gc_sr_logs(tmp_path, monkeypatch):
 @pytest.mark.skipif(not __import__("conftest").dml_available(),
                     reason="需要 DML 可用（真模型推理）")
 def test_worker_writes_prof_log(tmp_path, monkeypatch):
-    monkeypatch.setattr(worker_mod, "SR_LOG_DIR", tmp_path)
+    monkeypatch.setattr(worker_common, "SR_LOG_DIR", tmp_path)
     monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
     settings_mod.save({"sr_profiling": True})
 

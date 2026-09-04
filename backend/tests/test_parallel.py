@@ -113,6 +113,7 @@ from sv.paths import TEMP_DIR
 from sv.pipeline.stream import TaskCanceled
 from sv.server import db as sv_db
 from sv.server import worker as worker_mod
+from sv.server import worker_engine
 from sv.utils.process import WINDOWS_CREATE_FLAGS
 from sv.paths import ffmpeg_bin
 
@@ -172,6 +173,11 @@ def _make_par_clip() -> None:
 def par_task(monkeypatch):
     _make_par_clip()
     sv_db.init_db()
+    # 每个用例=全新 worker 进程的语义：清掉进程内引擎缓存，
+    # 否则上个用例留下的同签名条目会绕过本用例的引擎打桩
+    import sv.server.worker_engine as _we
+
+    _we._ENGINE_CACHE.clear()
     out = TEMP_DIR / "par_e2e_out.mp4"
     task = sv_db.new_task(str(_PAR_CLIP), str(out), "realesr-animevideov3",
                           params={"scale": 2})
@@ -205,7 +211,7 @@ def test_dual_stream_e2e_success(par_task):
     task_id, out, child_pids, monkeypatch = par_task
     from sv.pipeline.probe import probe
 
-    monkeypatch.setattr(worker_mod, "OnnxSrEngine", _Fast2x)
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _Fast2x)
     assert worker_mod.main(task_id) == 0
     assert child_pids, "parallel 判定未生效：没有分片子进程被拉起"
     assert out.exists(), "双路收尾 concat 未产出最终文件"
@@ -220,7 +226,7 @@ def test_dual_stream_cancel_kills_child(par_task):
     """协调者取消 → finally 连坐 kill_tree 子进程；checkpoint 保留供续跑。"""
     task_id, out, child_pids, monkeypatch = par_task
     _CancelAfterSeg1.calls = 0  # 类计数器跨用例复位
-    monkeypatch.setattr(worker_mod, "OnnxSrEngine", _CancelAfterSeg1)
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _CancelAfterSeg1)
     assert worker_mod.main(task_id) == 3  # worker 约定：3 = 已取消
     assert child_pids
     assert not psutil.pid_exists(child_pids[0]), "取消后分片子进程必须被连坐杀死"

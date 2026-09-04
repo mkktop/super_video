@@ -74,10 +74,10 @@ def client():
 @pytest.fixture(autouse=True)
 def _fake_registry(monkeypatch, client):
     """路由层注册表替换（创建校验走假模型表）。"""
-    import sv.server.app as app_mod
+    from sv.server.routes import compare as compare_mod
 
     monkeypatch.setattr(
-        app_mod, "load_registry",
+        compare_mod, "load_registry",
         lambda: {"cmp-a": SPEC_A, "cmp-b": SPEC_B})
 
 

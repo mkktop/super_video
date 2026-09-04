@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onUnmounted, ref, watch } from 'vue'
 import { NButton, NEmpty, NInput, NPopconfirm, NSpace, useDialog, useMessage } from 'naive-ui'
 import TaskCard from '../components/TaskCard.vue'
 import { api, type Task } from '../api'
@@ -9,11 +9,22 @@ const message = useMessage()
 const dialog = useDialog()
 
 // ---- 队列完成动作倒计时横幅（关机/休眠宽限期，可撤销） ----
+// 秒级 tick 只在横幅存在时运行：无倒计时的日常会话不再每秒强制整页重渲染
 const tick = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  tickTimer = setInterval(() => (tick.value = Date.now()), 1000)
-})
+watch(
+  () => store.queueAction,
+  (qa) => {
+    if (qa && !tickTimer) {
+      tick.value = Date.now()
+      tickTimer = setInterval(() => (tick.value = Date.now()), 1000)
+    } else if (!qa && tickTimer) {
+      clearInterval(tickTimer)
+      tickTimer = null
+    }
+  },
+  { immediate: true },
+)
 onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer)
 })
@@ -30,6 +41,8 @@ async function cancelQueueAction() {
   try {
     await api.cancelQueueAction()
     store.queueAction = null // 乐观清横幅；WS 取消事件随迟到不重复伤害
+  } catch {
+    message.error('取消失败（本地服务未连接？）')
   } finally {
     cancelingAction.value = false
   }

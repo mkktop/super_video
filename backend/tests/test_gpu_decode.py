@@ -166,11 +166,11 @@ def api_client(monkeypatch, tmp_path):
         total_frames=24, has_audio=False, audio=[], subtitles=[],
         path=tmp_path / "in.mp4",
     )
-    monkeypatch.setattr("sv.server.app.probe", lambda p: info)
-    monkeypatch.setattr("sv.server.app.validate_m0", lambda i: None)
-    monkeypatch.setattr("sv.server.app.cached_hardware", lambda: {
+    monkeypatch.setattr("sv.server.routes.tasks.probe", lambda p: info)
+    monkeypatch.setattr("sv.server.routes.tasks.validate_m0", lambda i: None)
+    monkeypatch.setattr("sv.server.routes.tasks.cached_hardware", lambda: {
         "nvenc": False, "av1_nvenc": False, "amf": False, "svt_av1": True})
-    monkeypatch.setattr("sv.server.app.load_registry", lambda: {
+    monkeypatch.setattr("sv.server.routes.tasks.load_registry", lambda: {
         "m-test": SimpleNamespace(
             id="m-test", engine="onnx", scale=[2], io={}, tile_hint=0,
             installed=True, bundled=True, vram_ok=True, fp16=False)})
@@ -219,9 +219,9 @@ def test_probe_endpoint_decoder_map(monkeypatch, tmp_path):
         total_frames=24, has_audio=False, audio=[], subtitles=[],
         path=tmp_path / "in.mkv",
     )
-    monkeypatch.setattr("sv.server.app.probe", lambda p: info)
-    monkeypatch.setattr("sv.server.app.validate_m0", lambda i: None)
-    monkeypatch.setattr("sv.server.app.probe_hwaccel", _fake_probe_hwaccel)
+    monkeypatch.setattr("sv.server.routes.models.probe", lambda p: info)
+    monkeypatch.setattr("sv.server.routes.models.validate_m0", lambda i: None)
+    monkeypatch.setattr("sv.server.routes.models.probe_hwaccel", _fake_probe_hwaccel)
 
     (tmp_path / "in.mkv").write_bytes(b"x")  # 端点先做存在性检查
     from sv.server.app import app

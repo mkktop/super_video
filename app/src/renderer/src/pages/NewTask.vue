@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -23,6 +23,12 @@ import {
 } from 'naive-ui'
 import { api, mediaSrc, type ModelInfo, type ProbeInfo } from '../api'
 import { refreshTasks, store, ui } from '../store'
+import { useFileDrop, useRecentVideos } from '../composables/videoPicks'
+import { useModelOptions } from '../composables/useModelOptions'
+import { useEncoderOptions } from '../composables/useEncoderOptions'
+import { tileOptions, useCustomResolution } from '../composables/useCustomResolution'
+import { SCENES, hasScene, sceneLabel } from '../composables/useModelOptions'
+import { denoiseLabel } from '../composables/useModelOptions'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -114,41 +120,10 @@ async function autoFillOutput() {
   output.value = await defaultOutputName(stem, container.value, p)
 }
 
-// ---- 模型 ----
-// 已下载（含内置）排最前（与图片超分/模型对比页同款）：模型多了以后，
-// 最常点的就是已装的那几个；稳定排序，组内保持注册表顺序
-// 场景筛选（视频任务默认「全部」；漫画/图片向模型选了也能跑，只是不快）
-const scene = ref<'all' | 'video' | 'manga' | 'image'>('all')
-const SCENES = ['video', 'manga', 'image'] as const
-const sceneLabel: Record<string, string> = { video: '视频', manga: '漫画', image: '图片' }
-const hasScene = (m: ModelInfo, s: string) => (m.scenes ?? ['video', 'image']).includes(s)
-const srModels = computed(() =>
-  store.models
-    .filter((m) => m.kind !== 'interp')
-    .filter((m) => scene.value === 'all' || hasScene(m, scene.value))
-    .sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled)))
-const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
-const scaleOptions = computed(() =>
-  (selectedModel.value?.scale ?? []).map((s) => ({ label: `x${s}`, value: s })),
-)
-const interpOptions = computed(() => [
-  { label: '关闭', value: 'off' },
-  { label: 'RIFE 2×（帧率翻倍，需下载 23MB 模型）', value: 'rife2x' },
-])
-// 降噪档位随模型注册表动态出（real-cugan 专属；缺省回退保守/3 两档）
-const denoiseLabel = {
-  0: '不降噪（no-denoise）',
-  1: '轻度 denoise 1',
-  2: '中度 denoise 2',
-  3: 'denoise 3（去压缩噪，适合老片）',
-} as Record<number, string>
-const denoiseOptions = computed(() => {
-  const levels = selectedModel.value?.denoise_levels ?? [0, 3]
-  return levels.map((n) => ({ label: denoiseLabel[n] ?? `denoise ${n}`, value: n }))
-})
-const hasDenoiseVariants = computed(
-  () => (selectedModel.value?.denoise_levels?.length ?? 0) > 0,
-)
+// ---- 模型选择（场景筛选/已装优先/倍率与降噪选项，见 composables/useModelOptions） ----
+const { scene, srModels, selectedModel, scaleOptions, interpOptions,
+        denoiseOptions, hasDenoiseVariants, selectModel } = useModelOptions(modelId, targetScale)
+
 // ---- 智能推荐（probe 附带；源分析失败时无此块，卡片整张不出现） ----
 const recommend = computed(() => probeInfo.value?.recommend ?? null)
 const recommendFlags = computed(() => {
@@ -173,85 +148,13 @@ function applyRecommendation() {
   message.success(`已应用推荐配置：${r.model_name || '模型'} · x${r.target_scale}`)
   modelSec.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
-const nvencOk = computed(() => store.hardware?.nvenc ?? false)
-const av1NvencOk = computed(() => store.hardware?.av1_nvenc ?? false)
-const amfOk = computed(() => store.hardware?.amf ?? false)
-const svtOk = computed(() => store.hardware?.svt_av1 ?? false)
-const codecOptions = computed(() => [
-  { label: 'H.264 · 软件编码（兼容性好）', value: 'h264' },
-  { label: nvencOk.value ? 'H.264 · 硬件编码 NVENC（速度优先）' : 'H.264 · 硬件编码（当前设备不支持）', value: 'h264_nvenc', disabled: !nvencOk.value },
-  { label: 'H.265 · 软件编码（体积较小）', value: 'h265' },
-  { label: nvencOk.value ? 'H.265 · 硬件编码 NVENC（速度与体积均衡）' : 'H.265 · 硬件编码（当前设备不支持）', value: 'hevc_nvenc', disabled: !nvencOk.value },
-  { label: av1NvencOk.value ? 'AV1 · 硬件编码 NVENC（RTX 40 系及以上，体积最小）' : 'AV1 · 硬件编码（当前设备不支持）', value: 'av1_nvenc', disabled: !av1NvencOk.value },
-  { label: amfOk.value ? 'H.264 · 硬件编码 AMF（AMD 显卡）' : 'H.264 · 硬件编码 AMF（需 AMD 显卡）', value: 'h264_amf', disabled: !amfOk.value },
-  { label: amfOk.value ? 'H.265 · 硬件编码 AMF（AMD 显卡）' : 'H.265 · 硬件编码 AMF（需 AMD 显卡）', value: 'hevc_amf', disabled: !amfOk.value },
-  { label: svtOk.value ? 'AV1 · 软件编码 SVT（体积小，速度中等）' : 'AV1 · 软件编码 SVT（当前环境不支持）', value: 'av1_svt', disabled: !svtOk.value },
-])
-const containerOptions = [
-  { label: 'MP4（兼容性最好）', value: 'mp4' },
-  { label: 'MKV（字幕/音频全兼容）', value: 'mkv' },
-  { label: 'MOV（QuickTime）', value: 'mov' },
-]
-// 解码器：单文件按本文件实测（probe 返回 decoder map，含源编码是否支持）；
-// 批量无逐文件探测，按设备能力兜底——个别文件不支持时 worker 端回退软解并记日志
-const probedDecoder = computed(() => probeInfo.value?.decoder ?? null)
-const nvdecOk = computed(() =>
-  probedDecoder.value ? probedDecoder.value.nvdec : (store.hardware?.nvdec ?? false))
-const d3d11vaOk = computed(() =>
-  probedDecoder.value ? probedDecoder.value.d3d11va : (store.hardware?.d3d11va ?? false))
-const decoderOptions = computed(() => [
-  { label: '软件解码（默认，兼容性最好）', value: 'sw' },
-  { label: nvdecOk.value ? '硬件解码 NVDEC（NVIDIA 显卡）' : '硬件解码 NVDEC（当前设备/视频不支持）', value: 'nvdec', disabled: !nvdecOk.value },
-  { label: d3d11vaOk.value ? '硬件解码 D3D11VA（AMD / Intel 显卡）' : '硬件解码 D3D11VA（当前设备/视频不支持）', value: 'd3d11va', disabled: !d3d11vaOk.value },
-])
-const audioOptions = computed(() => [
-  { label: '自动（兼容则原样保留）', value: 'auto' },
-  { label: '原样保留（copy，需容器兼容）', value: 'copy' },
-  { label: '转 AAC 192k（最兼容）', value: 'aac' },
-  { label: container.value === 'mkv' ? 'FLAC 无损（仅 MKV）' : 'FLAC 无损（切到 MKV 可用）', value: 'flac', disabled: container.value !== 'mkv' },
-  { label: '不保留音轨', value: 'none' },
-])
-watch(container, (c) => {
-  if (c !== 'mkv' && audioMode.value === 'flac') audioMode.value = 'auto'
-})
-const srcSubs = computed(() => probeInfo.value?.subtitles ?? [])
-const subHint = computed(() => {
-  if (!srcSubs.value.length) return ''
-  if (container.value === 'mkv') return `MKV 将原样保留全部 ${srcSubs.value.length} 条字幕轨与内嵌字体`
-  return 'MP4/MOV 仅支持文本字幕（转 mov_text），图形字幕（PGS 等）会被丢弃'
-})
-const audioHint = computed(() => {
-  const n = probeInfo.value?.audio_tracks?.length ?? 0
-  if (n < 2 || outKind.value !== 'video') return ''
-  if (audioMode.value === 'none') return '不保留音轨'
-  const conv = container.value === 'mkv' ? '' : '，不兼容 MP4/MOV 的轨自动转 AAC'
-  return `将保留全部 ${n} 条音轨${conv}`
-})
-
-/** 媒体属性提示（信息卡下方标签行）：10bit/VFR/隔行——后两者后端会自动处理，
- * 展示让用户知道有这一步；隔行另给反交错建议（与智能推荐同依据，未开推荐也可见） */
-const mediaFlags = computed(() => {
-  const p = probeInfo.value
-  if (!p?.ok) return [] as string[]
-  const flags: string[] = []
-  if (p.field_order && p.field_order !== 'progressive') {
-    flags.push('隔行扫描源 — 建议开启反交错')
-  }
-  if (p.vfr) flags.push('可变帧率 — 将自动转为恒定帧率')
-  if ((p.bit_depth ?? 8) > 8) flags.push(`${p.bit_depth}bit 位深 — 处理时转为 8bit`)
-  return flags
-})
+// ---- 编码/解码/音轨/字幕选项（设备能力与探测实测，见 composables/useEncoderOptions） ----
+const { codecOptions, containerOptions, decoderOptions, audioOptions,
+        srcSubs, subHint, audioHint, mediaFlags } = useEncoderOptions(
+  probeInfo, container, audioMode, outKind)
 
 const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
 const contentLabel = { anime: '动漫', comic: '漫画', general: '真人/通用', real: '真人/通用' } as Record<string, string>
-
-/** 选模型：新模型支持当前倍率则保留，否则回落到最小倍率 */
-function selectModel(id: string) {
-  const spec = store.models.find((m) => m.id === id)
-  if (!spec || !spec.vram_ok) return
-  modelId.value = id
-  if (!spec.scale.includes(targetScale.value)) targetScale.value = Math.min(...spec.scale)
-}
 
 const isImage = computed(() => outKind.value !== 'video')
 const imgFrameHint = computed(() => {
@@ -260,52 +163,10 @@ const imgFrameHint = computed(() => {
   return `将导出全部 ${n} 帧，按 000001.${outKind.value} 顺序编号`
 })
 
-// ---- 自定义分辨率 ----
-const customAvailable = computed(
-  () => inputs.value.length === 1 && !!probeInfo.value?.ok,
-)
-const srcW = computed(() => probeInfo.value?.width ?? 0)
-const srcH = computed(() => probeInfo.value?.height ?? 0)
-const maxScale = computed(() => Math.max(...(selectedModel.value?.scale ?? [1])))
-// yuv420 编码要求偶数，奇数向下取整（后端同规则）
-const effW = computed(() => Math.max(2, Math.floor((targetW.value || 0) / 2) * 2))
-const effH = computed(() => Math.max(2, Math.floor((targetH.value || 0) / 2) * 2))
-// 纪律：只允许"原生超分后缩小"——取能覆盖目标的最小原生倍率（省算力）
-const customScale = computed(() =>
-  (selectedModel.value?.scale ?? []).find(
-    (s) => srcW.value * s >= effW.value && srcH.value * s >= effH.value,
-  ) ?? null,
-)
-const belowSrc = computed(() => effW.value < srcW.value || effH.value < srcH.value)
-const customOk = computed(
-  () => customAvailable.value && !belowSrc.value && customScale.value !== null,
-)
-const aspectNote = computed(() => {
-  if (!srcW.value || !srcH.value || !effW.value || !effH.value) return ''
-  const a1 = srcW.value / srcH.value
-  const a2 = effW.value / effH.value
-  return Math.abs(a1 - a2) / a1 > 0.01
-    ? `宽高比将由 ${a1.toFixed(2)} 变为 ${a2.toFixed(2)}（轻微拉伸）`
-    : ''
-})
-
-watch(resMode, (m) => {
-  if (m === 'custom' && probeInfo.value?.ok) {
-    targetW.value = probeInfo.value.width * targetScale.value
-    targetH.value = probeInfo.value.height * targetScale.value
-  }
-})
-watch(
-  () => inputs.value.length,
-  (n) => {
-    if (n !== 1) resMode.value = 'scale' // 批量无逐文件探测，只支持倍数模式
-  },
-)
-
-const tileOptions = [
-  { label: '自动（模型默认）', value: 0 },
-  ...[128, 192, 256, 384, 512, 768, 1024].map((v) => ({ label: `${v} px`, value: v })),
-]
+// ---- 自定义分辨率（只缩不放纪律，见 composables/useCustomResolution） ----
+const { customAvailable, srcW, srcH, maxScale, effW, effH,
+        customScale, belowSrc, customOk, aspectNote } = useCustomResolution(
+  inputs, probeInfo, selectedModel, targetScale, resMode, targetW, targetH)
 
 // ---- 提交校验：单文件需探测成功，多文件批量直接放行（无逐文件探测） ----
 const canSubmit = computed(
@@ -317,53 +178,9 @@ const canSubmit = computed(
     !(resMode.value === 'custom' && !customOk.value),
 )
 
-// ---- 文件选择 ----
-// 最近输入（localStorage，仅前端记忆；展示前过滤掉已不存在的文件）
-const RECENT_KEY = 'sv_recent_videos'
-const VIDEO_EXT = /\.(mp4|mkv|mov|avi|webm|flv|ts|m4v|wmv)$/i
-const recents = ref<string[]>([])
-
-onMounted(async () => {
-  try {
-    const list = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
-    recents.value = Array.isArray(list) ? list.filter((x) => typeof x === 'string') : []
-  } catch {
-    recents.value = []
-  }
-  const ok: string[] = []
-  for (const p of recents.value) {
-    if (await window.sv.fsExists(p)) ok.push(p)
-  }
-  recents.value = ok.slice(0, 6)
-})
-
-function pushRecent(paths: string[]) {
-  const list = [...paths, ...recents.value.filter((x) => !paths.includes(x))].slice(0, 6)
-  recents.value = list
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list))
-  } catch {
-    /* 存储不可用只是少了快捷入口 */
-  }
-}
-
-// ---- 拖拽入队：整个页面都是放置区（File.path 已移除，路径经 webUtils 取） ----
-const dragDepth = ref(0)
-function onDragEnter(e: DragEvent) {
-  if (!e.dataTransfer?.types.includes('Files')) return
-  dragDepth.value++
-}
-function onDragLeave() {
-  dragDepth.value = Math.max(0, dragDepth.value - 1)
-}
-function onDropFiles(e: DragEvent) {
-  dragDepth.value = 0
-  const files = [...(e.dataTransfer?.files ?? [])]
-  const vids = files
-    .filter((f) => VIDEO_EXT.test(f.name))
-    .map((f) => window.sv.pathForFile(f))
-  if (vids.length) void setInput(vids)
-}
+// ---- 文件选择：最近输入与整页拖拽（与剪切页共用，见 composables/videoPicks） ----
+const { recents, pushRecent } = useRecentVideos()
+const { dragDepth, onDragEnter, onDragLeave, onDropFiles } = useFileDrop((vids) => setInput(vids))
 
 async function setInput(files: string[]) {
   const seq = ++probeSeq
@@ -554,7 +371,7 @@ async function saveAsPreset() {
   })
   savingPreset.value = false
   if (r.ok) {
-    store.presets = await api.presets()
+    store.presets = await api.presets().catch(() => store.presets)
     presetName.value = ''
     presetPopShow.value = false
     message.success(`已保存预设「${name}」，下次直接点选`)
@@ -566,7 +383,7 @@ async function deleteUserPreset(pid: string) {
   const p = store.presets.find((x) => x.id === pid)
   const r = await api.deletePreset(pid)
   if (r.ok) {
-    store.presets = await api.presets()
+    store.presets = await api.presets().catch(() => store.presets)
     message.success(`已删除预设「${p?.name ?? pid}」`)
   } else {
     message.error(`删除失败: ${(await r.json()).detail ?? r.status}`)
