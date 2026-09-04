@@ -24,6 +24,32 @@ const hw = computed(() => store.hardware)
 // naive Line 进度的渐变色只认 { stops: [from, to] } 对象形态（数组形态会崩）
 const gradFill: { stops: [string, string] } = { stops: ['#4f8cff', '#8b5cf6'] }
 
+// ---- 显卡主卡：实时显存占用（perf 2s 一拍）+ 推理后端徽标 ----
+const gpuLive = computed(() => store.perf.latest?.gpus?.[0] ?? null)
+const vramTotalGb = computed(() => {
+  const live = gpuLive.value?.mem_total_mb
+  if (live) return live / 1024
+  return hw.value?.gpus?.[0]?.vram_gb ?? null
+})
+const vramUsedGb = computed(() => {
+  const used = gpuLive.value?.mem_used_mb
+  return used ? used / 1024 : null
+})
+const vramPct = computed(() => {
+  const total = vramTotalGb.value
+  const used = vramUsedGb.value
+  if (!total || used == null) return 0
+  return Math.min(100, Math.round((used / total) * 100))
+})
+const backendLabel = computed(() => {
+  if (!store.engine) return '未就绪'
+  return store.engine.backend === 'trt'
+    ? 'TensorRT'
+    : store.engine.backend === 'cuda'
+      ? 'CUDA'
+      : 'DirectML'
+})
+
 // 全新用户（还没跑过任何任务）：四宫格全 0 没有意义，换成三步上手引导
 const fresh = computed(() => store.stats.total === 0)
 </script>
@@ -146,25 +172,38 @@ const fresh = computed(() => store.stats.total === 0)
     <section>
       <h2 class="sec-title">硬件信息</h2>
       <div class="hw-grid">
-        <div class="card hw hw-gpu">
-          <div class="hw-head">
-            <span class="hw-icon">
-              <svg width="18" height="18" viewBox="0 0 18 18"><rect x="2" y="4.5" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" /><circle cx="6.4" cy="9" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3" /><path d="M10.5 7.2l2.6 1.8-2.6 1.8z" fill="currentColor" /><path d="M4.5 13.5v1.6M13.5 13.5v1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
-            </span>
-            <span class="hw-name">{{ hw?.gpus?.[0]?.name ?? '—' }}</span>
+      <div class="card hw hw-gpu">
+        <div class="gpu-circuit" aria-hidden="true" />
+        <div class="gpu-head">
+          <span class="gpu-icon">
+            <svg width="22" height="22" viewBox="0 0 22 22"><rect x="2" y="5.5" width="17" height="11" rx="2.4" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="7.4" cy="11" r="2.1" fill="none" stroke="currentColor" stroke-width="1.3" /><path d="M12.5 8.8l3.4 2.2-3.4 2.2z" fill="currentColor" /><path d="M4.8 16.5v2M16.8 16.5v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><path d="M6 2.6h10M6 1.2v2.8M16 1.2v2.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+          </span>
+          <div class="gpu-title">
+            <span class="gpu-kind">GRAPHICS · 图形处理器</span>
+            <span class="gpu-name">{{ hw?.gpus?.[0]?.name ?? '—' }}</span>
           </div>
-          <div class="hw-tags">
-            <NTag :type="store.engine ? 'success' : 'warning'" size="small" :bordered="false">
-              {{ store.engine ? 'AI 推理就绪' : '推理引擎未就绪' }}
-            </NTag>
-            <NTag v-if="hw?.gpus?.[0]?.vram_gb" type="info" size="small" :bordered="false">
-              显存 {{ hw.gpus[0].vram_gb }} GB
-            </NTag>
-            <NTag size="small" :bordered="false">
-              {{ store.engine?.backend === 'trt' ? 'TensorRT 加速' : store.engine?.backend === 'cuda' ? 'CUDA 加速' : 'DirectML' }}
-            </NTag>
-          </div>
+          <span class="gpu-backend" :class="{ off: !store.engine }">
+            <span class="gb-dot" />{{ backendLabel }}
+          </span>
         </div>
+        <div v-if="vramUsedGb != null" class="gpu-vram">
+          <div class="vram-bar">
+            <div class="vram-fill" :style="{ width: vramPct + '%' }" />
+          </div>
+          <span class="vram-text">
+            显存 {{ vramUsedGb.toFixed(1) }} / {{ vramTotalGb?.toFixed(1) }} GB
+            <b v-if="gpuLive?.util != null"> · GPU {{ gpuLive.util }}%</b>
+          </span>
+        </div>
+        <div class="hw-tags">
+          <NTag :type="store.engine ? 'success' : 'warning'" size="small" :bordered="false">
+            {{ store.engine ? 'AI 推理就绪' : '推理引擎未就绪' }}
+          </NTag>
+          <NTag v-if="vramUsedGb == null && hw?.gpus?.[0]?.vram_gb" type="info" size="small" :bordered="false">
+            显存 {{ hw.gpus[0].vram_gb }} GB
+          </NTag>
+        </div>
+      </div>
         <div class="card hw">
           <div class="hw-head">
             <span class="hw-icon">
@@ -487,29 +526,135 @@ h1 {
 /* ---- 硬件卡 ---- */
 .hw-grid { display: grid; grid-template-columns: 1.6fr 1.2fr 0.7fr; gap: 14px; }
 .hw { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
-.hw-gpu {
-  position: relative;
-  background:
-    linear-gradient(120deg, rgba(79, 140, 255, 0.1), rgba(139, 92, 246, 0.05) 45%, transparent 75%),
-    linear-gradient(180deg, #1c2027, #181b21);
-  border-color: rgba(96, 130, 200, 0.32);
-  overflow: hidden;
-}
-.hw-gpu::after {
-  content: '';
-  position: absolute;
-  top: -60px;
-  right: -50px;
-  width: 180px;
-  height: 180px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(79, 140, 255, 0.16), transparent 65%);
-  pointer-events: none;
-}
 .hw-head { display: flex; align-items: center; gap: 10px; }
 .hw-icon { display: inline-flex; color: #8fa8d8; }
 .hw-name { font-weight: 650; font-size: 14.5px; }
 .hw-tags { display: flex; gap: 8px; }
 .hw-detail { font-size: 13px; color: #c6cbd4; word-break: break-all; }
 .hw-sub { font-size: 12px; color: #8a919d; }
+
+/* 显卡主卡：整机门面——暗色电路底 + 金属渐变型号名 + 实时显存条 */
+.hw-gpu {
+  position: relative;
+  background:
+    radial-gradient(300px 150px at 86% -24%, rgba(79, 140, 255, 0.2), transparent 68%),
+    radial-gradient(220px 140px at -6% 118%, rgba(139, 92, 246, 0.14), transparent 68%),
+    linear-gradient(180deg, #1a1f2a, #171a21);
+  border-color: rgba(96, 130, 200, 0.38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 22px rgba(79, 140, 255, 0.09);
+  overflow: hidden;
+  justify-content: space-between;
+}
+/* 电路板走线：右侧极淡的斜向细线 */
+.gpu-circuit {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(115deg, rgba(140, 170, 255, 0.05) 0 1px, transparent 1px 26px),
+    repeating-linear-gradient(115deg, rgba(140, 170, 255, 0.03) 0 1px, transparent 1px 78px);
+  -webkit-mask-image: linear-gradient(105deg, transparent 38%, rgba(0, 0, 0, 0.85) 75%);
+  mask-image: linear-gradient(105deg, transparent 38%, rgba(0, 0, 0, 0.85) 75%);
+}
+.gpu-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.gpu-icon {
+  display: inline-flex;
+  color: #7fb0ff;
+  filter: drop-shadow(0 0 7px rgba(79, 140, 255, 0.65));
+  animation: gpu-breathe 2.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes gpu-breathe {
+  0%, 100% { filter: drop-shadow(0 0 5px rgba(79, 140, 255, 0.45)); }
+  50% { filter: drop-shadow(0 0 10px rgba(79, 140, 255, 0.85)); }
+}
+.gpu-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gpu-kind {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #7c8ba8;
+}
+/* 型号名：银蓝金属渐变 + 缓速流光扫过 */
+.gpu-name {
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(100deg, #c8d6f2 0%, #8fb4ff 28%, #eef4ff 50%, #b39cff 72%, #c8d6f2 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gpu-shimmer 7s linear infinite;
+}
+@keyframes gpu-shimmer {
+  0% { background-position: 0% 0; }
+  100% { background-position: -220% 0; }
+}
+.gpu-backend {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: #9fc2ff;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(79, 140, 255, 0.45);
+  background: linear-gradient(180deg, rgba(79, 140, 255, 0.14), rgba(79, 140, 255, 0.05));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 14px rgba(79, 140, 255, 0.14);
+}
+.gpu-backend .gb-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4f8cff;
+  box-shadow: 0 0 8px rgba(79, 140, 255, 0.9);
+  animation: run-blink 1.8s ease-in-out infinite;
+}
+.gpu-backend.off { color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.07); box-shadow: none; }
+.gpu-backend.off .gb-dot { background: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.8); animation: none; }
+/* 实时显存占用条 */
+.gpu-vram {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.vram-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.vram-fill {
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #4f8cff, #8b5cf6);
+  box-shadow: 0 0 10px rgba(79, 140, 255, 0.55);
+  transition: width 0.6s ease-out;
+}
+.vram-text {
+  font-size: 12px;
+  color: #9aa1ad;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vram-text b { color: #8ab4ff; font-weight: 650; }
 </style>
