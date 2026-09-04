@@ -211,6 +211,7 @@ function handleWsEvent(raw: MessageEvent) {
           done: ev.done ?? store.trt.done,
           total: ev.total ?? store.trt.total,
           error: ev.error ?? null,
+          source: ev.source ?? (ev.phase === 'download' ? store.trt.source : null),
         }
         if (ev.phase === 'done') {
           // 安装完成:重拉完整状态(版本/体积/资产)与引擎探测结果

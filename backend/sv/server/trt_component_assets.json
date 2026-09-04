@@ -5,58 +5,85 @@
   "trt": "10.16.1.11",
   "assets": {
     "core": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-core-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-core-win-x64-v1.7z",
       "size": 1327160128,
       "sha256": "8f590516cf6822a1736acf6b02c0269d32dd3e38d5c619733149dd6a671629d2",
-      "raw": 3084797568
+      "raw": 3084797568,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-core-win-x64-v1.7z"
+      ]
     },
     "builder-ptx": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-ptx-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-builder-ptx-win-x64-v1.7z",
       "size": 149437962,
       "sha256": "15d96af9a57f121ae24f8829d41ea08317a2a7660db450c7222a8f115f5f30e8",
-      "raw": 498070128
+      "raw": 498070128,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-ptx-win-x64-v1.7z"
+      ]
     },
     "builder-sm100": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm100-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-builder-sm100-win-x64-v1.7z",
       "size": 151495443,
       "sha256": "778011f1a3b6438d0731104cd2686bd67363783c6267b53cee6d8038694930f0",
-      "raw": 424997488
+      "raw": 424997488,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm100-win-x64-v1.7z"
+      ]
     },
     "builder-sm120": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm120-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-builder-sm120-win-x64-v1.7z",
       "size": 132967352,
       "sha256": "7e003b6a41d7f8c194a0df9aaeda99aff6c581ab9a2c4ee8f5edce81e5664a72",
-      "raw": 389793392
+      "raw": 389793392,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm120-win-x64-v1.7z"
+      ]
     },
     "builder-sm75": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm75-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-builder-sm75-win-x64-v1.7z",
       "size": 45098731,
       "sha256": "1ce9ee843cbcc9f5baf906b00b81dbedad13236143dc790ae60022417c04e24f",
-      "raw": 165661808
+      "raw": 165661808,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm75-win-x64-v1.7z"
+      ]
     },
     "builder-sm80": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm80-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-builder-sm80-win-x64-v1.7z",
       "size": 88106630,
       "sha256": "ca118ac6367daf84ca3997640c50317f5d6a84c9c6566e99543882786e37347b",
-      "raw": 264855664
+      "raw": 264855664,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm80-win-x64-v1.7z"
+      ]
     },
     "builder-sm86": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm86-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-builder-sm86-win-x64-v1.7z",
       "size": 80557501,
       "sha256": "309be79b621bd20bf21d4ef0187369fab08fd8cbadf79e497e3d036fcfd5bdd1",
-      "raw": 249851504
+      "raw": 249851504,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm86-win-x64-v1.7z"
+      ]
     },
     "builder-sm89": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm89-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-builder-sm89-win-x64-v1.7z",
       "size": 85374867,
       "sha256": "06ef8c3c4522c1a792067270ed8636616e63961c5f427b99ab25f44961987f4a",
-      "raw": 262510192
+      "raw": 262510192,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm89-win-x64-v1.7z"
+      ]
     },
     "builder-sm90": {
-      "url": "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm90-win-x64-v1.7z",
+      "url": "https://modelscope.cn/models/mengkaikun/super-video-models/resolve/master/trt-builder-sm90-win-x64-v1.7z",
       "size": 245859336,
       "sha256": "50e001af9d14a4ff197fff143172e81940576cc62a714292c4d5f473c0a84758",
-      "raw": 670116976
+      "raw": 670116976,
+      "mirror_urls": [
+        "https://github.com/mkktop/super_video/releases/download/runtime-v1/trt-builder-sm90-win-x64-v1.7z"
+      ]
     }
   }
 }

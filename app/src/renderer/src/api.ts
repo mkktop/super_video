@@ -133,6 +133,8 @@ export interface TrcStatus {
   done: number
   total: number
   error: string | null
+  /** 当前下载渠道（modelscope | github），非下载态为 null */
+  source: string | null
 }
 
 export interface ProbeInfo {

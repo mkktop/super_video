@@ -125,3 +125,55 @@ def test_load_assets_invalid(tmp_path, monkeypatch):
     assert mod.load_assets() == {}
     (tmp_path / "nope.json").write_text("{bad", encoding="utf-8")
     assert mod.load_assets() == {}
+
+
+# ---- _download_asset：镜像回退 + 渠道回调 ----
+
+def _sha(b: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(b).hexdigest()
+
+
+def test_download_asset_mirror_fallback(tmp_path):
+    """主源挂 → 逐镜像重试落盘；source_cb 按实际发起顺序回调（TRT 加速的主路径）。"""
+    good = b"trt-mirror-content"
+    dead = tmp_path / "missing.7z"
+    mirror = tmp_path / "mirror.7z"
+    mirror.write_bytes(good)
+    part = {
+        "url": dead.as_uri(),
+        "size": len(good),
+        "sha256": _sha(good),
+        "mirror_urls": [dead.as_uri(), mirror.as_uri()],  # 第一个镜像也挂，验证逐个尝试
+    }
+    dest = tmp_path / "out.7z"
+    seen: list[str] = []
+    tc._download_asset(part, dest, lambda *a: None,
+                       source_cb=lambda url, name: seen.append(url))
+    assert dest.read_bytes() == good
+    assert seen == [dead.as_uri(), dead.as_uri(), mirror.as_uri()]
+
+
+def test_download_asset_primary_hit(tmp_path):
+    """主源一次成功：source_cb 恰好一次、带主源 URL。"""
+    content = b"primary"
+    src = tmp_path / "core.7z"
+    src.write_bytes(content)
+    part = {"url": src.as_uri(), "size": len(content), "sha256": _sha(content)}
+    dest = tmp_path / "out.7z"
+    seen: list[str] = []
+    tc._download_asset(part, dest, lambda *a: None,
+                       source_cb=lambda url, name: seen.append(url))
+    assert dest.read_bytes() == content
+    assert seen == [src.as_uri()]
+
+
+def test_download_asset_all_sources_dead(tmp_path):
+    """主源与镜像全挂：报「下载失败（含镜像）」，不留半成品。"""
+    dead = tmp_path / "nope.7z"
+    part = {"url": dead.as_uri(), "mirror_urls": [dead.as_uri()]}
+    dest = tmp_path / "out.7z"
+    with pytest.raises(RuntimeError, match="镜像"):
+        tc._download_asset(part, dest, lambda *a: None)
+    assert not dest.exists()

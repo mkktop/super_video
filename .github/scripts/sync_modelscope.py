@@ -39,6 +39,7 @@ for _s in (sys.stdout, sys.stderr):
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_GLOB = str(REPO_ROOT / "backend" / "sv" / "models" / "registry_json" / "*.json")
+TRT_ASSETS = REPO_ROOT / "backend" / "sv" / "server" / "trt_component_assets.json"
 BUNDLED_DIR = REPO_ROOT / "backend" / "sv" / "models" / "bundled"
 DEFAULT_REPO = "mengkaikun/super-video-models"
 PROXY_KEYS = ("http_proxy", "https_proxy", "all_proxy")
@@ -59,7 +60,8 @@ license: other
 
 def collect_files() -> dict[str, dict]:
     """注册表全部文件条目按 name 去重（不同 manifest 引用同一文件取一份）。
-    附带 _model_id 供 models_store 本地副本解析。"""
+    附带 _model_id 供 models_store 本地副本解析；TRT 组件资产（trt_component_assets.json）
+    同池对账——文件名 trt-*.7z 与模型不冲突。"""
     files: dict[str, dict] = {}
     for p in sorted(glob.glob(REGISTRY_GLOB)):
         spec = json.loads(Path(p).read_text(encoding="utf-8"))
@@ -71,6 +73,15 @@ def collect_files() -> dict[str, dict]:
                 print(f"!! 注册表内 {f['name']} 条目不一致，以先出现为准", file=sys.stderr)
                 continue
             files.setdefault(f["name"], entry)
+    if TRT_ASSETS.exists():
+        trt = json.loads(TRT_ASSETS.read_text(encoding="utf-8"))
+        for key, a in trt.get("assets", {}).items():
+            name = a["url"].rsplit("/", 1)[-1]
+            files.setdefault(name, {
+                "name": name, "url": a["url"], "size": a.get("size", 0),
+                "sha256": a.get("sha256", ""), "mirror_urls": a.get("mirror_urls", []),
+                "_model_id": f"trt-runtime/{key}",
+            })
     return files
 
 

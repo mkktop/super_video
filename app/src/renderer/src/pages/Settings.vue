@@ -463,6 +463,10 @@ function fmtGB(b: number): string {
   return (b / 1e9).toFixed(2) + ' GB'
 }
 
+// TRT 下载当前渠道：后端按实际命中的 URL 透出（主源 ModelScope，回落 GitHub 镜像）
+const trtSrcText = (s: string | null | undefined) =>
+  s === 'modelscope' ? 'ModelScope' : s === 'github' ? 'GitHub 镜像' : ''
+
 /** 安装需下载的体积（core + 匹配架构的 builder 包） */
 const trcDownloadBytes = computed(() => {
   const t = store.trt
@@ -565,7 +569,7 @@ async function uninstallTrc() {
             <template v-if="store.trt.installing">
               <p class="hint" style="margin-bottom: 8px">
                 {{ store.trt.phase === 'download'
-                  ? `正在下载 ${store.trt.file}（${fmtGB(store.trt.done)} / ${fmtGB(store.trt.total)}）`
+                  ? `正在下载 ${store.trt.file}${trtSrcText(store.trt.source) ? ' · ' + trtSrcText(store.trt.source) : ''}（${fmtGB(store.trt.done)} / ${fmtGB(store.trt.total)}）`
                   : `正在解压 ${store.trt.file} …` }}
               </p>
               <NProgress

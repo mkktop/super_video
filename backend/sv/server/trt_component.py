@@ -35,6 +35,7 @@ _state: dict = {
     "done": 0,              # 已下载/已解压字节
     "total": 0,
     "error": None,
+    "source": None,         # 当前下载渠道（modelscope | github），下载结束清空
 }
 _install_thread: threading.Thread | None = None
 _arch_cache: str | None = None
@@ -110,18 +111,34 @@ def status() -> dict:
         "size_bytes": _cached_size() if manifest is not None else 0,
         "gpu_arch": detect_gpu_arch(),
         "assets": load_assets(),
-        **{k: st[k] for k in ("installing", "phase", "file", "done", "total", "error")},
+        **{k: st[k] for k in ("installing", "phase", "file", "done", "total", "error", "source")},
     }
 
 
 # ---- 下载/解压（复用模型下载器的原语） ----
 
-def _download_asset(url: str, size: int, sha: str, tmp: Path,
-                    report) -> None:  # report(done, total, label)
+def _download_asset(part: dict, tmp: Path, report, source_cb=None) -> None:
+    """下载单个资产包：url 失败（网络层）→ 逐 mirror_urls 重试（模型同款
+    主源/镜像语义，主源 ModelScope、GitHub 回退）；sha256 校验不变。"""
+    from urllib.error import URLError
+
     from ..models import manager as _m
 
     opener = _m._opener()  # noqa: SLF001 — 同仓库内部复用（代理设置一致）
-    _m._download_to(url, tmp, opener, report, 0, size, tmp.name)  # noqa: SLF001
+    size, sha = part.get("size", 0), part.get("sha256", "")
+    last: Exception | None = None
+    for url in [part["url"], *part.get("mirror_urls", [])]:
+        if source_cb:
+            source_cb(url, tmp.name)
+        try:
+            _m._download_to(url, tmp, opener, report, 0, size, tmp.name)  # noqa: SLF001
+            last = None
+            break
+        except (URLError, OSError) as e:
+            last = e
+            tmp.unlink(missing_ok=True)
+    if last is not None:
+        raise RuntimeError(f"{tmp.name} 下载失败（含镜像）: {last}")
     if size and tmp.stat().st_size != size:
         raise RuntimeError(f"{tmp.name} 大小不符")
     if sha and _m._sha256(tmp) != sha:  # noqa: SLF001
@@ -173,6 +190,15 @@ def _install(bus: EventBus, arch: str | None) -> None:
             _state.update(phase="download", file=label, done=done, total=total)
         _publish(bus, phase="download", file=label, done=done, total=total)
 
+    def on_source(url, label):
+        # 渠道透出：按实际命中的下载 URL 判定（主源 ModelScope，回落 GitHub 镜像）
+        src = ("modelscope" if "modelscope" in url
+               else "github" if "github" in url else "")
+        if src:
+            with _state_lock:
+                _state["source"] = src
+            _publish(bus, phase="download", file=label, source=src)
+
     try:
         if _STAGING.exists():
             shutil.rmtree(_STAGING)
@@ -181,8 +207,9 @@ def _install(bus: EventBus, arch: str | None) -> None:
         for name, part in parts:
             arch_path = tmp_dir / f"{name}.7z"
             try:
-                _download_asset(part["url"], part["size"], part["sha256"], arch_path,
-                                lambda d, t, l, _base=dl_done: report(_base + d, total_dl, l))
+                _download_asset(part, arch_path,
+                                lambda d, t, l, _base=dl_done: report(_base + d, total_dl, l),
+                                source_cb=on_source)
             except Exception:  # noqa: BLE001 — 单包失败整体失败，清理半成品
                 arch_path.unlink(missing_ok=True)
                 raise
@@ -229,13 +256,14 @@ def _install(bus: EventBus, arch: str | None) -> None:
         _size_cache = (0.0, 0)  # 装载内容变了，体积缓存失效
         shutil.rmtree(_OLD, ignore_errors=True)
         with _state_lock:
-            _state.update(phase="done", installing=False, done=0, total=0, error=None)
+            _state.update(phase="done", installing=False, done=0, total=0, error=None,
+                          source=None)
         _publish(bus, phase="done")
         engine_select._PROBE_CACHE.clear()  # noqa: SLF001 — 装完重探测
     except Exception as e:  # noqa: BLE001 — 任何失败都要回到 UI
         shutil.rmtree(_STAGING, ignore_errors=True)
         with _state_lock:
-            _state.update(phase="error", installing=False, error=str(e))
+            _state.update(phase="error", installing=False, error=str(e), source=None)
         _publish(bus, phase="error", error=str(e))
 
 
@@ -246,7 +274,7 @@ def start_install(bus: EventBus) -> tuple[bool, str]:
         if _state["installing"]:
             return False, "组件正在安装中"
         _state.update(installing=True, phase="download", file="", done=0,
-                      total=0, error=None)
+                      total=0, error=None, source=None)
     from .app import runner  # 循环导入延迟到调用点
 
     if runner.current_id is not None:
