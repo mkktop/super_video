@@ -63,6 +63,11 @@ const ramUsedGb = computed(() => store.perf.latest?.mem_used_gb ?? null)
 
 // 全新用户（还没跑过任何任务）：四宫格全 0 没有意义，换成三步上手引导
 const fresh = computed(() => store.stats.total === 0)
+
+// 引擎胶囊里的显卡短名：去掉 NVIDIA GeForce 前缀与 (R)/(TM)，全名在下方显卡主卡展示
+const gpuShortName = computed(() =>
+  (store.gpuName || '').replace(/NVIDIA\s+GeForce\s+/i, '').replace(/\((R|TM)\)/gi, '').trim(),
+)
 </script>
 
 <template>
@@ -77,19 +82,29 @@ const fresh = computed(() => store.stats.total === 0)
           <NButton size="large" quaternary @click="ui.page = 'tasks'">查看任务队列</NButton>
         </div>
       </div>
-      <!-- 低清 → 高清 的像素渐清晰示意（纯 CSS 装饰） -->
-      <div class="px-demo" aria-hidden="true">
-        <div class="px-screen">
-          <div class="px-sharp" />
-          <div class="px-mosaic" />
-          <div class="px-line" />
-          <span class="px-tag sd">480p</span>
-          <span class="px-tag hd">4K</span>
+      <!-- 右侧：引擎状态胶囊 + 像素渐清晰示意（垂直成组，任何窗宽都不与文字相叠） -->
+      <div class="hero-side">
+        <div class="engine-chip" :class="{ off: !store.engine }">
+          <span class="ec-dot" />
+          <span class="ec-status">{{ store.engine ? '引擎就绪' : '引擎未就绪' }}</span>
+          <template v-if="store.engine">
+            <span class="ec-sep" />
+            <span class="ec-backend">{{ backendLabel }}</span>
+          </template>
+          <template v-if="gpuShortName">
+            <span class="ec-sep" />
+            <span class="ec-gpu">{{ gpuShortName }}</span>
+          </template>
         </div>
-      </div>
-      <div class="hero-chip">
-        <span class="chip-dot" :class="{ off: !store.engine }" />
-        {{ store.engine ? `推理引擎就绪 · ${store.engine.backend}` : '推理引擎未就绪' }} · {{ store.gpuName }}
+        <div class="px-demo" aria-hidden="true">
+          <div class="px-screen">
+            <div class="px-sharp" />
+            <div class="px-mosaic" />
+            <div class="px-line" />
+            <span class="px-tag sd">480p</span>
+            <span class="px-tag hd">4K</span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -298,30 +313,55 @@ h1 {
 }
 .hero-text p { margin: 10px 0 22px; color: #9aa1ad; font-size: 14px; letter-spacing: 0.5px; }
 .hero-actions { display: flex; gap: 12px; }
-.hero-chip {
-  position: absolute;
-  right: 24px;
-  top: 22px;
+
+/* 右侧状态列：胶囊在上、演示图在下，随内容自适应不相叠 */
+.hero-side {
+  position: relative;
   z-index: 1;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14px;
+  margin: 0 6px 0 auto;
+  flex-shrink: 0;
+}
+/* 引擎状态胶囊：分段式——状态灯 / 引擎就绪 / 后端 / 显卡短名 */
+.engine-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
-  border-radius: 20px;
-  background: rgba(52, 211, 153, 0.09);
-  border: 1px solid rgba(52, 211, 153, 0.25);
-  color: #34d399;
-  font-size: 12.5px;
+  gap: 10px;
+  padding: 7px 15px;
+  border-radius: 999px;
+  background: rgba(12, 16, 25, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 14px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
 }
-.chip-dot {
-  width: 7px; height: 7px; border-radius: 50%;
+.ec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   background: #34d399;
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.9);
+  box-shadow: 0 0 9px rgba(52, 211, 153, 0.95);
+  animation: run-blink 2.2s ease-in-out infinite;
 }
-.chip-dot.off { background: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.8); }
+.ec-status { font-size: 12px; font-weight: 600; color: #9fd8bd; }
+.ec-sep { width: 1px; height: 12px; background: rgba(255, 255, 255, 0.14); }
+.ec-backend {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #8ab4ff;
+  text-shadow: 0 0 12px rgba(79, 140, 255, 0.45);
+}
+.ec-gpu { font-size: 12px; color: #b9c2d2; letter-spacing: 0.2px; }
+.engine-chip.off { border-color: rgba(251, 191, 36, 0.28); }
+.engine-chip.off .ec-dot { background: #fbbf24; box-shadow: 0 0 9px rgba(251, 191, 36, 0.85); animation: none; }
+.engine-chip.off .ec-status { color: #fbbf24; }
 
 /* 像素渐清晰示意：左 480p 马赛克 → 扫描线 → 右 4K 顺滑 */
-.px-demo { position: relative; z-index: 1; margin: 14px 84px 0 auto; flex-shrink: 0; }
+.px-demo { position: relative; flex-shrink: 0; }
 .px-screen {
   --cut: 34%;
   position: relative;
