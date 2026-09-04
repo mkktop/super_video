@@ -168,7 +168,7 @@ cd app && pnpm preview   # → http://localhost:5199/preview.html
 
 ```bash
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
-# 370 通过 + 2 跳过（无 GPU/部分模型缺失时按机器跳过）
+# 393 通过 + 2 跳过（无 GPU/部分模型缺失时按机器跳过）
 ```
 
 ### 打包发布
