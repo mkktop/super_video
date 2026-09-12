@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NEmpty, NModal, NRadioButton, NRadioGroup, NTag, useMessage } from 'naive-ui'
+import { NButton, NModal, NRadioButton, NRadioGroup, NTag, useMessage } from 'naive-ui'
 import { api } from '../api'
 import type { TaskStills } from '../api'
 import { store, ui } from '../store'
 import { useFullscreen } from '../utils'
 import CompareSlider from '../components/CompareSlider.vue'
+import EmptyState from '../components/EmptyState.vue'
 import VideoCompare from '../components/VideoCompare.vue'
 
 const message = useMessage()
@@ -169,15 +170,17 @@ onUnmounted(() => {
         :src-url="sliderSrc"
         :out-url="sliderOut"
       />
-      <NEmpty
+      <EmptyState
         v-else
-        :description="busy ? '任务还在处理中，完成前几秒会出现首对预览' : '该任务没有可对比的预览图'"
+        variant="compare"
         class="empty"
+        :title="busy ? '任务还在处理中' : '没有可对比的预览'"
+        :desc="busy
+          ? '完成前几秒会出现首对预览，届时对比画面会自动出现'
+          : '该任务没有生成对比所需的预览图，无法进行对比'"
       >
-        <template #extra>
-          <NButton size="small" @click="back">返回</NButton>
-        </template>
-      </NEmpty>
+        <NButton size="small" @click="back">返回</NButton>
+      </EmptyState>
     </div>
 
     <!-- 静帧样本条：缩略图取源帧，点选/[ ] 切换（与模型对比页同款交互） -->
