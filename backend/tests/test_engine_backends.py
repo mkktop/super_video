@@ -358,16 +358,17 @@ def test_worker_trt_garbage_disables_trt_fp16(monkeypatch, tmp_path):
 
 
 def test_worker_garbage_falls_through_to_cpu(monkeypatch, tmp_path):
-    """降链全黑到底：TRT fp16 → TRT fp32 → auto → CPU，4 次尝试内保出片。"""
+    """降链全黑到底：512 分块 → fp32 原件（无）→ TRT 关 fp16 → auto → CPU，
+    逐级换变量保出片。"""
     from sv.server import worker
     from sv.server import worker_engine
 
-    calls: list[str] = []
+    calls: list[tuple[str, int]] = []
 
     class _BlackUntilCpu:
         def __init__(self, weight, scale, io=None, tile=0, batch=1,
                      device="auto", validate_hw=None, trt_fp16=None):
-            calls.append(device)
+            calls.append((device, tile))
             self.device = device
 
         def load(self):
@@ -384,4 +385,74 @@ def test_worker_garbage_falls_through_to_cpu(monkeypatch, tmp_path):
                         types.SimpleNamespace(load=lambda: {"engine": "trt"}))
     eng, prec = worker._load_onnx_engine(
         tmp_path / "w.onnx", spec, 4, None, "fp32", 0, (64, 64), log=lambda ev: None)
-    assert calls == ["trt", "trt", "auto", "cpu"], f"应逐级降链至 CPU: {calls}"
+    assert [d for d, _ in calls] == ["trt", "trt", "trt", "auto", "cpu"], \
+        f"应按 分块→关TRT-fp16→auto→cpu 逐级降链: {calls}"
+    assert calls[0][1] == 0 and calls[1][1] == 512, "第一步先启用 512 分块"
+
+
+def test_worker_garbage_big_image_enables_tiling(monkeypatch, tmp_path):
+    """DML 大图全图数值损坏（1500x1078 实测灰雾/近黑，512 分块即救）：
+    auto 后端 tile=0 时第一步降档就是启用分块，不出 GPU。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    calls: list[int] = []
+
+    class _BlackOnlyFullFrame:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            calls.append(tile)
+            self.tile = tile
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            import numpy as np
+
+            return frame if self.tile else np.zeros_like(frame)
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="realesrgan-x4plus-anime")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _BlackOnlyFullFrame)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 4, None, "fp32", 0, (1078, 1500), log=lambda ev: None)
+    assert calls == [0, 512], f"应只走 全图→512分块 两步: {calls}"
+    assert prec == "fp32"
+
+
+def test_worker_garbage_fp16_file_falls_to_fp32(monkeypatch, tmp_path):
+    """转换版 fp16 权重在当前后端数值损坏：分块救不了时换 fp32 原件同后端重试，
+    返回精度口径同步落为 fp32。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    fp32_file = tmp_path / "m.onnx"
+    fp32_file.write_bytes(b"x")
+    (tmp_path / "m_fp16.onnx").write_bytes(b"x")
+    calls: list[str] = []
+
+    class _BlackOnFp16File:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            calls.append(weight.name)
+            self.fp16_file = weight.stem.endswith("_fp16")
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            import numpy as np
+
+            return np.zeros_like(frame) if self.fp16_file else frame
+
+    spec = types.SimpleNamespace(io={}, fp16=True, id="x")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _BlackOnFp16File)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "m_fp16.onnx", spec, 4, None, "fp32", 0, (64, 64), log=lambda ev: None)
+    assert calls == ["m_fp16.onnx", "m_fp16.onnx", "m.onnx"], \
+        f"应先试分块、再换 fp32 原件: {calls}"
+    assert prec == "fp32"

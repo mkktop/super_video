@@ -35,7 +35,8 @@ _ENGINE_CACHE: dict = {}
 
 
 class _EngineGarbage(Exception):
-    """引擎输出数值损坏（灰图探测均值≈0）：会话能建、run 不抛，但输出全黑。"""
+    """引擎输出数值损坏（彩色探针均值/标准差异常）：会话能建、run 不抛，但输出
+    黑图或色彩塌缩（TRT fp16×transformer / DML 大图全图两案实锤）。"""
 
 
 def _engine_sig(weight: Path, scale: int, variant: str | None, precision: str,
@@ -59,9 +60,10 @@ def _load_onnx_engine(
     """构建并预热 onnx 推理引擎（视频/图片任务共用）。
 
     含 fp16 惰性补转、TRT 组件激活与编译提示、显存不足自动减半 tile 重试、
-    灰图输出探测（坏引擎自动降链：TRT 关 fp16 → DML/CUDA → CPU）。
-    warmup 必须用源帧真实尺寸：DML 会话跑过小形状后拖慢真实尺寸且不可逆。
-    返回 (engine, 实际使用精度)。失败向上抛，由调用方转 failed 事件。
+    彩色探针输出校验（坏引擎自动降链：512 分块 → fp32 原件 → TRT 关 fp16 →
+    DML/CUDA → CPU）。warmup 必须用源帧真实尺寸：DML 会话跑过小形状后拖慢
+    真实尺寸且不可逆。返回 (engine, 实际使用精度)。失败向上抛，由调用方转
+    failed 事件。
     serve 常驻模式下同签名任务直接复用已预热会话（TRT 反序列化 5-8s/路、
     DML 预热数十帧的开销从「每任务一次」降为「每签名一次」）。
     """
@@ -156,9 +158,9 @@ def _load_onnx_engine(
 
         gc.collect()
     # 显存不足自动降档 tile 减半（最多 3 次）；CUDA 执行层内核崩溃换链重试（一次）；
-    # 输出数值损坏（灰图探测）按 TRT 关 fp16 → DML/CUDA → CPU 逐级降链
+    # 输出数值损坏（彩色探针）按 512 分块 → fp32 原件 → TRT 关 fp16 → DML/CUDA → CPU 降链
     fp16_for_trt = bool(spec.io.get("trt_fp16", True))
-    for attempt in range(4):
+    for attempt in range(7):
         try:
             # 仅在关闭混合精度时显式传参（默认 True 走 io 声明，测试 fake 不感知新参）
             extra = {} if fp16_for_trt else {"trt_fp16": False}
@@ -170,22 +172,44 @@ def _load_onnx_engine(
             # 预热兼显存探测兼输出探测。必须用源帧真实尺寸：DML 会话一旦跑过 64x64 这类
             # 小形状，后续真实尺寸的执行路径被拖慢且不可逆（实测 960x720：
             # 25.7ms -> 38.5ms/帧，+50%；先小后大也无法自愈）。
-            # 探测用灰 128 帧（超分对平坦输入输出≈同色）：坏引擎 run 不抛但输出全黑
-            # （TRT fp16 对 DAT2 类 transformer 实测 100% NaN→截 0），在此拦截住，
-            # 否则任务「成功」而 53 张成片全废（v0.5.0 用户实测）
-            probe = engine.process(np.full((warmup_hw[0], warmup_hw[1], 3), 128, dtype=np.uint8))
-            if float(probe.mean()) < 8.0:
+            # 探测用确定性彩色渐变帧（超分对彩色输入必出彩色）：数值损坏的引擎 run 不抛
+            # 但输出黑图/灰雾——TRT fp16 对 DAT2 类 transformer 实测 100% NaN→截 0 纯黑；
+            # DML 大尺寸全图 fp16 出灰雾/fp32 出近黑（1500x1078 实测 std 1.3/0.6，均
+            # 秒级安静返回）。均值/双标准差双门同时拦黑图与色彩塌缩，在此拦截住，
+            # 否则任务「成功」而成片全废
+            ph, pw = warmup_hw
+            _gy, _gx = np.mgrid[0:ph, 0:pw]
+            probe = np.stack([(_gx * 255) // max(pw, 1), (_gy * 255) // max(ph, 1),
+                              (_gx + _gy) % 256], axis=-1).astype(np.uint8)
+            probe = engine.process(probe)
+            _pm, _ps = float(probe.mean()), float(probe.std())
+            if _pm < 8.0 or _ps < 6.0:
                 raise _EngineGarbage(
-                    f"灰图探测输出均值 {float(probe.mean()):.2f}（健康引擎应≈128）")
+                    f"彩色探针输出异常（均值 {_pm:.2f}/标准差 {_ps:.2f}，健康引擎应≈128/>40）")
             break
         except Exception as e:  # noqa: BLE001
             if isinstance(e, _EngineGarbage):
-                # 会话本身健康、输出损坏：TRT 先关 fp16 重建（DAT2 实测 fp32 恢复
-                # 且 0.55s/帧），仍坏退 auto（DML/CUDA），再坏退 CPU 保出片
+                # 会话健康、输出损坏：按代价从低到高换变量重试。今日三案：
+                # DML 大图全图（tile 512 即救，2s 且更快）、TRT fp16×transformer
+                # （关 fp16 重建，DAT2 实测恢复且 0.55s/帧）、余下换后端保出片
                 engine = None
                 import gc
 
                 gc.collect()
+                if tile == 0:
+                    tile = 512
+                    if log:
+                        log({"type": "log", "line":
+                             "推理后端在大图整幅输出异常，已启用 512px 分块重试"})
+                    continue
+                if weight.stem.endswith("_fp16"):
+                    alt = weight.with_name(weight.stem[:-5] + weight.suffix)
+                    if alt.exists():
+                        weight = alt
+                        if log:
+                            log({"type": "log", "line":
+                                 "fp16 变体在该后端输出异常，已改用 fp32 原件重试"})
+                        continue
                 if ort_device in ("trt", "trt_cpu") and fp16_for_trt:
                     fp16_for_trt = False
                     if log:
@@ -240,6 +264,8 @@ def _load_onnx_engine(
                      f"显存不足，分块大小调整为 {new_tile} 后重试"})
             tile = new_tile
     _ENGINE_CACHE.clear()  # 单条语义：换签名即释放旧引擎（显存）再换入
+    # 降链可能已把转换版 fp16 换回 fp32 原件，精度口径按落定权重重算
+    used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
     _ENGINE_CACHE.update({"sig": sig, "engine": engine, "precision": used_precision})
     return engine, used_precision
 
