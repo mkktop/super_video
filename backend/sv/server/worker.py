@@ -46,6 +46,7 @@ from sv.pipeline.stream import (
     prefilter_chain,
 )
 from sv.server import db, settings
+from sv.server.preview_final import rewrite_final_previews
 
 from sv.server.worker_common import (  # noqa: F401 — 事件/性能日志协议（含测试 re-export）
     SR_LOG_DIR,
@@ -354,6 +355,11 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             _fps = stats.frames / stats.elapsed_s if stats.elapsed_s > 0 else 0
             _prof_write(task_id, f"==== 运行结束 {stats.frames}帧 · {stats.elapsed_s:.1f}s"
                         f" · 平均 {_fps:.2f} fps（端到端口径） ====\n\n")
+        # 收尾缩略图定版：滚动预览停在最后一帧，恰逢暗场任务卡就全黑——挑亮帧重写
+        if out_kind == "video":
+            rewrite_final_previews(output_path, input_path,
+                                   preview_dir / f"{task_id}.jpg",
+                                   preview_dir / f"{task_id}_src.jpg")
         emit({
             "type": "done", "frames": stats.frames,
             "elapsed": round(stats.elapsed_s, 1),
@@ -522,6 +528,10 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
                     f"==== 运行结束 {stats.frames}帧 · {stats.elapsed_s:.1f}s"
                     f" · 平均 {fps_e2e:.2f} fps（端到端口径：含引擎加载与合成） ====\n\n")
 
+    # 收尾缩略图定版（仅协调者/单进程：分片子进程的 output 是中间段，且双路
+    # 的成片要等 concat 落盘后才有意义——上面 parallel 分支已保证此刻文件完整）
+    if shard is None and out_kind == "video":
+        rewrite_final_previews(output_path, input_path, preview_path, src_preview_path)
     emit({
         "type": "done", "frames": stats.frames,
         "total_frames": stats.frames,  # 真实片尾修正后回填 DB（旧事件无此键按估算）

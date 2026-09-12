@@ -419,7 +419,7 @@ h1 {
 
 /* ---- 像素重构示意（主打记忆点）----
    静止格局：左 1/3 马赛克(480p) + 右 2/3 锐利(4K)；
-   一条 2px 品牌扫描线 4s 一轮从左向右扫过，扫过之处叠出清晰的"重构带"。
+   一条 2px 品牌扫描线来回往返扫描（alternate），线身的 16% 宽"重构带"走到哪洗到哪。
    几何全部由 --scan（注册自定义属性）驱动 clip-path/位移，GPU 合成不触发布局。 */
 .px-demo { position: relative; flex-shrink: 0; }
 .px-screen {
@@ -439,19 +439,12 @@ h1 {
   initial-value: 18%;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .px-screen { animation: px-scan 4s cubic-bezier(0.45, 0.1, 0.35, 1) infinite; }
-  .px-band, .px-line { animation: px-scan-fade 4s linear infinite; }
+  /* alternate 往返：去程 18%→100%，回程反向扫回，端点缓入缓出不停顿 */
+  .px-screen { animation: px-scan 2.6s ease-in-out infinite alternate; }
 }
 @keyframes px-scan {
   0% { --scan: 18%; }
-  86% { --scan: 100%; }
   100% { --scan: 100%; }
-}
-@keyframes px-scan-fade {
-  0% { opacity: 0; }
-  7% { opacity: 1; }
-  82% { opacity: 1; }
-  90%, 100% { opacity: 0; }
 }
 /* 场景底画（清晰层全幅铺满） */
 .px-art { position: absolute; inset: 0; background: var(--sv-px-scene); }
