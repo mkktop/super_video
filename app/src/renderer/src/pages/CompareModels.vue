@@ -532,7 +532,7 @@ function useModel(mid: string) {
 
         <div class="stage-foot">
           <span class="hint-inline">
-            数字键 1~{{ doneEntries.length }} 切换模型 · 拖动分割线对比原版（←/→ 微调）{{ stillCount > 1 ? ' · [ ] 换静帧样本' : '' }} ·
+            数字键 1~{{ doneEntries.length }} 切换模型 · 静帧默认 1:1 像素（拖动平移/滚轮缩放/手柄移分割线对比原版）{{ stillCount > 1 ? ' · [ ] 换静帧样本' : '' }} ·
             当前：{{ curEntry.out_w }}x{{ curEntry.out_h }} ·
             {{ job.kind === 'video' ? `${curEntry.fps.toFixed(1)} fps · ` : '' }}{{ curEntry.elapsed_s }}s
           </span>
