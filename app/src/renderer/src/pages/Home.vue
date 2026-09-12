@@ -359,7 +359,7 @@ h1 {
   font-size: 31px;
   font-weight: 750;
   letter-spacing: 1px;
-  color: #f2f4f8;
+  color: var(--sv-hero-fg);
 }
 .grad {
   background: linear-gradient(90deg, var(--sv-accent-strong), var(--sv-accent-2-strong));
@@ -389,7 +389,7 @@ h1 {
   gap: 10px;
   padding: 7px 15px;
   border-radius: 999px;
-  background: rgba(12, 16, 25, 0.62);
+  background: var(--sv-chip-bg);
   border: 1px solid var(--sv-border-mid);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 14px rgba(0, 0, 0, 0.25);
   white-space: nowrap;
@@ -403,7 +403,7 @@ h1 {
   animation: run-blink 2.2s ease-in-out infinite;
 }
 .ec-status { font-size: 12px; font-weight: 600; color: var(--sv-success-strong); }
-.ec-sep { width: 1px; height: 12px; background: rgba(255, 255, 255, 0.14); }
+.ec-sep { width: 1px; height: 12px; background: var(--sv-border-mid); }
 .ec-backend {
   font-size: 11px;
   font-weight: 750;
@@ -412,7 +412,7 @@ h1 {
   color: var(--sv-accent-strong);
   text-shadow: 0 0 12px rgba(var(--sv-accent-rgb), 0.45);
 }
-.ec-gpu { font-size: 12px; color: #b9c2d2; letter-spacing: 0.2px; }
+.ec-gpu { font-size: 12px; color: var(--sv-text-dim); letter-spacing: 0.2px; }
 .engine-chip.off { border-color: rgba(var(--sv-warning-rgb), 0.28); }
 .engine-chip.off .ec-dot { background: var(--sv-warning); box-shadow: 0 0 9px rgba(var(--sv-warning-rgb), 0.85); animation: none; }
 .engine-chip.off .ec-status { color: var(--sv-warning); }
@@ -696,7 +696,7 @@ h1 {
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 1.8px;
-  color: #7c8ba8;
+  color: var(--sv-text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -777,7 +777,7 @@ h1 {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 2px;
-  color: #7c8ba8;
+  color: var(--sv-text-faint);
   /* 轨道被压窄时按整行省略，不许 CJK 逐字竖排（实测小窗一列一字） */
   white-space: nowrap;
   overflow: hidden;
@@ -813,7 +813,7 @@ h1 {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.8px;
-  color: #9fc2ff;
+  color: var(--sv-accent-strong);
   padding: 5px 13px;
   border-radius: 999px;
   border: 1px solid rgba(var(--sv-accent-rgb), 0.45);

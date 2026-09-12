@@ -239,12 +239,14 @@ onUnmounted(() => offNavigate?.())
   --sv-btn-grad: linear-gradient(135deg, #4f8cff, #7d5cf0);
   --sv-btn-grad-hover: linear-gradient(135deg, #6199ff, #8d70f4);
   --sv-btn-grad-active: linear-gradient(135deg, #407ef2, #7050e6);
-  /* —— 沉浸式面板画布（Hero/硬件区）：品牌氛围岛，两种主题都保持深色基调 —— */
+  /* —— 沉浸式面板画布（Hero/硬件区）：品牌氛围层叠，浅色主题换浅色映射 —— */
   --sv-hero-grad:
     radial-gradient(420px 260px at 82% -30%, rgba(79, 140, 255, 0.16), transparent 68%),
     radial-gradient(360px 240px at 55% 130%, rgba(139, 92, 246, 0.1), transparent 68%),
     linear-gradient(135deg, #1a2130 0%, #171920 55%, #191a26 100%);
   --sv-hero-border: rgba(96, 120, 180, 0.22);
+  --sv-hero-fg: #f2f4f8;               /* Hero 大标题（深底亮字/浅底深字） */
+  --sv-chip-bg: rgba(12, 16, 25, 0.62); /* 引擎状态胶囊底 */
   --sv-gpu-grad:
     radial-gradient(300px 150px at 86% -24%, rgba(79, 140, 255, 0.2), transparent 68%),
     radial-gradient(220px 140px at -6% 118%, rgba(139, 92, 246, 0.14), transparent 68%),
@@ -363,6 +365,26 @@ onUnmounted(() => offNavigate?.())
   --sv-metal-grad: linear-gradient(100deg, #3a465c 0%, #2c3950 45%, #1f2a3d 100%);
   --sv-metal-grad-2: linear-gradient(100deg, #333c4d 0%, #4a5261 45%, #2a3242 100%);
   --sv-accent-cyan: #0e8fa8;
+  --sv-hero-grad:
+    radial-gradient(420px 260px at 82% -30%, rgba(58, 120, 242, 0.1), transparent 68%),
+    radial-gradient(360px 240px at 55% 130%, rgba(124, 78, 240, 0.07), transparent 68%),
+    linear-gradient(135deg, #eef1fa 0%, #f7f8fc 55%, #f3f2fb 100%);
+  --sv-hero-border: rgba(58, 120, 242, 0.18);
+  --sv-hero-fg: #1c2333;
+  --sv-chip-bg: rgba(255, 255, 255, 0.78);
+  --sv-gpu-grad:
+    radial-gradient(300px 150px at 86% -24%, rgba(58, 120, 242, 0.08), transparent 68%),
+    radial-gradient(220px 140px at -6% 118%, rgba(124, 78, 240, 0.05), transparent 68%),
+    linear-gradient(180deg, #ffffff, #f6f8fd);
+  --sv-gpu-border: rgba(58, 120, 242, 0.22);
+  --sv-cpu-grad:
+    radial-gradient(220px 120px at 92% -30%, rgba(58, 120, 242, 0.06), transparent 70%),
+    linear-gradient(180deg, #ffffff, #f5f8fd);
+  --sv-cpu-border: rgba(58, 120, 242, 0.18);
+  --sv-mem-grad:
+    radial-gradient(180px 110px at 90% -30%, rgba(181, 125, 11, 0.06), transparent 70%),
+    linear-gradient(180deg, #ffffff, #fdfbf4);
+  --sv-mem-border: rgba(181, 125, 11, 0.24);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
