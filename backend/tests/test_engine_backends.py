@@ -309,6 +309,9 @@ def test_trt_fp16_flag_parsed_and_cache_split():
     _, opts_on = _trt_provider_options(True)[0]
     _, opts_off = _trt_provider_options(False)[0]
     assert opts_on["trt_fp16_enable"] is True and opts_off["trt_fp16_enable"] is False
+    # workspace ≥10GB：全图大图 RRDB 的 builder 需求超 4GB 会 EP_FAIL 静默回落
+    # CUDA（891x1280 实测 29s/张 vs TRT 0.4s）
+    assert opts_on["trt_max_workspace_size"] == 10 * 1024**3
     # 精度分家：坏 fp16 引擎缓存绝不与 fp32 链同目录（缓存键不保证区分精度开关）
     assert opts_on["trt_engine_cache_path"] != opts_off["trt_engine_cache_path"]
     assert opts_off["trt_engine_cache_path"].endswith("trt_cache_fp32")

@@ -58,7 +58,12 @@ def _trt_provider_options(fp16: bool = True) -> list[tuple[str, dict[str, object
             "trt_engine_cache_path": str(cache),
             "trt_timing_cache_enable": True,
             "trt_fp16_enable": fp16,
-            "trt_max_workspace_size": 4294967296,  # 4GB
+            # 10GB：全图大尺寸（~18M 输出像素的 RRDB 图片任务）builder 需求超 4GB
+            # 时 TRT 引擎构建失败（EP_FAIL），ORT 静默回落 CUDA 执行慢 40~70 倍
+            # （891x1280 实测 29s/张 vs TRT 0.4s），且 providers 仍显示 TRT 无从
+            # 察觉。workspace 只是 tactic 选择上限、构建按需分配，小显存卡构建
+            # 失败行为不变（照常回落），不会更糟
+            "trt_max_workspace_size": 10737418240,  # 10GB
         },
     )]
 
