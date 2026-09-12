@@ -12,6 +12,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api, mediaSrc } from '../api'
+import type { FolderScanResult } from '../api'
 import { refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
@@ -33,6 +34,10 @@ onMounted(consumePendingModel)
 onActivated(consumePendingModel)
 
 const files = ref<string[]>([])
+// 文件夹模式（整本漫画）：与散选互斥——选文件夹清散页，散选/拖拽清文件夹。
+// 扫描结果持有 rel 清单，提交时由后端按 rel 镜像输出目录结构
+const folder = ref<FolderScanResult | null>(null)
+const scanning = ref(false)
 const modelId = ref('')
 const targetScale = ref(2)
 const format = ref<'png' | 'jpg'>('png')
@@ -79,7 +84,10 @@ function thumbUrl(p: string): string {
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|bmp|tiff?)$/i
 
-// ---- 拖拽入队：整个页面都是放置区 ----
+const batchN = computed(() => (folder.value ? folder.value.total : files.value.length))
+const dragHint = computed(() => !files.value.length && !folder.value)
+
+// ---- 拖拽入队：整个页面都是放置区（文件夹模式先让位） ----
 const dragDepth = ref(0)
 function onDragEnter(e: DragEvent) {
   if (!e.dataTransfer?.types.includes('Files')) return
@@ -94,15 +102,38 @@ function onDropFiles(e: DragEvent) {
   const imgs = dropped
     .filter((f) => IMAGE_EXT.test(f.name))
     .map((f) => window.sv.pathForFile(f))
+  if (!imgs.length) return
+  folder.value = null // 互斥：拖散图退出文件夹模式
   for (const p of imgs) if (!files.value.some((x) => x.toLowerCase() === p.toLowerCase())) files.value.push(p)
 }
 
 function pick() {
   void window.sv.pickImages().then((picked) => {
+    if (!picked.length) return
+    folder.value = null // 互斥：散选退出文件夹模式
     for (const p of picked) {
       if (!files.value.some((x) => x.toLowerCase() === p.toLowerCase())) files.value.push(p)
     }
   })
+}
+
+async function pickFolder() {
+  const dir = await window.sv.pickDir()
+  if (!dir) return
+  scanning.value = true
+  try {
+    const r = await api.scanImageFolder(dir)
+    if (!r.total) {
+      message.warning('该文件夹（含子目录）里没有受支持的图片')
+      return
+    }
+    folder.value = r
+    files.value = [] // 互斥：进文件夹模式清散选
+  } catch (e) {
+    message.error(`扫描文件夹失败: ${e instanceof Error ? e.message : e}`)
+  } finally {
+    scanning.value = false
+  }
 }
 
 function removeAt(i: number) {
@@ -111,11 +142,12 @@ function removeAt(i: number) {
 
 function clearAll() {
   files.value = []
+  folder.value = null
 }
 
 const canSubmit = computed(
   () =>
-    files.value.length > 0 &&
+    batchN.value > 0 &&
     !!modelId.value &&
     !!selectedModel.value?.vram_ok &&
     !submitting.value,
@@ -132,11 +164,14 @@ function onThumbErr(f: string) {
 async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
-  // 批量合并为一个任务：后端一次模型加载循环处理全部图片
-  const n = files.value.length
+  // 批量合并为一个任务：后端一次模型加载循环处理全部图片；
+  // 文件夹模式额外带 folder_src，后端按相对路径镜像输出目录结构
+  const isFolder = !!folder.value
+  const list = isFolder ? folder.value!.files.map((f) => f.path) : files.value
+  const n = list.length
   const wantPdf = mergePdf.value && n >= 2
   const r = await api.createTask({
-    inputs: files.value,
+    inputs: list,
     model_id: modelId.value,
     params: {
       kind: 'image',
@@ -146,14 +181,18 @@ async function submit() {
       ...(format.value === 'jpg' ? { jpg_quality: jpgQuality.value } : {}),
       ...(tileChoice.value ? { tile: tileChoice.value } : {}),
       ...(wantPdf ? { merge_pdf: true } : {}),
+      ...(isFolder ? { folder_src: folder.value!.folder } : {}),
     },
   })
   submitting.value = false
   if (r.ok) {
     message.success(
-      `已加入队列（${n} 张图片合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`,
+      isFolder
+        ? `已加入队列（${baseName(folder.value!.folder)} 整个文件夹 ${n} 张合并为 1 个批量任务，输出将镜像目录结构${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`
+        : `已加入队列（${n} 张图片合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`,
     )
     files.value = []
+    folder.value = null
     ui.page = 'tasks'
     refreshTasks()
   } else {
@@ -181,16 +220,53 @@ export default { name: 'ImageSR' }
     <div class="page-head">
       <div>
         <h1>图片超分</h1>
-        <p class="sub">单张或批量 → 选模型放大 → 结果保存为 PNG / JPG</p>
+        <p class="sub">单张 / 多选 / 整个文件夹 → 选模型放大 → 结果保存为 PNG / JPG</p>
       </div>
     </div>
 
     <!-- ① 选择图片 -->
     <section class="sec sv-card">
       <h2 class="sec-title"><span class="sec-num">1</span>选择图片</h2>
-      <NButton dashed block size="large" @click="pick">
-        {{ files.length ? `已选 ${files.length} 张（点击继续追加）` : '点击选择图片（可多选批量入队，也可直接拖进窗口）' }}
-      </NButton>
+      <div class="pick-row">
+        <NButton dashed size="large" class="grow" @click="pick">
+          {{ files.length ? `已选 ${files.length} 张（点击继续追加）` : '选择图片（可多选）' }}
+        </NButton>
+        <NButton dashed size="large" class="grow" :loading="scanning" @click="pickFolder">
+          选择文件夹（含子目录，漫画整本）
+        </NButton>
+      </div>
+      <div v-if="dragHint" class="drop-hint">也可以直接把图片 / 文件夹拖进窗口</div>
+
+      <!-- 文件夹模式：摘要卡 + 首屏预览（替代 53 张散页缩略图墙） -->
+      <div v-if="folder" class="folder-card">
+        <div class="f-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+            <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2.2 2.5H19.5A1.5 1.5 0 0 1 21 9v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18V6.5Z"
+              stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+          </svg>
+        </div>
+        <div class="f-info">
+          <div class="f-name" :title="folder.folder">{{ baseName(folder.folder) }}</div>
+          <div class="f-meta">
+            共 {{ folder.total }} 张图片<template v-if="folder.dirs"> · 含 {{ folder.dirs }} 个子目录</template>
+            · 输出将镜像目录结构
+          </div>
+        </div>
+        <button class="rm" title="移除文件夹" @click="folder = null">✕</button>
+        <div v-if="folder.total" class="folder-peeks">
+          <img
+            v-for="f in folder.files.slice(0, 10)"
+            :key="f.path"
+            :src="thumbUrl(f.path)"
+            class="peek"
+            loading="lazy"
+            alt=""
+            @error="onThumbErr(f.path)"
+          />
+          <span v-if="folder.total > 10" class="peek more">+{{ folder.total - 10 }}</span>
+        </div>
+      </div>
+
       <div v-if="files.length" class="thumb-grid">
         <div v-for="(f, i) in files" :key="f" class="thumb-cell">
           <img
@@ -248,7 +324,7 @@ export default { name: 'ImageSR' }
           <NRadioGroup v-model:value="targetScale" size="small">
             <NRadioButton v-for="s in scaleOptions" :key="s.value" :value="s.value">x{{ s.value }}</NRadioButton>
           </NRadioGroup>
-          <NTag v-if="files.length === 1" size="small" :bordered="false">
+          <NTag v-if="batchN === 1" size="small" :bordered="false">
             边长 ×{{ targetScale }} · 面积 ×{{ targetScale * targetScale }}
           </NTag>
         </div>
@@ -263,7 +339,7 @@ export default { name: 'ImageSR' }
             <NSlider v-model:value="jpgQuality" :min="60" :max="100" :step="1" style="width: 180px" />
           </template>
         </div>
-        <div v-if="files.length >= 2" class="row inline">
+        <div v-if="batchN >= 2" class="row inline">
           <span class="lbl">批量合并</span>
           <NCheckbox v-model:checked="mergePdf">
             另外输出一份 PDF（全部结果按顺序无损封装，逐张图片文件仍保留）
@@ -274,9 +350,11 @@ export default { name: 'ImageSR' }
           <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
         </div>
         <p class="hint-row">
-          自动=按模型默认；超大图（如 8K 扫描件）显存不足时调小分块。结果保存到「{{
+          自动=按模型默认；超大图（如 8K 扫描件）显存不足时调小分块。散选图片保存到「{{
             outDirLabel
-          }}」，目录内无同名时沿用原文件名，同名冲突自动改用「原名_倍率」后缀，不覆盖现有文件。PDF
+          }}」，目录内无同名时沿用原文件名，同名冲突自动改用「原名_倍率」后缀，不覆盖现有文件。文件夹模式输出到「{{
+            outDirLabel === '源图片所在目录' ? '源文件夹旁边' : outDirLabel
+          }}」下的「文件夹名_倍率」目录，并按源目录结构镜像（子目录原样保留）。PDF
           无损口径：PNG 结果逐像素一致直接嵌入，JPG 结果按原文件字节嵌入不再压缩。
         </p>
       </div>
@@ -286,7 +364,7 @@ export default { name: 'ImageSR' }
     <div class="footer-bar sv-card">
       <NButton :disabled="submitting" @click="clearAll">清空</NButton>
       <NButton type="primary" :loading="submitting" :disabled="!canSubmit" @click="submit">
-        加入队列（{{ files.length }} 张）
+        加入队列（{{ batchN }} 张）
       </NButton>
     </div>
   </div>
@@ -331,6 +409,68 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
   justify-content: center;
   flex-shrink: 0;
   box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.3);
+}
+
+/* 双入口：散选图片 / 整个文件夹 */
+.pick-row { display: flex; gap: 10px; }
+.pick-row .grow { flex: 1 1 0; min-width: 0; }
+.drop-hint {
+  font-size: 12px;
+  color: var(--sv-text-faint);
+  text-align: center;
+}
+
+/* 文件夹模式摘要卡：图标 + 名称 + 统计 + 首屏预览 */
+.folder-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1.5px solid rgba(var(--sv-accent-rgb), 0.45);
+  border-radius: var(--sv-radius-md);
+  background:
+    linear-gradient(135deg, rgba(var(--sv-accent-rgb), 0.08), rgba(var(--sv-accent2-rgb), 0.04)),
+    var(--sv-fill-1);
+}
+.f-ico {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sv-accent-strong);
+  background: var(--sv-accent-bg);
+  border: 1px solid rgba(var(--sv-accent-rgb), 0.25);
+}
+.f-name { font-weight: 650; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.f-meta { font-size: 12px; color: var(--sv-text-dim); margin-top: 3px; }
+.folder-card .rm { position: static; }
+.folder-peeks {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.peek {
+  width: 56px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--sv-border-mid);
+  background: rgba(0, 0, 0, 0.28);
+}
+.peek.more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  color: var(--sv-text-dim);
+  border-style: dashed;
+  background: none;
+  flex: none;
 }
 
 /* 缩略图墙 */

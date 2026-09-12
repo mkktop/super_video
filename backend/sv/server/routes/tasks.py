@@ -40,6 +40,52 @@ class TaskCreate(BaseModel):
     overwrite: bool = False  # 显式 output 撞已存在文件/活动任务时 409，确认覆盖后带 True 重交
 
 
+class FolderScanIn(BaseModel):
+    folder: str
+
+
+# 文件夹模式单任务上限：整本漫画也就几百页，3000 已是「一个任务跑得完」的
+# 合理边界——超限创建期明确报数，好过建一个进度条走不完的任务
+_FOLDER_SCAN_CAP = 3000
+
+
+def _natural_key(s: str) -> list:
+    """自然排序键：数字段按数值比较（chapter2 < chapter10、p2 < p10）。"""
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
+
+
+@router.post("/api/images/scan")
+def scan_image_folder(body: FolderScanIn) -> dict:
+    """图片超分·文件夹模式扫描：递归枚举受支持图片，隐藏目录整棵跳过。
+
+    漫画整本（卷/话子目录）入口用；rel 是相对所选文件夹的 posix 风格路径，
+    创建任务时按它镜像输出目录结构。"""
+    from ..consts import _IMAGE_EXTS
+
+    folder = Path(body.folder)
+    if not folder.is_dir():
+        raise HTTPException(400, f"文件夹不存在: {body.folder}")
+    files: list[dict] = []
+    dirs = 0
+    for p in folder.rglob("*"):
+        rel = p.relative_to(folder)
+        if any(part.startswith(".") for part in rel.parts):
+            continue  # 隐藏目录（.git 等）整棵跳过，目录计数也不含
+        if p.is_dir():
+            dirs += 1
+            continue
+        if p.suffix.lower() not in _IMAGE_EXTS:
+            continue
+        files.append({"path": str(p), "rel": rel.as_posix()})
+    files.sort(key=lambda f: _natural_key(f["rel"]))
+    if len(files) > _FOLDER_SCAN_CAP:
+        raise HTTPException(
+            400, f"该文件夹（含子目录）共 {len(files)} 张图片，"
+                 f"超过单任务上限 {_FOLDER_SCAN_CAP} 张，请分批处理")
+    return {"folder": str(folder), "total": len(files), "dirs": dirs,
+            "files": files}
+
+
 def _sr_output_name(out_root: Path, stem: str, fmt: str, res_label: str,
                     used: set[str]) -> str:
     """超分输出命名（视频/图片同规则）：
@@ -125,6 +171,9 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     一次模型加载循环处理。输出默认 PNG（无损），可选 JPG + 质量。批量可勾选
     merge_pdf：逐图产物照常落盘，另把全部成功页无损封装成一份 PDF（任务
     output 指向 PDF），pdf_out 与逐图产物同命名系、不覆盖现有文件。
+    文件夹模式（params.folder_src + inputs=全量图片）：输出按源目录结构镜像
+    到「输出根/文件夹名_倍率」下（输出根=设置目录，未设置则在源文件夹旁建
+    兄弟目录——不落回源目录内，否则产物会被下一次扫描重复吃进来）。
     """
     from ..consts import _IMAGE_EXTS
 
@@ -144,7 +193,25 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     seen: set[str] = set()
     paths = [p for p in paths
              if not (key := os.path.normcase(str(p))) in seen and not seen.add(key)]
-    batch = len(paths) > 1
+    # 文件夹模式：folder_src 必须是已存在目录，且所有图片都在它之内
+    # （rel 镜像输出结构的依据；夹外路径直接 400 而不是悄悄落平铺）
+    folder_src = str(params_in.get("folder_src") or "").strip()
+    rels: list[Path] = []
+    froot: Path | None = None
+    if folder_src:
+        froot = Path(folder_src)
+        if not froot.is_dir():
+            raise HTTPException(400, f"文件夹不存在: {folder_src}")
+        try:
+            rels = [p.relative_to(froot) for p in paths]
+        except ValueError:
+            raise HTTPException(
+                400, "文件夹模式下所有图片必须位于所选文件夹内") from None
+        if len(paths) > _FOLDER_SCAN_CAP:
+            raise HTTPException(
+                400, f"文件夹共 {len(paths)} 张图片，"
+                     f"超过单任务上限 {_FOLDER_SCAN_CAP} 张，请分批处理")
+    batch = len(paths) > 1 or bool(folder_src)
 
     scale = int(params_in.get("scale") or max(spec.scale))
     if scale not in spec.scale:
@@ -198,6 +265,13 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     odir = str(st.get("output_dir") or "").strip()
     tmpl = str(st.get("output_name_template") or "")
     out_root = Path(odir) if odir else paths[0].parent
+    if folder_src:
+        assert froot is not None
+        # 文件夹模式输出根：设置目录下建「文件夹名_倍率」；未设置时在源文件夹
+        # 旁建兄弟目录。重跑同文件夹同倍率会落到同一个输出根（逐图命名的不
+        # 覆盖规则在各自镜像目录内收敛，不会增殖）
+        base = Path(odir) if odir else froot.parent
+        out_root = base / f"{froot.name}_{res_label}"
     if batch and body.output:
         raise HTTPException(400, "批量图片由系统逐图命名输出，不能指定单一输出文件")
     # 逐图输出命名：目录无同名则沿用原名，冲突退 _倍率 后缀（不覆盖现有文件；
@@ -205,10 +279,11 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     images_meta: list[dict] = []
     used: set[str] = _active_output_keys()
     ow, oh = (tw, th) if tw is not None else (src_w * target, src_h * target)
-    for p in paths:
+    for idx, p in enumerate(paths):
         if batch or not body.output:
             stem = _render_output_stem(tmpl, p.stem, body.model_id, res_label, ow, oh)
-            out = _sr_output_name(out_root, stem, fmt, res_label, used)
+            file_dir = out_root if not folder_src else out_root / rels[idx].parent
+            out = _sr_output_name(file_dir, stem, fmt, res_label, used)
         else:
             _reject_output_conflict(str(body.output), used, body.overwrite)
             out = str(body.output)
@@ -217,9 +292,10 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     pdf_out = None
     if merge_pdf:
         # PDF 沿用首图名系（首图撞名拿了 _倍率 后缀时 PDF 跟随），与逐图
-        # 产物互不覆盖；名字在创建期定死，worker 只消费
-        pdf_out = _sr_output_name(
-            out_root, Path(images_meta[0]["out"]).stem, "pdf", res_label, used)
+        # 产物互不覆盖；文件夹模式放输出根、以文件夹名命名；名字在创建期
+        # 定死，worker 只消费
+        pdf_stem = froot.name if folder_src else Path(images_meta[0]["out"]).stem
+        pdf_out = _sr_output_name(out_root, pdf_stem, "pdf", res_label, used)
     try:  # 与视频同规则：目录不存在自动建，指向不可写处给可读错误
         out_root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -230,6 +306,8 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         "scale": scale, "target_scale": target,
         "tile": tile, "images": images_meta,
     }
+    if folder_src:
+        params["folder_src"] = folder_src  # 任务卡/续跑侧识别文件夹模式
     if fmt == "jpg":
         q = int(params_in.get("jpg_quality", 92))
         params["jpg_quality"] = min(100, max(60, q))
@@ -242,7 +320,8 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         params["merge_pdf"] = True
         params["pdf_out"] = pdf_out
     task = db.new_task(
-        str(paths[0]), pdf_out or images_meta[0]["out"], body.model_id, params,
+        str(froot) if folder_src else str(paths[0]),
+        pdf_out or images_meta[0]["out"], body.model_id, params,
         src={"w": src_w, "h": src_h, "fps": 0.0, "total_frames": len(paths)},
     )
     bus.publish({"type": "task_status", "task_id": task["id"], "status": "queued"})

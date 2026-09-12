@@ -296,6 +296,16 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
       ))
     }
     if (method === 'POST' && path === '/api/tasks') return Promise.resolve(json({ id: `t-${Date.now()}` }, 201))
+    if (method === 'POST' && path === '/api/images/scan') {
+      // 图片超分·文件夹模式：假漫画目录树（封面 + 两话子目录）
+      const body = JSON.parse(String(init?.body ?? '{}')) as { folder?: string }
+      const f = body.folder ?? 'D:\\manga'
+      const rels = ['ch01/p001.jpg', 'ch01/p002.jpg', 'ch02/p001.jpg', 'ch02/p002.jpg', 'cover.jpg']
+      return Promise.resolve(json({
+        folder: f, total: rels.length, dirs: 2,
+        files: rels.map((rel) => ({ path: `${f}\\${rel.replace(/\//g, '\\')}`, rel })),
+      }))
+    }
     if (method === 'POST' && path === '/api/tasks/batch') {
       const body = JSON.parse(String(init?.body ?? '{}')) as { ids?: string[] }
       return Promise.resolve(json({ ok: true, done: body.ids ?? [], failed: {} }))

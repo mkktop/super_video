@@ -281,6 +281,20 @@ export interface PerfSample {
   task: PerfTaskUsage | null
 }
 
+export interface FolderScanFile {
+  path: string
+  /** 相对所选文件夹的 posix 风格路径（镜像输出目录结构的依据） */
+  rel: string
+}
+
+export interface FolderScanResult {
+  folder: string
+  total: number
+  /** 非隐藏子目录数（UI 提示「含 N 个子目录」） */
+  dirs: number
+  files: FolderScanFile[]
+}
+
 export const api = {
   async models(): Promise<ModelInfo[]> {
     return _get_json(`${baseUrl}/api/models`)
@@ -385,6 +399,19 @@ export const api = {
   },
   async uninstallTrtComponent(): Promise<Response> {
     return _fetch(`${baseUrl}/api/trt-component`, { method: 'DELETE' })
+  },
+  /** 图片超分·文件夹模式：递归枚举受支持图片（隐藏目录跳过，自然排序） */
+  async scanImageFolder(folder: string): Promise<FolderScanResult> {
+    const r = await _fetch(`${baseUrl}/api/images/scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder }),
+    })
+    if (!r.ok) {
+      const body = (await r.json().catch(() => ({}))) as { detail?: string }
+      throw new ApiError(body.detail ?? `HTTP ${r.status}`, r.status)
+    }
+    return r.json() as Promise<FolderScanResult>
   },
   async createTask(body: {
     input?: string

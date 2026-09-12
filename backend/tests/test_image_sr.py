@@ -399,3 +399,114 @@ def test_corrupt_image_gives_400(client, model_x2, tmp_path):
         "params": {"kind": "image", "scale": 2}})
     assert r.status_code == 400
     assert "无法读取图片" in r.json()["detail"]
+
+
+# ---- 文件夹模式（整本漫画：递归扫描 + 镜像输出结构）----
+
+def _manga_tree(root: Path) -> None:
+    """典型漫画目录：封面 + 卷/话子目录 + 非图片文件 + 隐藏目录。"""
+    _make_png(root / "cover.jpg", 10, 14)
+    _make_png(root / "ch2" / "p1.png", 10, 10)
+    _make_png(root / "ch2" / "p2.png", 10, 10)
+    _make_png(root / "ch10" / "p1.png", 10, 10)
+    (root / "ch10" / "note.txt").write_text("x")
+    _make_png(root / ".hidden" / "p.png", 10, 10)
+    _make_png(root / ".git" / "obj.png", 10, 10)
+
+
+def test_scan_image_folder(client, tmp_path):
+    """递归扫描：只认图片后缀、隐藏目录整棵跳过、自然排序（ch2 < ch10）。"""
+    root = tmp_path / "manga"
+    _manga_tree(root)
+    r = client.post("/api/images/scan", json={"folder": str(root)})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["total"] == 4, d["files"]
+    rels = [f["rel"] for f in d["files"]]
+    # 'ch' < 'cover'：子目录卷在前；2 < 10 自然序
+    assert rels == ["ch2/p1.png", "ch2/p2.png", "ch10/p1.png", "cover.jpg"], rels
+    assert d["dirs"] == 2, "只数非隐藏子目录"
+    assert client.post("/api/images/scan",
+                       json={"folder": str(tmp_path / "nope")}).status_code == 400
+
+
+def test_create_image_folder_task_mirrors_structure(client, model_x2, tmp_path, monkeypatch):
+    """文件夹模式：输出镜像源目录结构；未设置 output_dir 时在源文件夹旁建
+    兄弟目录（绝不落回源目录内——产物会被下一次扫描重复吃进来）。"""
+    root = tmp_path / "manga"
+    _manga_tree(root)
+    from sv.server.routes import tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "load_settings", lambda: {})
+    r = client.post("/api/tasks", json={
+        "inputs": [str(root / "ch2" / "p1.png"), str(root / "ch2" / "p2.png"),
+                   str(root / "ch10" / "p1.png"), str(root / "cover.jpg")],
+        "model_id": model_x2,
+        "params": {"kind": "image", "scale": 2, "folder_src": str(root)},
+    })
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["input_path"].replace("\\", "/") == str(root).replace("\\", "/")
+    assert d["total_frames"] == 4
+    outs = [i["out"].replace("\\", "/") for i in d["params"]["images"]]
+    base = str(tmp_path / "manga_2x").replace("\\", "/")
+    assert all(o.startswith(base + "/") for o in outs), outs
+    for want in (f"{base}/ch2/p1.png", f"{base}/ch2/p2.png",
+                 f"{base}/ch10/p1.png", f"{base}/cover.png"):
+        assert want in outs, want
+
+
+def test_create_image_folder_task_uses_output_dir(client, model_x2, tmp_path, monkeypatch):
+    """设置了 output_dir：镜像根建在其下（文件夹名_倍率），与其他任务的散图
+    产物互不混放。"""
+    root = tmp_path / "manga"
+    _manga_tree(root)
+    outdir = tmp_path / "sr_out"
+    from sv.server.routes import tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "load_settings",
+                        lambda: {"output_dir": str(outdir)})
+    r = client.post("/api/tasks", json={
+        "inputs": [str(root / "ch2" / "p1.png")],
+        "model_id": model_x2,
+        "params": {"kind": "image", "scale": 2, "folder_src": str(root)},
+    })
+    assert r.status_code == 201, r.text
+    out = r.json()["output_path"].replace("\\", "/")
+    want = (str(outdir / "manga_2x" / "ch2" / "p1.png")).replace("\\", "/")
+    assert out == want, out
+
+
+def test_create_image_folder_task_pdf_at_output_root(client, model_x2, tmp_path, monkeypatch):
+    """文件夹 + merge_pdf：PDF 以文件夹名命名、放在镜像输出根（不裹进子目录）。"""
+    root = tmp_path / "manga"
+    _manga_tree(root)
+    from sv.server.routes import tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "load_settings", lambda: {})
+    r = client.post("/api/tasks", json={
+        "inputs": [str(root / "ch2" / "p1.png"), str(root / "cover.jpg")],
+        "model_id": model_x2,
+        "params": {"kind": "image", "scale": 2, "folder_src": str(root),
+                   "merge_pdf": True},
+    })
+    assert r.status_code == 201, r.text
+    d = r.json()
+    pdf = d["output_path"].replace("\\", "/")
+    assert pdf.endswith("/manga_2x/manga.pdf"), pdf
+    assert d["params"]["pdf_out"] == d["output_path"]
+
+
+def test_create_image_folder_task_rejects_outside_file(client, model_x2, tmp_path):
+    """夹外路径直接 400（而不是悄悄落平铺破坏镜像语义）。"""
+    root = tmp_path / "manga"
+    _manga_tree(root)
+    stray = tmp_path / "stray.png"
+    _make_png(stray, 10, 10)
+    r = client.post("/api/tasks", json={
+        "inputs": [str(root / "ch2" / "p1.png"), str(stray)],
+        "model_id": model_x2,
+        "params": {"kind": "image", "scale": 2, "folder_src": str(root)},
+    })
+    assert r.status_code == 400
+    assert "文件夹内" in r.json()["detail"]
