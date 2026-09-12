@@ -126,8 +126,8 @@ const gpuShortName = computed(() =>
             <span class="ec-gpu">{{ gpuShortName }}</span>
           </template>
         </div>
-        <!-- 像素重构示意：左 1/3 马赛克(480p) / 右 2/3 锐利(4K)，
-             品牌扫描线 4s 一轮从左向右扫过，扫过之处像素"重构"为清晰细节 -->
+        <!-- 像素重构示意：扫描线左侧=马赛克(480p)、右侧=锐利(4K)，
+             光标在 26%↔74% 间往返，分界随手柄走（与对比页滑块同语义） -->
         <div class="px-demo" aria-hidden="true">
           <div class="px-screen">
             <div class="px-art px-sharp" />
@@ -418,13 +418,13 @@ h1 {
 .engine-chip.off .ec-status { color: var(--sv-warning); }
 
 /* ---- 像素重构示意（主打记忆点）----
-   静止格局：左 1/3 马赛克(480p) + 右 2/3 锐利(4K)；
-   一条 2px 品牌扫描线来回往返扫描（alternate），线身的 16% 宽"重构带"走到哪洗到哪。
+   语义与对比页一致：扫描线左侧=马赛克(480p)、右侧=锐利(4K)，线扫到哪
+   分界就在哪。光标 26%↔74% 往返（两端都留得出对方的区域，不会出现
+   「整幅全模糊」的尴尬帧）；线右 10% 宽"新鲜重构"微光随行。
    几何全部由 --scan（注册自定义属性）驱动 clip-path/位移，GPU 合成不触发布局。 */
 .px-demo { position: relative; flex-shrink: 0; }
 .px-screen {
-  --split: 34%;
-  --scan: 18%;
+  --scan: 26%;
   position: relative;
   width: 224px;
   height: 132px;
@@ -438,15 +438,15 @@ h1 {
 @property --scan {
   syntax: '<percentage>';
   inherits: true;
-  initial-value: 18%;
+  initial-value: 26%;
 }
 @media (prefers-reduced-motion: no-preference) {
-  /* alternate 往返：去程 18%→100%，回程反向扫回，端点缓入缓出不停顿 */
+  /* alternate 往返：分界线在 26%↔74% 之间来回，端点缓入缓出不停顿 */
   .px-screen { animation: px-scan 2.6s ease-in-out infinite alternate; }
 }
 @keyframes px-scan {
-  0% { --scan: 18%; }
-  100% { --scan: 100%; }
+  0% { --scan: 26%; }
+  100% { --scan: 74%; }
 }
 /* 场景底画（清晰层全幅铺满） */
 .px-art { position: absolute; inset: 0; background: var(--sv-px-scene); }
@@ -456,9 +456,9 @@ h1 {
   inset: 0;
   background: var(--sv-px-detail);
 }
-/* 马赛克层：只露左 split%；粗像素网点 + 正交色块条纹 */
+/* 马赛克层：跟随扫描线动态裁切——线左模糊(480p)、线右锐利(4K) */
 .px-mosaic {
-  clip-path: inset(0 calc(100% - var(--split)) 0 0);
+  clip-path: inset(0 calc(100% - var(--scan)) 0 0);
 }
 .px-mosaic::before {
   content: '';
@@ -477,15 +477,13 @@ h1 {
   background: var(--sv-px-detail);
   background-size: 16px 16px, 16px 16px;
 }
-/* 重构带：扫描线身后 16% 宽的清晰画（带一点提亮），把马赛克"洗"成细节 */
+/* 重构微光：线右侧 10% 宽的柔光条（刚被"扫"成清晰的区域），走到哪亮到哪 */
 .px-band {
   position: absolute;
   inset: 0;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 70%, transparent),
-    var(--sv-px-detail),
-    var(--sv-px-scene);
-  clip-path: inset(0 calc(100% - var(--scan)) 0 calc(var(--scan) - 16%));
+  background: linear-gradient(
+    90deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03) 60%, transparent);
+  clip-path: inset(0 calc(90% - var(--scan)) 0 var(--scan));
 }
 /* 扫描线：2px 品牌渐变竖线 + 辉光 */
 .px-line {
