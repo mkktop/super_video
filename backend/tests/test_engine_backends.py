@@ -456,3 +456,71 @@ def test_worker_garbage_fp16_file_falls_to_fp32(monkeypatch, tmp_path):
     assert calls == ["m_fp16.onnx", "m_fp16.onnx", "m.onnx"], \
         f"应先试分块、再换 fp32 原件: {calls}"
     assert prec == "fp32"
+
+
+# ---- 显存不足（GBK 掩盖形态）耗尽降 tile 后的 CPU 兜底 + 错误解蔽 ----
+
+_OOM_BYTES = (b"[ONNXRuntimeError] : 6 : RUNTIME_EXCEPTION ... 8007000E "
+              b"\xc4\xe6\xb4\xe6\xd7\xca\xd4\xb4\xb2\xbb\xd7\xe3")
+
+
+def test_worker_oom_exhausted_falls_to_cpu(monkeypatch, tmp_path):
+    """OOM 后同进程 DML 会话损坏（降 tile 重建接着爆，2026-09-12 实测）：tile 降到底
+    仍不足时回退 CPU 保出片，不再直接失败——失败任务后 runner 丢弃进程，下一单
+    自然恢复 GPU（用户实测：整幅失败→手动 256 分块新进程成功）。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    calls: list[tuple[str, int]] = []
+
+    class _OomUntilCpu:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            calls.append((device, tile))
+            self.device = device
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            if self.device != "cpu":
+                raise UnicodeDecodeError("utf-8", _OOM_BYTES, 240, 1,
+                                         "invalid continuation byte")
+            return frame
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _OomUntilCpu)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (1280, 891), log=lambda ev: None)
+    tiles = [t for _, t in calls]
+    assert tiles == [0, 256, 128, 64, 0], f"应 降tile到底→CPU整幅: {calls}"
+    assert calls[-1][0] == "cpu"
+
+
+def test_worker_masked_error_decoded_on_total_failure(monkeypatch, tmp_path):
+    """全链失败时错误必须解蔽：上报解码后的真实错误（含 HRESULT），不再让用户
+    对着 UnicodeDecodeError 猜病因。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    class _AlwaysOom:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            pass
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            raise UnicodeDecodeError("utf-8", _OOM_BYTES, 240, 1,
+                                     "invalid continuation byte")
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="x")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _AlwaysOom)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    with pytest.raises(RuntimeError, match="8007000E"):
+        worker._load_onnx_engine(
+            tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)

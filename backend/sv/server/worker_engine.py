@@ -39,6 +39,16 @@ class _EngineGarbage(Exception):
     黑图或色彩塌缩（TRT fp16×transformer / DML 大图全图两案实锤）。"""
 
 
+def _unmask(e: Exception) -> str | None:
+    """中文系统 ORT 错误消息内嵌 GBK、Python 绑定层按 utf-8 硬解失败 → 用户只看
+    到无语义的 UnicodeDecodeError；真实 HRESULT/描述在 args 里的原始 bytes 中。
+    解出可读消息供失败上报与重试日志，不再让用户对着解码报错猜病因。"""
+    for a in e.args:
+        if isinstance(a, (bytes, bytearray)):
+            return bytes(a).decode("gbk", "replace").strip()
+    return None
+
+
 def _engine_sig(weight: Path, scale: int, variant: str | None, precision: str,
                 tile: int, batch: int, warmup_hw: tuple[int, int], ort_device: str) -> tuple:
     return (str(weight), int(scale), variant or "", precision, int(tile),
@@ -160,7 +170,7 @@ def _load_onnx_engine(
     # 显存不足自动降档 tile 减半（最多 3 次）；CUDA 执行层内核崩溃换链重试（一次）；
     # 输出数值损坏（彩色探针）按 512 分块 → fp32 原件 → TRT 关 fp16 → DML/CUDA → CPU 降链
     fp16_for_trt = bool(spec.io.get("trt_fp16", True))
-    for attempt in range(7):
+    for attempt in range(9):
         try:
             # 仅在关闭混合精度时显式传参（默认 True 走 io 声明，测试 fake 不感知新参）
             extra = {} if fp16_for_trt else {"trt_fp16": False}
@@ -250,7 +260,10 @@ def _load_onnx_engine(
                 continue
             # 最后一次尝试仍失败必须 raise：带着没加载成功的 engine 继续走，
             # 后面会以更难懂的方式崩（如 provider_used AttributeError）
-            if not _oom(e) or tile in (1,) or attempt == 3:
+            if not _oom(e):
+                decoded = _unmask(e)
+                if decoded:
+                    raise RuntimeError(decoded) from e
                 raise
             new_tile = 256 if tile == 0 else max(64, tile // 2)
             # 先释放失败引擎再降档重建：OOM 的旧 session 仍攥着 DML/CUDA 资源，
@@ -259,10 +272,28 @@ def _load_onnx_engine(
             import gc
 
             gc.collect()
-            if log:
-                log({"type": "log", "line":
-                     f"显存不足，分块大小调整为 {new_tile} 后重试"})
-            tile = new_tile
+            if new_tile < tile or tile == 0:
+                if log:
+                    log({"type": "log", "line":
+                         f"显存不足，分块大小调整为 {new_tile} 后重试"})
+                tile = new_tile
+                continue
+            # tile 已降到底仍 OOM：同进程 DML 会话大概率已损坏（gc 释放也救不回，
+            # 2026-09-12 实测降档重建接着爆，仅换进程可愈）——不再无限重试，
+            # 回退 CPU 保出片；失败任务后 runner 丢弃进程，下一单自然恢复 GPU
+            if ort_device != "cpu":
+                ort_device = "cpu"
+                tile = 0  # CPU 无显存约束，分块纯属多跑重叠区
+                if log:
+                    log({"type": "log", "line":
+                         "显存不足且降分块无效（GPU 会话可能已损坏），已回退 CPU 推理重试（速度较慢）"})
+                continue
+            decoded = _unmask(e)
+            if decoded:
+                raise RuntimeError(decoded) from e
+            raise
+    if engine is None:
+        raise RuntimeError("引擎加载重试次数耗尽")  # 理论不可达：链上每档要么 continue 要么 raise
     _ENGINE_CACHE.clear()  # 单条语义：换签名即释放旧引擎（显存）再换入
     # 降链可能已把转换版 fp16 换回 fp32 原件，精度口径按落定权重重算
     used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
