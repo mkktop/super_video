@@ -433,9 +433,11 @@ h1 {
   overflow: hidden;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
+/* 必须允许继承：动画挂在 .px-screen 上，消费 var(--scan) 的 .px-line/.px-band
+   是其子元素——inherits:false 时子元素永远只拿到 initial-value，扫描线不动 */
 @property --scan {
   syntax: '<percentage>';
-  inherits: false;
+  inherits: true;
   initial-value: 18%;
 }
 @media (prefers-reduced-motion: no-preference) {
