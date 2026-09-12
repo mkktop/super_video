@@ -25,7 +25,11 @@ onUnmounted(() => off?.())
 <template>
   <div class="titlebar" @dblclick="toggleMax">
     <div class="brand">
-      <span class="mark"><img class="logo" :src="logoUrl" alt="" draggable="false" /></span>
+      <span class="mark">
+        <img class="logo" :src="logoUrl" alt="" draggable="false" />
+        <!-- 启动微光扫过：软件醒来的仪式感，只播一次 -->
+        <span class="mark-sheen" aria-hidden="true" />
+      </span>
       <span class="name">super_video</span>
       <span class="ver">v{{ version }}</span>
       <button
@@ -66,8 +70,8 @@ onUnmounted(() => off?.())
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(180deg, rgba(30, 34, 42, 0.92), rgba(22, 25, 31, 0.96));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  background: var(--sv-titlebar-grad);
+  border-bottom: 1px solid var(--sv-titlebar-line);
   position: relative;
   -webkit-app-region: drag;
   user-select: none;
@@ -81,7 +85,7 @@ onUnmounted(() => off?.())
   right: 0;
   bottom: -1px;
   height: 1px;
-  background: linear-gradient(90deg, transparent 8%, rgba(79, 140, 255, 0.4) 38%, rgba(139, 92, 246, 0.32) 62%, transparent 92%);
+  background: linear-gradient(90deg, transparent 8%, rgba(var(--sv-accent-rgb), 0.4) 38%, rgba(var(--sv-accent2-rgb), 0.32) 62%, transparent 92%);
   opacity: 0.55;
   pointer-events: none;
 }
@@ -99,6 +103,8 @@ onUnmounted(() => off?.())
   height: 23px;
   border-radius: 7px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
 }
 .logo {
   display: block;
@@ -106,11 +112,27 @@ onUnmounted(() => off?.())
   height: 100%;
   border-radius: inherit;
 }
+/* 启动微光：一道高光斜面从左扫到右，600ms 一次性 */
+.mark-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.55) 48%, transparent 62%);
+  transform: translateX(-130%);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mark-sheen { animation: mark-sheen 0.6s var(--sv-ease) 0.35s 1 both; }
+}
+@keyframes mark-sheen {
+  from { transform: translateX(-130%); }
+  to { transform: translateX(130%); }
+}
 .name {
   font-size: 13px;
   font-weight: 650;
   letter-spacing: 0.3px;
-  background: linear-gradient(90deg, #f2f4f7, #a8adb5);
+  background: var(--sv-title-grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -119,9 +141,9 @@ onUnmounted(() => off?.())
   font-size: 11px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  color: #8f959d;
-  background: rgba(255, 255, 255, 0.055);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: var(--sv-text-dim);
+  background: var(--sv-fill-3);
+  border: 1px solid var(--sv-border-mid);
   border-radius: 999px;
   padding: 1px 9px;
   margin-left: 2px;
@@ -133,26 +155,34 @@ onUnmounted(() => off?.())
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: #4f8cff;
-  background: rgba(79, 140, 255, 0.12);
-  border: 1px solid rgba(79, 140, 255, 0.45);
+  color: var(--sv-accent-strong);
+  background: var(--sv-accent-bg);
+  border: 1px solid rgba(var(--sv-accent-rgb), 0.45);
   border-radius: 999px;
   padding: 1px 10px;
   margin-left: 6px;
   cursor: pointer;
   -webkit-app-region: no-drag;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--sv-dur-fast) ease, color var(--sv-dur-fast) ease, box-shadow var(--sv-dur-fast) ease;
 }
 .upd:hover {
-  background: rgba(79, 140, 255, 0.24);
-  color: #6fa0ff;
+  background: rgba(var(--sv-accent-rgb), 0.24);
+  color: var(--sv-accent-strong);
+}
+/* 有更新时太容易错过：轻微呼吸辉光提示（box-shadow 2.5s 循环） */
+@media (prefers-reduced-motion: no-preference) {
+  .upd { animation: upd-breathe 2.5s ease-in-out infinite; }
+}
+@keyframes upd-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--sv-accent-rgb), 0); }
+  50% { box-shadow: 0 0 12px 1px rgba(var(--sv-accent-rgb), 0.45); }
 }
 .upd-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #4f8cff;
-  box-shadow: 0 0 6px rgba(79, 140, 255, 0.9);
+  background: var(--sv-accent);
+  box-shadow: 0 0 6px rgba(var(--sv-accent-rgb), 0.9);
   animation: upd-pulse 2s ease-in-out infinite;
 }
 @keyframes upd-pulse {
@@ -172,15 +202,16 @@ onUnmounted(() => off?.())
   justify-content: center;
   border: none;
   background: transparent;
-  color: #9aa0a6;
-  transition: background 0.12s, color 0.12s;
+  color: var(--sv-ctl-fg);
+  transition: background 0.1s ease, color 0.1s ease;
 }
 .ctl:hover {
-  background: #26292e;
-  color: #e8eaed;
+  background: var(--sv-ctl-hover);
+  color: var(--sv-ctl-fg-hover);
 }
+/* Windows 惯例：关闭键 hover 红底白图标 */
 .ctl.close:hover {
-  background: #e81123;
+  background: var(--sv-ctl-close);
   color: #fff;
 }
 </style>

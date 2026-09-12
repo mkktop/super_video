@@ -25,21 +25,21 @@ const rings = computed<Ring[]>(() => {
   return [
     {
       label: 'CPU 占用',
-      color: '#4f8cff',
+      color: 'var(--sv-accent)',
       pct: l?.cpu ?? 0,
       value: l ? `${Math.round(l.cpu)}%` : '—',
       sub: hw ? `${hw.cpu_cores} 核心` : '',
     },
     {
       label: '内存占用',
-      color: '#f59e0b',
+      color: 'var(--sv-warning-deep)',
       pct: l?.mem_pct ?? 0,
       value: l ? `${Math.round(l.mem_pct)}%` : '—',
       sub: l && hw ? `${l.mem_used_gb} / ${hw.ram_gb} GB` : '',
     },
     {
       label: 'GPU 占用',
-      color: '#34d399',
+      color: 'var(--sv-success)',
       pct: gpu0?.util ?? 0,
       value: gpu0 ? `${gpu0.util ?? 0}%` : '—',
       sub: store.gpuName || '',
@@ -47,7 +47,7 @@ const rings = computed<Ring[]>(() => {
     },
     {
       label: '显存占用',
-      color: '#8b5cf6',
+      color: 'var(--sv-accent-2)',
       pct: vramTotalGb ? (vramUsedGb / vramTotalGb) * 100 : 0,
       value: gpu0 && vramTotalGb ? `${vramUsedGb.toFixed(1)} GB` : '—',
       sub: vramTotalGb ? `总 ${vramTotalGb.toFixed(1)} GB` : '',
@@ -59,7 +59,7 @@ const rings = computed<Ring[]>(() => {
 
 <template>
   <div class="gauge-grid">
-    <div v-for="r in rings" :key="r.label" class="gauge">
+    <div v-for="r in rings" :key="r.label" class="gauge sv-card hoverable">
       <div class="ring-wrap">
         <svg width="88" height="88" viewBox="0 0 88 88">
           <circle cx="44" cy="44" r="36" class="ring-track" />
@@ -73,7 +73,7 @@ const rings = computed<Ring[]>(() => {
             :stroke-dasharray="`${(RING_C * Math.min(r.pct, 100)) / 100} ${RING_C}`"
           />
         </svg>
-        <span class="ring-pct" :style="{ color: r.na ? '#767d88' : r.color }">
+        <span class="ring-pct sv-num" :style="{ color: r.na ? 'var(--sv-text-faint)' : r.color }">
           {{ r.na ? '—' : `${Math.round(r.pct)}%` }}
         </span>
       </div>
@@ -97,18 +97,9 @@ const rings = computed<Ring[]>(() => {
   display: flex;
   align-items: center;
   gap: 14px;
-  background: linear-gradient(180deg, #1c2027, #181b21);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
-  transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
-}
-.gauge:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
 }
 .ring-wrap { position: relative; width: 88px; height: 88px; flex-shrink: 0; }
-.ring-track { fill: none; stroke: rgba(255, 255, 255, 0.07); stroke-width: 8; }
+.ring-track { fill: none; stroke: var(--sv-fill-3); stroke-width: 8; }
 .ring-val {
   fill: none;
   stroke-width: 8;
@@ -129,17 +120,18 @@ const rings = computed<Ring[]>(() => {
   font-variant-numeric: tabular-nums;
 }
 .gauge-body { min-width: 0; }
-.g-label { font-size: 12.5px; color: #9aa1ad; }
+.g-label { font-size: 12.5px; color: var(--sv-text-dim); }
 .g-value {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 750;
   margin: 3px 0 2px;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
   white-space: nowrap;
 }
 .g-sub {
   font-size: 11.5px;
-  color: #8a919d;
+  color: var(--sv-text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -2,6 +2,7 @@
 import { nextTick, onMounted, onUnmounted, computed, ref } from 'vue'
 import { NButton, NInput, NSwitch, useMessage } from 'naive-ui'
 import { api } from '../api'
+import EmptyState from '../components/EmptyState.vue'
 
 const message = useMessage()
 
@@ -85,8 +86,18 @@ function onVisible() {
     </div>
 
     <div ref="box" class="log-box" @scroll="onScroll">
-      <div v-if="!lines.length" class="log-empty">暂无日志</div>
-      <div v-else-if="!shown.length" class="log-empty">没有匹配「{{ query.trim() }}」的行</div>
+      <EmptyState
+        v-if="!lines.length"
+        variant="log"
+        title="暂无日志"
+        desc="sidecar 启动后运行日志会显示在这里"
+      />
+      <EmptyState
+        v-else-if="!shown.length"
+        variant="log"
+        title="没有匹配的行"
+        :desc="`关键字「${query.trim()}」未命中任何日志行`"
+      />
       <div
         v-for="(l, i) in shown"
         :key="i"
@@ -100,15 +111,15 @@ function onVisible() {
 <style scoped>
 .logs-page { display: flex; flex-direction: column; gap: 14px; }
 .page-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
-.sub { font-size: 12.5px; color: #9aa1ad; margin-top: 4px; }
+h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
+.sub { font-size: 12.5px; color: var(--sv-text-dim); margin-top: 4px; }
 .head-actions { display: flex; align-items: center; gap: 10px; }
-.as-label { font-size: 12.5px; color: #9aa1ad; }
+.as-label { font-size: 12.5px; color: var(--sv-text-dim); }
 
 .log-box {
-  background: rgba(0, 0, 0, 0.32);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
+  background: var(--sv-well);
+  border: 1px solid var(--sv-border-soft);
+  border-radius: var(--sv-radius-md);
   padding: 12px 14px;
   height: calc(100vh - 175px);
   min-height: 240px;
@@ -116,9 +127,8 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   font-family: Consolas, 'Courier New', monospace;
   font-size: 12px;
   line-height: 1.65;
-  color: #c9cdd6;
+  color: var(--sv-text-code);
 }
 .log-line { white-space: pre-wrap; word-break: break-all; }
-.log-line.err { color: #f87171; }
-.log-empty { color: #767d88; }
+.log-line.err { color: var(--sv-danger); }
 </style>

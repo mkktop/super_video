@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   user-select: none;
   cursor: ew-resize;
-  background: #0d0e10;
+  background: var(--sv-panel-deep);
   border-radius: 6px;
 }
 /* 与静帧对比同构：两层同尺寸 contain，clip-path 裁剪，画面像素级对齐 */
@@ -292,8 +292,8 @@ onBeforeUnmount(() => {
   bottom: 0;
   left: -1px;
   width: 2px;
-  background: #4f8cff;
-  box-shadow: 0 0 8px rgba(79, 140, 255, 0.8);
+  background: var(--sv-accent);
+  box-shadow: 0 0 8px rgba(var(--sv-accent-rgb), 0.8);
 }
 .knob {
   position: absolute;
@@ -303,7 +303,7 @@ onBeforeUnmount(() => {
   height: 32px;
   margin-top: -16px;
   border-radius: 50%;
-  background: #4f8cff;
+  background: var(--sv-accent);
   color: #fff;
   display: flex;
   align-items: center;
@@ -318,7 +318,7 @@ onBeforeUnmount(() => {
   padding: 3px 10px;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.55);
-  color: #e8eaed;
+  color: var(--sv-text);
   pointer-events: none;
 }
 .label-l { left: 10px; }
@@ -333,7 +333,7 @@ onBeforeUnmount(() => {
   padding: 5px 12px;
   border-radius: 10px;
   background: rgba(120, 70, 0, 0.78);
-  color: #fbbf24;
+  color: var(--sv-warning);
   pointer-events: none;
   white-space: nowrap;
   overflow: hidden;
@@ -341,7 +341,7 @@ onBeforeUnmount(() => {
 }
 .broken.pending {
   background: rgba(17, 52, 96, 0.75);
-  color: #7db4ff;
+  color: var(--sv-accent-strong);
 }
 .bar {
   display: flex;
@@ -352,7 +352,7 @@ onBeforeUnmount(() => {
 }
 .time {
   font-size: 12px;
-  color: #9aa0a6;
+  color: var(--sv-text-faint);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

@@ -203,8 +203,8 @@ function loupeTransform() {
   bottom: 0;
   left: -1px;
   width: 2px;
-  background: linear-gradient(180deg, transparent, #6fa0ff 12%, #c4d5ff 50%, #6fa0ff 88%, transparent);
-  box-shadow: 0 0 10px rgba(79, 140, 255, 0.8);
+  background: linear-gradient(180deg, transparent, var(--sv-accent-strong) 12%, #c4d5ff 50%, var(--sv-accent-strong) 88%, transparent);
+  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.8);
 }
 .knob {
   position: absolute;
@@ -214,13 +214,13 @@ function loupeTransform() {
   height: 32px;
   margin-top: -16px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #4f8cff, #7d5cf0);
+  background: var(--sv-btn-grad);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5), 0 0 14px rgba(79, 140, 255, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5), 0 0 14px rgba(var(--sv-accent-rgb), 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .label {
   position: absolute;
@@ -229,7 +229,7 @@ function loupeTransform() {
   padding: 3px 10px;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.55);
-  color: #e8eaed;
+  color: var(--sv-text);
   pointer-events: none;
 }
 .label-l { left: 10px; }
@@ -242,7 +242,7 @@ function loupeTransform() {
   padding: 3px 10px;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.55);
-  color: #9aa0a6;
+  color: var(--sv-text-faint);
   pointer-events: none;
 }
 .loupe-btn {
@@ -251,26 +251,26 @@ function loupeTransform() {
   left: 10px;
   padding: 3px 12px;
   border-radius: 12px;
-  border: 1px solid #33373d;
+  border: 1px solid var(--sv-border);
   background: rgba(0, 0, 0, 0.55);
-  color: #9aa0a6;
+  color: var(--sv-text-faint);
   font-size: 11.5px;
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
 }
-.loupe-btn:hover { color: #e8eaed; }
+.loupe-btn:hover { color: var(--sv-text); }
 .loupe-btn.on {
-  color: #4f8cff;
-  border-color: rgba(79, 140, 255, 0.6);
-  background: rgba(79, 140, 255, 0.12);
+  color: var(--sv-accent);
+  border-color: rgba(var(--sv-accent-rgb), 0.6);
+  background: rgba(var(--sv-accent-rgb), 0.12);
 }
 /* 放大视窗：双层图按图片像素坐标平移缩放，分割比例与主视图同步 */
 .loupe {
   position: absolute;
   overflow: hidden;
-  border: 2px solid #4f8cff;
+  border: 2px solid var(--sv-accent);
   border-radius: 6px;
-  background: #0d0e10;
+  background: var(--sv-panel-deep);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
   pointer-events: none;
   z-index: 6;
@@ -289,8 +289,8 @@ function loupeTransform() {
   bottom: 0;
   width: 2px;
   margin-left: -1px;
-  background: #4f8cff;
-  box-shadow: 0 0 6px rgba(79, 140, 255, 0.8);
+  background: var(--sv-accent);
+  box-shadow: 0 0 6px rgba(var(--sv-accent-rgb), 0.8);
 }
 .loupe-zoom {
   position: absolute;
@@ -300,6 +300,6 @@ function loupeTransform() {
   padding: 1px 8px;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.6);
-  color: #9aa0a6;
+  color: var(--sv-text-faint);
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -145,7 +145,28 @@ async function onDelete() {
 }
 
 // naive Line 进度的渐变色只认 { stops: [from, to] } 对象形态；完成态保持绿色
-const gradFill: { stops: [string, string] } = { stops: ['#4f8cff', '#8b5cf6'] }
+const gradFill: { stops: [string, string] } = { stops: ['var(--sv-accent)', 'var(--sv-accent-2)'] }
+
+// ---- 任务完成微庆祝：running → done 迁移时播一次（弹跳 + 成功色描边扩散），不循环 ----
+const celebrate = ref(false)
+let celebrateTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => props.task.status,
+  (s, o) => {
+    if (s === 'done' && o === 'running') {
+      celebrate.value = true
+      if (celebrateTimer) clearTimeout(celebrateTimer)
+      celebrateTimer = setTimeout(() => (celebrate.value = false), 950)
+    }
+  },
+)
+onBeforeUnmount(() => {
+  if (celebrateTimer) clearTimeout(celebrateTimer)
+})
+
+// fps / ETA：值变化时 150ms 淡入，消除秒级跳变的生硬感
+const fpsText = computed(() => props.task.fps_run.toFixed(1))
+const etaText = computed(() => fmtEta(props.task.eta_sec))
 
 function onOpenFolder() {
   window.sv.showInFolder(props.task.output_path)
@@ -158,7 +179,27 @@ function onOpenInputFolder() {
 </script>
 
 <template>
-  <n-card size="small" :bordered="true" class="task-card" :class="'st-' + task.status">
+  <n-card
+    size="small"
+    :bordered="true"
+    class="task-card sv-card"
+    :class="['st-' + task.status, { celebrate: celebrate }]"
+  >
+    <!-- 运行中：右上角一颗脉动圆点（与侧栏连接点同款 halo） -->
+    <span v-if="task.status === 'running'" class="run-dot" aria-hidden="true" />
+    <!-- 排队任务：拖拽手柄（六点位），hover 才显示，暗示可拖拽排序 -->
+    <span
+      v-if="task.status === 'queued' && !selectMode"
+      class="drag-grip"
+      title="拖拽调整顺序"
+      aria-hidden="true"
+    >
+      <svg width="10" height="18" viewBox="0 0 10 18">
+        <circle cx="2.5" cy="3" r="1.5" fill="currentColor" /><circle cx="7.5" cy="3" r="1.5" fill="currentColor" />
+        <circle cx="2.5" cy="9" r="1.5" fill="currentColor" /><circle cx="7.5" cy="9" r="1.5" fill="currentColor" />
+        <circle cx="2.5" cy="15" r="1.5" fill="currentColor" /><circle cx="7.5" cy="15" r="1.5" fill="currentColor" />
+      </svg>
+    </span>
     <div class="row1">
       <NCheckbox
         v-if="selectMode"
@@ -189,7 +230,13 @@ function onOpenInputFolder() {
         >
           {{ String(task.params.out_kind).toUpperCase() }} 序列
         </n-tag>
-        <n-tag size="small" :bordered="false" :type="statusMeta[task.status].type">
+        <n-tag
+          size="small"
+          :bordered="false"
+          :type="statusMeta[task.status].type"
+          class="st-tag"
+          :class="{ bump: celebrate }"
+        >
           {{ statusMeta[task.status].label }}{{ task.queue_position ? ` #${task.queue_position}` : '' }}
         </n-tag>
       </div>
@@ -207,8 +254,9 @@ function onOpenInputFolder() {
       <div class="stats">
         <span>{{ scaleLabel }}</span>
         <span v-if="task.status === 'running'">
-          {{ task.progress_frames }}/{{ task.total_frames }} 帧 · {{ task.fps_run.toFixed(1) }} fps ·
-          剩余 {{ fmtEta(task.eta_sec) }}
+          {{ task.progress_frames }}/{{ task.total_frames }} 帧 ·
+          <Transition name="num" mode="out-in"><span :key="fpsText" class="sv-num">{{ fpsText }}</span></Transition> fps ·
+          剩余 <Transition name="num" mode="out-in"><span :key="etaText" class="sv-num">{{ etaText }}</span></Transition>
         </span>
         <span v-else :title="avgSpeed ? avgSpeedTip : undefined">
           {{ fmtBytes(task.out_bytes) }} · 用时 {{ fmtElapsed(task.elapsed_s)
@@ -309,11 +357,10 @@ function onOpenInputFolder() {
 </template>
 
 <style scoped>
-/* 卡片即画布：状态脊线 + 悬浮微抬；NCard 圆角经主题已是 14px */
+/* 卡片即画布：状态脊线 + 悬浮微抬；NCard 圆角经主题已是 14px（sv-card 提供底/描边/高光） */
 .task-card {
   position: relative;
-  background: linear-gradient(180deg, #1c2027, #181b21);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition: border-color 0.18s var(--sv-ease), box-shadow 0.18s var(--sv-ease), transform 0.18s var(--sv-ease);
   overflow: visible;
 }
 /* 状态脊线：一眼分清队列里的任务处于什么状态 */
@@ -325,24 +372,94 @@ function onOpenInputFolder() {
   bottom: 14px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: #3a4150;
+  background: var(--sv-text-faint); /* 排队态的中性脊线（浅色下也可见） */
+  opacity: 0.55;
   transition: background 0.2s, box-shadow 0.2s;
 }
-.task-card.st-running::before { background: var(--sv-grad); box-shadow: 0 0 10px rgba(79, 140, 255, 0.65); }
-.task-card.st-done::before { background: #34d399; opacity: 0.75; }
-.task-card.st-failed::before { background: #f87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.4); }
-.task-card.st-canceled::before { background: #fbbf24; opacity: 0.7; }
-.task-card:hover {
-  border-color: rgba(255, 255, 255, 0.13);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+/* 运行中：品牌渐变缓慢下流（background-size 300% 三段循环，无缝） */
+.task-card.st-running::before {
+  background: linear-gradient(180deg, var(--sv-accent), var(--sv-accent-2), var(--sv-accent));
+  background-size: 100% 300%;
+  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.65);
 }
+@media (prefers-reduced-motion: no-preference) {
+  .task-card.st-running::before { animation: ridge-flow 3s linear infinite; }
+}
+@keyframes ridge-flow {
+  0% { background-position: 0% 100%; }
+  100% { background-position: 0% 0%; }
+}
+.task-card.st-done::before { background: var(--sv-success); opacity: 0.75; }
+.task-card.st-failed::before { background: var(--sv-danger); box-shadow: 0 0 8px rgba(var(--sv-danger-rgb), 0.4); }
+.task-card.st-canceled::before { background: var(--sv-warning); opacity: 0.7; }
+.task-card:hover {
+  border-color: var(--sv-border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--sv-card-inset), 0 8px 22px rgba(0, 0, 0, 0.32);
+}
+
+/* 任务完成微庆祝：一次性成功色描边扩散（不循环、不撒花、不发声） */
+.task-card.celebrate { animation: card-celebrate 0.9s var(--sv-ease) 1; }
+@keyframes card-celebrate {
+  0% { box-shadow: var(--sv-card-inset), 0 0 0 0 rgba(var(--sv-success-rgb), 0); }
+  30% { box-shadow: var(--sv-card-inset), 0 0 0 3px rgba(var(--sv-success-rgb), 0.4), 0 10px 30px rgba(0, 0, 0, 0.3); }
+  100% { box-shadow: var(--sv-card-inset), 0 0 0 10px rgba(var(--sv-success-rgb), 0); }
+}
+.st-tag.bump { animation: tag-bump 0.4s var(--sv-ease) 1; }
+@keyframes tag-bump {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+/* 运行中右上角脉动圆点：8px + halo 扩散（与侧栏连接点同款） */
+.run-dot {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sv-accent);
+  box-shadow: 0 0 8px rgba(var(--sv-accent-rgb), 0.9);
+}
+.run-dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--sv-accent-rgb), 0.55);
+  animation: dot-halo 2.2s ease-out infinite;
+}
+@keyframes dot-halo {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  70%, 100% { transform: scale(1.8); opacity: 0; }
+}
+
+/* 排队任务拖拽手柄：卡片左缘外挂，hover 才现身 */
+.drag-grip {
+  position: absolute;
+  left: -26px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sv-text-faint);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity var(--sv-dur-fast) ease, color var(--sv-dur-fast) ease;
+}
+.drag-grip:hover { color: var(--sv-accent-strong); }
+.task-card:hover .drag-grip { opacity: 1; }
+
 .row1 { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .sel-box { margin-left: 2px; flex-shrink: 0; }
 .names { flex: 1; }
 .names { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.arrow, .out { color: #9aa1ad; font-size: 13px; }
+.arrow, .out { color: var(--sv-text-dim); font-size: 13px; }
 .out { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badges { display: flex; gap: 6px; flex-shrink: 0; }
 .progress-wrap { margin-top: 10px; }
@@ -359,33 +476,37 @@ function onOpenInputFolder() {
 @keyframes fill-sheen { 100% { transform: translateX(100%); } }
 .stats {
   display: flex; justify-content: space-between; margin-top: 6px;
-  font-size: 12px; color: #9aa1ad; font-variant-numeric: tabular-nums;
+  font-size: 12px; color: var(--sv-text-dim); font-variant-numeric: tabular-nums;
 }
+/* fps/ETA 值变化的 150ms 淡入 */
+.num-enter-active { transition: opacity 0.15s ease-out; }
+.num-leave-active { transition: opacity 0.05s ease-in; }
+.num-enter-from, .num-leave-to { opacity: 0; }
 .err { margin-top: 8px; }
-.err-text { color: #f87171; font-size: 12px; word-break: break-all; white-space: pre-wrap; }
+.err-text { color: var(--sv-danger); font-size: 12px; word-break: break-all; white-space: pre-wrap; }
 .row3 { display: flex; align-items: flex-end; gap: 10px; margin-top: 10px; }
 .preview-broken {
   width: 88px;
   height: 50px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed rgba(255, 255, 255, 0.1);
-  color: #8a919d;
+  border-radius: var(--sv-radius-sm);
+  background: var(--sv-fill-1);
+  border: 1px dashed var(--sv-border-mid);
+  color: var(--sv-text-faint);
   font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .preview {
-  max-height: 96px; max-width: 45%; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.09);
+  max-height: 96px; max-width: 45%; border-radius: var(--sv-radius-sm); border: 1px solid var(--sv-border-mid);
   object-fit: contain; cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition: transform 0.18s var(--sv-ease), box-shadow 0.18s var(--sv-ease), border-color 0.18s var(--sv-ease);
 }
 /* 悬停放大预览：像捏住一角掀开看细节 */
 .preview:hover:not(.gone) {
   transform: scale(1.6);
   transform-origin: left bottom;
-  border-color: rgba(79, 140, 255, 0.55);
+  border-color: rgba(var(--sv-accent-rgb), 0.55);
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
   z-index: 6;
   position: relative;
@@ -397,7 +518,7 @@ function onOpenInputFolder() {
   display: inline-flex;
   gap: 4px;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--sv-dur-fast) ease;
 }
 .task-card:hover .qbtns { opacity: 1; }
 .qbtn {
@@ -405,17 +526,17 @@ function onOpenInputFolder() {
   height: 22px;
   border: 1px solid var(--sv-border);
   border-radius: 6px;
-  background: #20242c;
-  color: #9aa1ad;
+  background: var(--sv-panel-2);
+  color: var(--sv-text-dim);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: border-color var(--sv-dur-fast) ease, color var(--sv-dur-fast) ease, background var(--sv-dur-fast) ease;
 }
-.qbtn:hover:not(:disabled) { border-color: #4f8cff; color: #6fa0ff; background: rgba(79, 140, 255, 0.1); }
+.qbtn:hover:not(:disabled) { border-color: var(--sv-accent); color: var(--sv-accent-strong); background: var(--sv-accent-bg); }
 .qbtn:disabled { opacity: 0.35; cursor: default; }
 .srlog-pre {
   margin: 0;
@@ -425,9 +546,9 @@ function onOpenInputFolder() {
   font-family: Consolas, 'Courier New', monospace;
   font-size: 12px;
   line-height: 1.65;
-  color: #c9cdd6;
+  color: var(--sv-text-code);
   white-space: pre-wrap;
   word-break: break-all;
 }
-.srlog-msg { min-height: 120px; display: flex; align-items: center; justify-content: center; color: #9aa1ad; font-size: 12.5px; }
+.srlog-msg { min-height: 120px; display: flex; align-items: center; justify-content: center; color: var(--sv-text-dim); font-size: 12.5px; }
 </style>

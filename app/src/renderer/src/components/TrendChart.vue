@@ -187,7 +187,7 @@ function fmtVal(v: number | null): string {
       >
         <span
           class="swatch"
-          :style="{ background: hidden.has(se.key) ? '#3a3f45' : se.color }"
+          :style="{ background: hidden.has(se.key) ? 'var(--sv-border-strong)' : se.color }"
         />
         {{ se.label }}
       </button>
@@ -277,37 +277,37 @@ function fmtVal(v: number | null): string {
   gap: 6px;
   border: none;
   background: transparent;
-  color: #9aa0a6;
+  color: var(--sv-text-faint);
   font-size: 12px;
   padding: 3px 8px;
   border-radius: 6px;
   cursor: pointer;
 }
-.lg:hover { background: #23262b; color: #e8eaed; }
-.lg.off { color: #767d88; text-decoration: line-through; }
+.lg:hover { background: var(--sv-fill-2); color: var(--sv-text); }
+.lg.off { color: var(--sv-text-faint); text-decoration: line-through; }
 .swatch { width: 9px; height: 9px; border-radius: 2.5px; }
 .tc-svg { display: block; }
-.grid-line { stroke: #24272c; stroke-width: 1; }
-.tick { fill: #8a919c; font-size: 10.5px; text-anchor: end; }
+.grid-line { stroke: var(--sv-border-soft); stroke-width: 1; }
+.tick { fill: var(--sv-text-faint); font-size: 10.5px; text-anchor: end; }
 .tick-x { text-anchor: middle; }
-.crosshair { stroke: #4a4f57; stroke-width: 1; stroke-dasharray: 3 3; }
-.empty { fill: #767d88; font-size: 12.5px; text-anchor: middle; }
+.crosshair { stroke: var(--sv-text-faint); stroke-width: 1; stroke-dasharray: 3 3; }
+.empty { fill: var(--sv-text-faint); font-size: 12.5px; text-anchor: middle; }
 .tc-tip {
   position: absolute;
   top: 8px;
   transform: translateX(-50%);
-  background: #26282c;
-  border: 1px solid #33363b;
-  border-radius: 8px;
+  background: var(--sv-panel-2);
+  border: 1px solid var(--sv-border);
+  border-radius: var(--sv-radius-sm);
   padding: 8px 10px;
   pointer-events: none;
   min-width: 128px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--sv-shadow-card);
   z-index: 5;
 }
-.tip-time { font-size: 11px; color: #9aa0a6; margin-bottom: 5px; }
+.tip-time { font-size: 11px; color: var(--sv-text-faint); margin-bottom: 5px; }
 .tip-row { display: flex; align-items: center; gap: 7px; font-size: 12px; line-height: 1.7; }
 .tip-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
-.tip-label { color: #c6cad0; }
-.tip-val { margin-left: auto; font-variant-numeric: tabular-nums; color: #e8eaed; }
+.tip-label { color: var(--sv-text-dim); }
+.tip-val { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--sv-text); }
 </style>

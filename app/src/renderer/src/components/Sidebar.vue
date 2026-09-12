@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { store, ui } from '../store'
+import { navDirection, pageDir } from '../uiFx'
 
 const items = computed(() => [
   { key: 'home', label: '首页', icon: 'home' },
@@ -31,6 +32,12 @@ const miniPerf = computed(() => {
     ? `CPU ${Math.round(l.cpu)}% · 内存 ${Math.round(l.mem_pct)}%`
     : `CPU ${Math.round(l.cpu)}% · GPU ${gpu}%`
 })
+
+/** 方向感知过渡：点击时把导航方向写给 App.vue 的 Transition */
+function navTo(key: string) {
+  pageDir.value = navDirection(ui.page, key)
+  ui.page = key as typeof ui.page
+}
 </script>
 
 <template>
@@ -41,7 +48,7 @@ const miniPerf = computed(() => {
         :key="it.key"
         class="nav-item"
         :class="{ active: ui.page === it.key }"
-        @click="ui.page = it.key as typeof ui.page"
+        @click="navTo(it.key)"
       >
         <span class="icon">
           <svg v-if="it.icon === 'plus'" width="16" height="16" viewBox="0 0 16 16">
@@ -63,7 +70,7 @@ const miniPerf = computed(() => {
           </svg>
           <svg v-else-if="it.icon === 'vs'" width="16" height="16" viewBox="0 0 16 16">
             <rect x="1.5" y="3" width="9" height="10" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
-            <rect x="5.5" y="3" width="9" height="10" rx="1.6" fill="#141517" stroke="currentColor" stroke-width="1.2" />
+            <rect x="5.5" y="3" width="9" height="10" rx="1.6" fill="var(--sv-bg)" stroke="currentColor" stroke-width="1.2" />
             <path d="M3.5 6.5l5 3-5 3" fill="none" stroke="currentColor" stroke-width="0" />
           </svg>
           <svg v-else-if="it.icon === 'tasks'"  width="16" height="16" viewBox="0 0 16 16">
@@ -138,12 +145,12 @@ const miniPerf = computed(() => {
   transform: translateX(2px);
 }
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(79, 140, 255, 0.17), rgba(139, 92, 246, 0.1));
-  border-color: rgba(79, 140, 255, 0.28);
+  background: linear-gradient(90deg, rgba(var(--sv-accent-rgb), 0.17), rgba(var(--sv-accent2-rgb), 0.1));
+  border-color: rgba(var(--sv-accent-rgb), 0.28);
   color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 14px rgba(79, 140, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 14px rgba(var(--sv-accent-rgb), 0.12);
 }
-.nav-item.active .icon { color: #7fb0ff; filter: drop-shadow(0 0 6px rgba(79, 140, 255, 0.55)); }
+.nav-item.active .icon { color: var(--sv-accent-strong); filter: drop-shadow(0 0 6px rgba(var(--sv-accent-rgb), 0.55)); }
 .nav-item.active::before {
   content: '';
   position: absolute;
@@ -153,7 +160,7 @@ const miniPerf = computed(() => {
   width: 3px;
   border-radius: 3px;
   background: var(--sv-grad);
-  box-shadow: 0 0 10px rgba(79, 140, 255, 0.8);
+  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.8);
 }
 .nav-item:disabled {
   opacity: 0.42;
@@ -173,12 +180,12 @@ const miniPerf = computed(() => {
   align-items: center;
   justify-content: center;
   padding: 0 5px;
-  box-shadow: 0 0 10px rgba(79, 140, 255, 0.45);
+  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.45);
 }
 .badge-err {
-  background: rgba(248, 113, 113, 0.12);
-  color: #f87171;
-  border: 1px solid rgba(248, 113, 113, 0.55);
+  background: var(--sv-danger-bg);
+  color: var(--sv-danger);
+  border: 1px solid rgba(var(--sv-danger-rgb), 0.55);
   min-width: 17px;
   height: 17px;
   border-radius: 9px;
@@ -187,8 +194,8 @@ const miniPerf = computed(() => {
   animation: err-breathe 2.4s ease-in-out infinite;
 }
 @keyframes err-breathe {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.25); }
-  50% { box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.12); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--sv-danger-rgb), 0.25); }
+  50% { box-shadow: 0 0 0 4px rgba(var(--sv-danger-rgb), 0.12); }
 }
 .foot-col {
   display: flex;
@@ -220,20 +227,20 @@ const miniPerf = computed(() => {
   position: relative;
 }
 .dot.on {
-  background: #34d399;
-  box-shadow: 0 0 6px rgba(52, 211, 153, 0.8);
+  background: var(--sv-success);
+  box-shadow: 0 0 6px rgba(var(--sv-success-rgb), 0.8);
 }
 .dot.on::after {
   content: '';
   position: absolute;
   inset: -3px;
   border-radius: 50%;
-  border: 1px solid rgba(52, 211, 153, 0.55);
+  border: 1px solid rgba(var(--sv-success-rgb), 0.55);
   animation: dot-halo 2.2s ease-out infinite;
 }
 @keyframes dot-halo {
   0% { transform: scale(0.6); opacity: 0.9; }
   70%, 100% { transform: scale(1.7); opacity: 0; }
 }
-.dot.off { background: #f87171; }
+.dot.off { background: var(--sv-danger); }
 </style>

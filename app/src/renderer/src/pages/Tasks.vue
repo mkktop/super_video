@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onUnmounted, ref, watch } from 'vue'
-import { NButton, NEmpty, NInput, NPopconfirm, NSpace, useDialog, useMessage } from 'naive-ui'
+import { NButton, NInput, NPopconfirm, NSpace, useDialog, useMessage } from 'naive-ui'
 import TaskCard from '../components/TaskCard.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { api, type Task } from '../api'
 import { refreshStats, refreshTasks, store, ui } from '../store'
 
@@ -372,17 +373,31 @@ function retryWithParams(t: Task) {
       />
     </div>
 
-    <NEmpty
+    <!-- 空态：统一插画（胶片框）；搜索无结果/筛选无结果给对应文案 -->
+    <EmptyState
       v-if="store.ready && filtered.length === 0"
-      :description="
+      variant="film"
+      :title="searchList ? '没有匹配的任务' : store.tasks.length ? '该筛选下没有任务' : '队列为空'"
+      :desc="
         searchList
-          ? '没有匹配的任务，换个关键词试试'
+          ? '换个关键词试试'
           : store.tasks.length
-            ? '该筛选下没有任务'
-            : '队列为空，点击右上角「新建任务」添加视频'
+            ? '切换上方的筛选条件看看'
+            : '把视频拖进来，或点新建任务开始第一次超分'
       "
-      style="margin-top: 12vh"
-    />
+    >
+      <NButton v-if="!store.tasks.length" type="primary" @click="ui.page = 'newtask'">＋ 新建任务</NButton>
+    </EmptyState>
+
+    <!-- 初始化中：3 条等高骨架卡，避免任务列表就位时跳动 -->
+    <NSpace v-else-if="!store.ready && !store.initError" vertical :size="12" aria-hidden="true">
+      <div v-for="i in 3" :key="i" class="task-skel sv-card">
+        <div class="sv-skeleton" style="height: 16px; width: 38%" />
+        <div class="sv-skeleton" style="height: 8px; width: 100%; margin-top: 14px" />
+        <div class="sv-skeleton" style="height: 12px; width: 46%; margin-top: 12px" />
+      </div>
+    </NSpace>
+
     <NSpace v-else vertical :size="12">
       <TaskCard
         v-for="t in filtered"
@@ -403,9 +418,6 @@ function retryWithParams(t: Task) {
         @toggle-select="toggleSelect(t.id)"
       />
     </NSpace>
-    <div v-if="!store.ready" class="loading">
-      {{ store.initError ? '后端连接失败，请使用上方提示中的"重试"按钮' : '正在连接后端服务…' }}
-    </div>
   </div>
 </template>
 
@@ -418,8 +430,8 @@ function retryWithParams(t: Task) {
   gap: 16px;
   flex-wrap: wrap;
 }
-h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
-.sub { font-size: 12.5px; color: #9aa1ad; margin-top: 4px; }
+h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
+.sub { font-size: 12.5px; color: var(--sv-text-dim); margin-top: 4px; }
 .filter-bar { display: flex; gap: 6px; align-items: center; }
 .fb-spacer { flex: 1; }
 /* 分段式筛选：凹槽容器 + 浮起选中片 */
@@ -428,40 +440,45 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   gap: 2px;
   padding: 3px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--sv-fill-2);
+  border: 1px solid var(--sv-border-soft);
 }
 .filter-btn {
   border: 1px solid transparent;
   background: transparent;
-  color: #9aa1ad;
+  color: var(--sv-text-dim);
   font-size: 12.5px;
   padding: 4px 14px;
-  border-radius: 8px;
+  border-radius: var(--sv-radius-sm);
   cursor: pointer;
   transition: all 0.16s;
 }
-.filter-btn:hover { color: #e9ecf2; }
+.filter-btn:hover { color: var(--sv-text); }
 .filter-btn.on {
-  background: linear-gradient(180deg, #2a3040, #232837);
-  border-color: rgba(79, 140, 255, 0.42);
-  color: #8ab4ff;
+  background: var(--sv-panel-2);
+  border-color: rgba(var(--sv-accent-rgb), 0.42);
+  color: var(--sv-accent-strong);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
-.loading { margin-top: 30vh; text-align: center; color: #9aa1ad; }
+/* 骨架卡：与真实任务卡同构（标题行 + 进度条 + 底部操作行） */
+.task-skel {
+  padding: 14px 20px 16px;
+  display: flex;
+  flex-direction: column;
+}
 .batch-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid rgba(79, 140, 255, 0.4);
-  border-radius: 12px;
-  background: linear-gradient(90deg, rgba(79, 140, 255, 0.09), rgba(79, 140, 255, 0.03) 60%, transparent);
+  border: 1px solid rgba(var(--sv-accent-rgb), 0.4);
+  border-radius: var(--sv-radius-md);
+  background: linear-gradient(90deg, rgba(var(--sv-accent-rgb), 0.09), rgba(var(--sv-accent-rgb), 0.03) 60%, transparent);
 }
-.bb-count { font-size: 13px; color: #e9ecf2; }
+.bb-count { font-size: 13px; color: var(--sv-text); }
 .bb-spacer { flex: 1; }
 .task-dragging { opacity: 0.45; }
-.task-drag-over { box-shadow: 0 0 0 2px #4f8cff; }
+.task-drag-over { box-shadow: 0 0 0 2px var(--sv-accent); }
 
 .queue-done-banner {
   display: flex;
@@ -469,24 +486,25 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   justify-content: space-between;
   gap: 12px;
   padding: 10px 14px;
-  border: 1px solid rgba(251, 191, 36, 0.45);
-  border-radius: 12px;
-  background: linear-gradient(90deg, rgba(251, 191, 36, 0.1), rgba(251, 191, 36, 0.04) 60%, transparent);
+  border: 1px solid rgba(var(--sv-warning-rgb), 0.45);
+  border-radius: var(--sv-radius-md);
+  background: linear-gradient(90deg, rgba(var(--sv-warning-rgb), 0.1), rgba(var(--sv-warning-rgb), 0.04) 60%, transparent);
   font-size: 13px;
-  color: #e9ecf2;
+  color: var(--sv-text);
 }
 .qd-count {
   font-size: 16px;
-  color: #fbbf24;
+  color: var(--sv-warning);
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
 .gate-banner {
   padding: 10px 14px;
-  border: 1px solid rgba(79, 140, 255, 0.4);
-  border-radius: 12px;
-  background: linear-gradient(90deg, rgba(79, 140, 255, 0.08), rgba(79, 140, 255, 0.03) 60%, transparent);
+  border: 1px solid rgba(var(--sv-accent-rgb), 0.4);
+  border-radius: var(--sv-radius-md);
+  background: linear-gradient(90deg, rgba(var(--sv-accent-rgb), 0.08), rgba(var(--sv-accent-rgb), 0.03) 60%, transparent);
   font-size: 13px;
-  color: #9aa1ad;
+  color: var(--sv-text-dim);
 }
 </style>

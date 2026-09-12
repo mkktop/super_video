@@ -42,13 +42,13 @@ const runPercent = computed(() => {
 
 // ---- 趋势系列 ----
 const pctSeries: ChartSeries[] = [
-  { key: 'cpu', label: 'CPU', color: '#4f8cff', get: (s) => s.cpu },
-  { key: 'gpu', label: 'GPU', color: '#34d399', get: (s) => s.gpus?.[0]?.util ?? null },
-  { key: 'mem', label: '内存', color: '#f59e0b', get: (s) => s.mem_pct },
+  { key: 'cpu', label: 'CPU', color: 'var(--sv-accent)', get: (s) => s.cpu },
+  { key: 'gpu', label: 'GPU', color: 'var(--sv-success)', get: (s) => s.gpus?.[0]?.util ?? null },
+  { key: 'mem', label: '内存', color: 'var(--sv-warning-deep)', get: (s) => s.mem_pct },
   {
     key: 'taskcpu',
     label: '任务进程 CPU',
-    color: '#8b5cf6',
+    color: 'var(--sv-accent-2)',
     dashed: true,
     get: (s) => s.task?.cpu_pct ?? null,
   },
@@ -58,14 +58,14 @@ const vramSeries: ChartSeries[] = [
   {
     key: 'vram',
     label: '显存',
-    color: '#8b5cf6',
+    color: 'var(--sv-accent-2)',
     fill: true,
     get: (s) => (s.gpus?.[0] ? s.gpus[0].mem_used_mb / 1024 : null),
   },
   {
     key: 'taskmem',
     label: '任务进程内存',
-    color: '#fbbf24',
+    color: 'var(--sv-warning)',
     dashed: true,
     get: (s) => s.task?.mem_gb ?? null,
   },
@@ -93,7 +93,7 @@ const gpuEver = computed(
       </div>
     </div>
 
-    <div v-if="!samplingOn" class="card off-tip">
+    <div v-if="!samplingOn" class="card off-tip sv-card">
       后台性能采样已关闭,仪表与趋势不再更新 —— 可在「设置 · 性能监控」中重新开启。
     </div>
 
@@ -101,7 +101,7 @@ const gpuEver = computed(
     <PerfRings />
 
     <!-- 运行任务 -->
-    <section v-if="running" class="card task-card">
+    <section v-if="running" class="card task-card sv-card">
       <div class="tc-info">
         <span class="tc-label">正在运行</span>
         <span class="tc-file">{{ running.input_path.split(/[\\/]/).pop() }}</span>
@@ -123,7 +123,7 @@ const gpuEver = computed(
     </section>
 
     <!-- 占用率趋势 -->
-    <section class="card chart-card">
+    <section class="card chart-card sv-card">
       <div class="chart-head">
         <h2>占用率趋势</h2>
         <span class="chart-note">CPU / GPU / 内存为整机百分比,虚线是超分任务进程树(worker+ffmpeg)</span>
@@ -132,7 +132,7 @@ const gpuEver = computed(
     </section>
 
     <!-- 显存趋势 -->
-    <section v-if="gpuEver" class="card chart-card">
+    <section v-if="gpuEver" class="card chart-card sv-card">
       <div class="chart-head">
         <h2>显存与任务内存</h2>
         <span class="chart-note">显存来自 nvidia-smi,任务进程内存为 worker 进程树 RSS</span>
@@ -156,39 +156,33 @@ const gpuEver = computed(
   align-items: center;
   justify-content: space-between;
 }
-h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
-h2 { font-size: 15px; font-weight: 600; color: #c6cad0; }
+h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
+h2 { font-size: 15px; font-weight: 600; color: var(--sv-text); }
 
 .range-btns { display: flex; gap: 6px; }
 .range-btns button {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.035);
-  color: #9aa1ad;
+  border: 1px solid var(--sv-border-mid);
+  background: var(--sv-fill-2);
+  color: var(--sv-text-dim);
   font-size: 12.5px;
   padding: 5px 12px;
-  border-radius: 8px;
+  border-radius: var(--sv-radius-sm);
   cursor: pointer;
   transition: all 0.15s;
 }
-.range-btns button:hover { color: #e9ecf2; }
+.range-btns button:hover { color: var(--sv-text); }
 .range-btns button.on {
-  background: rgba(79, 140, 255, 0.16);
-  border-color: rgba(79, 140, 255, 0.5);
-  color: #8ab4ff;
-}
-
-.card {
-  background: linear-gradient(180deg, #1c2027, #181b21);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
+  background: var(--sv-accent-bg);
+  border-color: rgba(var(--sv-accent-rgb), 0.5);
+  color: var(--sv-accent-strong);
 }
 
 .off-tip {
   padding: 12px 16px;
   font-size: 13px;
-  color: #fbbf24;
-  border-color: rgba(251, 191, 36, 0.3);
-  background: rgba(251, 191, 36, 0.06);
+  color: var(--sv-warning);
+  border-color: rgba(var(--sv-warning-rgb), 0.3);
+  background: var(--sv-warning-bg);
 }
 
 .task-card {
@@ -197,10 +191,10 @@ h2 { font-size: 15px; font-weight: 600; color: #c6cad0; }
   align-items: center;
   gap: 20px;
   flex-wrap: wrap;
-  border-color: rgba(79, 140, 255, 0.35);
+  border-color: rgba(var(--sv-accent-rgb), 0.35);
 }
 .tc-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.tc-label { color: #4f8cff; font-size: 13px; flex-shrink: 0; }
+.tc-label { color: var(--sv-accent-strong); font-size: 13px; flex-shrink: 0; }
 .tc-file {
   font-weight: 600;
   white-space: nowrap;
@@ -208,14 +202,14 @@ h2 { font-size: 15px; font-weight: 600; color: #c6cad0; }
   text-overflow: ellipsis;
   max-width: 260px;
 }
-.tc-progress { font-size: 12.5px; color: #9aa1ad; font-variant-numeric: tabular-nums; }
+.tc-progress { font-size: 12.5px; color: var(--sv-text-dim); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .tc-proc { display: flex; gap: 22px; margin-left: auto; }
 .tc-proc > div { text-align: center; }
-.tc-proc b { font-size: 16px; font-weight: 700; display: block; font-variant-numeric: tabular-nums; }
-.tc-proc span { font-size: 11px; color: #8a919d; }
-.tc-proc-wait { font-size: 12px; color: #8a919d; }
+.tc-proc b { font-size: 16px; font-weight: 700; display: block; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.tc-proc span { font-size: 11px; color: var(--sv-text-faint); }
+.tc-proc-wait { font-size: 12px; color: var(--sv-text-faint); }
 
 .chart-card { padding: 16px 18px 12px; }
 .chart-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
-.chart-note { font-size: 11.5px; color: #8a919d; }
+.chart-note { font-size: 11.5px; color: var(--sv-text-faint); }
 </style>

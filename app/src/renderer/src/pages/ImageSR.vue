@@ -186,7 +186,7 @@ export default { name: 'ImageSR' }
     </div>
 
     <!-- ① 选择图片 -->
-    <section class="sec">
+    <section class="sec sv-card">
       <h2 class="sec-title"><span class="sec-num">1</span>选择图片</h2>
       <NButton dashed block size="large" @click="pick">
         {{ files.length ? `已选 ${files.length} 张（点击继续追加）` : '点击选择图片（可多选批量入队，也可直接拖进窗口）' }}
@@ -209,7 +209,7 @@ export default { name: 'ImageSR' }
     </section>
 
     <!-- ② 模型与输出 -->
-    <section class="sec">
+    <section class="sec sv-card">
       <h2 class="sec-title">
         <span class="sec-num">2</span>模型与输出
         <span class="sel-chip" :class="{ on: !!selectedModel }">
@@ -283,7 +283,7 @@ export default { name: 'ImageSR' }
     </section>
 
     <!-- 吸底操作条 -->
-    <div class="footer-bar">
+    <div class="footer-bar sv-card">
       <NButton :disabled="submitting" @click="clearAll">清空</NButton>
       <NButton type="primary" :loading="submitting" :disabled="!canSubmit" @click="submit">
         加入队列（{{ files.length }} 张）
@@ -299,28 +299,25 @@ export default { name: 'ImageSR' }
   gap: 18px;
   min-height: 100%;
 }
-h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
-.sub { font-size: 12.5px; color: #9aa1ad; margin-top: 4px; }
+h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
+.sub { font-size: 12.5px; color: var(--sv-text-dim); margin-top: 4px; }
 
 /* 步骤面板：与新建任务页同款画布 */
 .sec {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: linear-gradient(180deg, #1c2027, #181b21);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
   padding: 16px 18px;
 }
 .sec-title {
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 600;
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.sel-chip { margin-left: auto; font-size: 12px; font-weight: 400; color: #9aa1ad; }
-.sel-chip.on { color: #6fa0ff; }
+.sel-chip { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--sv-text-dim); }
+.sel-chip.on { color: var(--sv-accent-strong); }
 .sec-num {
   width: 20px;
   height: 20px;
@@ -333,7 +330,7 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 0 10px rgba(79, 140, 255, 0.3);
+  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.3);
 }
 
 /* 缩略图墙 */
@@ -344,9 +341,9 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
 }
 .thumb-cell {
   position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--sv-border-mid);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--sv-fill-1);
   padding: 6px;
   transition: border-color 0.15s, background 0.15s;
   display: flex;
@@ -367,8 +364,8 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  color: #6d747d;
-  border: 1px dashed #33363b;
+  color: var(--sv-text-faint);
+  border: 1px dashed var(--sv-border-strong);
 }
 .rm {
   position: absolute;
@@ -378,8 +375,8 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   height: 20px;
   border-radius: 50%;
   border: none;
-  background: rgba(20, 21, 23, 0.82);
-  color: #e8eaed;
+  background: var(--sv-panel-2);
+  color: var(--sv-text);
   font-size: 11px;
   cursor: pointer;
   display: inline-flex;
@@ -387,19 +384,20 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   justify-content: center;
   transition: background 0.15s;
 }
-.rm:hover { background: rgba(232, 62, 62, 0.9); }
+.rm:hover { background: var(--sv-danger); }
 .fname {
   font-size: 11.5px;
-  color: #9aa0a6;
+  color: var(--sv-text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .form-rows {
-  background: linear-gradient(180deg, #1c2027, #181b21);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
+  background: var(--sv-panel-grad);
+  border: 1px solid var(--sv-border-soft);
+  border-radius: var(--sv-radius-md);
+  box-shadow: var(--sv-card-inset);
   padding: 6px 18px 12px;
 }
 
@@ -407,18 +405,18 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
 .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .model-card {
   position: relative;
-  border: 1.5px solid rgba(255, 255, 255, 0.07);
-  border-radius: 12px;
+  border: 1.5px solid var(--sv-border-mid);
+  border-radius: var(--sv-radius-md);
   padding: 14px;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--sv-fill-1);
   transition: border-color 0.16s, background 0.16s, transform 0.16s, box-shadow 0.16s;
 }
-.model-card:hover { border-color: rgba(255, 255, 255, 0.16); transform: translateY(-2px); }
+.model-card:hover { border-color: var(--sv-border-strong); transform: translateY(-2px); }
 .model-card.selected {
-  border-color: #4f8cff;
-  background: linear-gradient(180deg, rgba(79, 140, 255, 0.1), rgba(139, 92, 246, 0.05));
-  box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.45), 0 6px 18px rgba(79, 140, 255, 0.16);
+  border-color: var(--sv-accent);
+  background: linear-gradient(180deg, rgba(var(--sv-accent-rgb), 0.1), rgba(var(--sv-accent2-rgb), 0.05));
+  box-shadow: 0 0 0 1px rgba(var(--sv-accent-rgb), 0.45), 0 6px 18px rgba(var(--sv-accent-rgb), 0.16);
 }
 .model-card.disabled { opacity: 0.45; cursor: not-allowed; }
 .m-check {
@@ -434,13 +432,13 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 10px rgba(79, 140, 255, 0.5);
+  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.5);
 }
 .m-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .m-scenes { margin-left: auto; display: inline-flex; gap: 4px; }
 .m-name { font-weight: 600; font-size: 14px; }
 .m-desc {
-  color: #9aa0a6;
+  color: var(--sv-text-faint);
   font-size: 12px;
   margin: 6px 0;
   display: -webkit-box;
@@ -448,31 +446,31 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.m-tags { display: flex; gap: 10px; font-size: 12px; color: #7c838c; flex-wrap: wrap; }
-.m-content { color: #8fa3c8; }
+.m-tags { display: flex; gap: 10px; font-size: 12px; color: var(--sv-text-faint); flex-wrap: wrap; }
+.m-content { color: var(--sv-text-dim); }
 
 .drop-mask {
   position: fixed;
   inset: 0;
   z-index: 50;
   background: rgba(10, 12, 16, 0.78);
-  border: 2px dashed rgba(79, 140, 255, 0.75);
+  border: 2px dashed rgba(var(--sv-accent-rgb), 0.75);
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  box-shadow: inset 0 0 120px rgba(79, 140, 255, 0.12);
+  box-shadow: inset 0 0 120px rgba(var(--sv-accent-rgb), 0.12);
 }
 .drop-tip {
   font-size: 18px;
   font-weight: 650;
-  color: #e9ecf2;
+  color: var(--sv-text);
   letter-spacing: 1px;
   padding: 14px 28px;
-  border-radius: 14px;
-  border: 1px solid rgba(79, 140, 255, 0.45);
-  background: rgba(79, 140, 255, 0.08);
-  box-shadow: 0 0 40px rgba(79, 140, 255, 0.2);
+  border-radius: var(--sv-radius-md);
+  border: 1px solid rgba(var(--sv-accent-rgb), 0.45);
+  background: var(--sv-accent-bg);
+  box-shadow: 0 0 40px rgba(var(--sv-accent-rgb), 0.2);
 }
 .row { padding: 12px 0; }
 .row.stack {
@@ -487,13 +485,13 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   gap: 14px;
   flex-wrap: wrap;
 }
-.lbl { font-weight: 600; font-size: 13px; color: #e9ecf2; }
-.q-label { font-size: 12.5px; color: #9aa1ad; }
+.lbl { font-weight: 600; font-size: 13px; color: var(--sv-text); }
+.q-label { font-size: 12.5px; color: var(--sv-text-dim); }
 .hint-row {
-  color: #9aa1ad;
+  color: var(--sv-text-dim);
   font-size: 12px;
   line-height: 1.55;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--sv-border-soft);
   padding-top: 10px;
   margin: 2px 0 0;
 }
@@ -507,10 +505,10 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  background: rgba(20, 23, 29, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 14px;
-  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.3), 0 8px 22px rgba(0, 0, 0, 0.25);
+  background: var(--sv-panel-2);
+  border: 1px solid var(--sv-border-mid);
+  border-radius: var(--sv-radius-md);
+  box-shadow: var(--sv-card-inset), 0 -6px 24px rgba(0, 0, 0, 0.3), 0 8px 22px rgba(0, 0, 0, 0.25);
   z-index: 5;
 }
 </style>

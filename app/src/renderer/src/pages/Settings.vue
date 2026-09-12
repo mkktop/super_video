@@ -18,6 +18,7 @@ import {
 import { api } from '../api'
 import { refreshTrt, store } from '../store'
 import { fmtBytes } from '../utils'
+import { themeMode, type ThemeMode } from '../theme'
 import { useAppUpdate } from '../composables/useAppUpdate'
 import { useCompareCache } from '../composables/useCompareCache'
 import { useOutputSettings } from '../composables/useOutputSettings'
@@ -65,6 +66,21 @@ const queueDoneOptions = [
   { label: '系统通知', value: 'notify' },
   { label: '关机（60 秒可取消）', value: 'shutdown' },
   { label: '休眠（60 秒可取消）', value: 'sleep' },
+]
+
+// ---- 外观（纯 UI 偏好：localStorage 持久化，不经后端设置） ----
+const themeOptions: Array<{ label: string; value: ThemeMode }> = [
+  { label: '深色', value: 'dark' },
+  { label: '浅色', value: 'light' },
+  { label: '跟随系统', value: 'system' },
+]
+// 全局快捷键对照（命令面板等入口的说明，纯静态展示）
+const shortcuts: Array<[string, string]> = [
+  ['Ctrl + K', '打开命令面板（搜索页面 / 动作 / 最近任务）'],
+  ['1 ~ 6', '切换对比模型（模型对比结果页）'],
+  ['[  /  ]', '切换静帧样本（任务对比 / 模型对比）'],
+  ['←  /  →', '微调分割线位置（Shift 加大步长）'],
+  ['Esc', '返回任务页 / 退出全屏'],
 ]
 // 超分完成后删除源文件（危险项，默认关；删除不进回收站）
 const deleteSource = ref(false)
@@ -281,7 +297,7 @@ async function saveSrProfiling(v: boolean) {
       <!-- 左列：处理与队列——引擎 / TensorRT / 队列自动化（通知·关机）/ 领取时机 -->
       <div class="col">
         <!-- 处理引擎 -->
-        <section class="card">
+        <section class="card sv-card">
           <header class="card-head">
             <div class="card-title">处理引擎</div>
             <div class="card-sub">推理后端与计算精度，影响画质细节的还原方式</div>
@@ -373,7 +389,7 @@ async function saveSrProfiling(v: boolean) {
                 运行库，耗时取决于网络环境；未安装时推理使用 DirectML，功能不受影响。
               </p>
               <div class="row switch-row">
-                <span class="row-text" v-if="store.trt.error" style="color: #e88080">上次安装失败：{{ store.trt.error }}</span>
+                <span class="row-text" v-if="store.trt.error" style="color: var(--sv-danger-strong)">上次安装失败：{{ store.trt.error }}</span>
                 <span class="row-text" v-else>检测到显卡架构：{{ store.trt.gpu_arch ?? '未知（将下载通用包）' }}</span>
                 <NButton size="small" type="primary" :loading="trcBusy" @click="installTrc">
                   {{ store.trt.error ? '重试安装' : `下载并安装（约 ${fmtGB(trcDownloadBytes)}）` }}
@@ -384,7 +400,7 @@ async function saveSrProfiling(v: boolean) {
         </section>
 
         <!-- 通知与窗口 -->
-        <section class="card">
+        <section class="card sv-card">
           <header class="card-head">
             <div class="card-title">通知与窗口</div>
             <div class="card-sub">任务完成提醒与关闭按钮的行为</div>
@@ -421,7 +437,7 @@ async function saveSrProfiling(v: boolean) {
         </section>
 
         <!-- 处理时机 -->
-        <section class="card">
+        <section class="card sv-card">
           <header class="card-head">
             <div class="card-title">处理时机</div>
             <div class="card-sub">队列什么时候开始处理下一个任务——白天不抢机器，夜间/空闲自动跑</div>
@@ -458,10 +474,36 @@ async function saveSrProfiling(v: boolean) {
         </section>
       </div>
 
-      <!-- 右列：输出与应用——输出位置 / 对比 / 性能采样 / 更新 / 模型下载网络 -->
+      <!-- 右列：输出与应用——外观 / 输出位置 / 对比 / 性能采样 / 更新 / 模型下载网络 -->
       <div class="col">
+        <!-- 外观 -->
+        <section class="card sv-card">
+          <header class="card-head">
+            <div class="card-title">外观</div>
+            <div class="card-sub">界面主题与全局快捷键（主题偏好保存在本机，不进设置文件）</div>
+          </header>
+          <div class="card-body">
+            <div class="row">
+              <span class="row-label">主题</span>
+              <NRadioGroup :value="themeMode" size="small" @update:value="themeMode = $event as ThemeMode">
+                <NRadioButton v-for="o in themeOptions" :key="o.value" :value="o.value">{{ o.label }}</NRadioButton>
+              </NRadioGroup>
+            </div>
+            <p class="hint">切换立即生效；「跟随系统」会随 Windows 深浅色模式自动切换。也可随时用 Ctrl+K 命令面板快速切换。</p>
+            <div class="row bordered-top">
+              <span class="row-label">快捷键</span>
+              <div class="sc-grid">
+                <template v-for="sc in shortcuts" :key="sc[0]">
+                  <span class="sc-key">{{ sc[0] }}</span>
+                  <span class="sc-desc">{{ sc[1] }}</span>
+                </template>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- 输出位置 -->
-        <section class="card">
+        <section class="card sv-card">
           <header class="card-head">
             <div class="card-title">输出位置</div>
             <div class="card-sub">新建超分任务的默认保存目录，剪切导出同样遵循</div>
@@ -509,7 +551,7 @@ async function saveSrProfiling(v: boolean) {
         </section>
 
         <!-- 对比缓存 -->
-        <section class="card">
+        <section class="card sv-card">
           <header class="card-head">
             <div class="card-title">对比</div>
             <div class="card-sub">静帧样本数设置，以及模型对比切片/成片与任务对比静帧产物的缓存管理（保留在本地且不会自动清理）</div>
@@ -561,7 +603,7 @@ async function saveSrProfiling(v: boolean) {
         </section>
 
         <!-- 应用与更新 -->
-        <section class="card">
+        <section class="card sv-card">
           <header class="card-head">
             <div class="card-title">应用与更新</div>
             <div class="card-sub">版本检查与升级安装</div>
@@ -626,7 +668,7 @@ async function saveSrProfiling(v: boolean) {
         </section>
 
         <!-- 性能监控 -->
-        <section class="card">
+        <section class="card sv-card">
           <header class="card-head">
             <div class="card-title">性能监控</div>
             <div class="card-sub">「性能」页仪表盘与趋势图的数据来源</div>
@@ -651,7 +693,7 @@ async function saveSrProfiling(v: boolean) {
         </section>
 
         <!-- 模型下载 -->
-        <section class="card">
+        <section class="card sv-card">
           <header class="card-head">
             <div class="card-title">模型下载</div>
             <div class="card-sub">模型从 GitHub Releases 获取时的网络通道</div>
@@ -678,7 +720,7 @@ async function saveSrProfiling(v: boolean) {
     </div>
 
     <!-- 设备信息：通栏规格条沉底 -->
-    <section class="card">
+    <section class="card sv-card">
       <header class="card-head">
         <div class="card-title">设备信息</div>
         <div class="card-sub">决定可选的处理规格与硬件编码能力</div>
@@ -709,7 +751,7 @@ async function saveSrProfiling(v: boolean) {
   width: 100%;
   min-width: 560px; /* 窄于此宽度改为横向滚动,不挤压内部控件 */
 }
-h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
+h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
 
 /* 两列按语义分组 + 高度配平（左≈右，全屏下底部对齐）：
    宽屏只把卡片撑宽,永远不挤第三列；窄窗口 auto-fit 回落单列,两列各自整列下移 */
@@ -721,25 +763,22 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
 }
 .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-/* 统一卡片骨架：头部(标题+副题) + 分隔线行式主体 */
+/* 统一卡片骨架：头部(标题+副题) + 分隔线行式主体（底/描边/圆角由 .sv-card 提供） */
 .card {
-  background: linear-gradient(180deg, #1c2027, #181b21);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
   overflow: hidden;
 }
 .card-head {
   padding: 14px 18px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent);
+  border-bottom: 1px solid var(--sv-border-soft);
+  background: linear-gradient(180deg, var(--sv-fill-1), transparent);
 }
-.card-title { font-size: 14px; font-weight: 650; color: #e9ecf2; }
-.card-sub { font-size: 12px; color: #9aa1ad; margin-top: 3px; }
+.card-title { font-size: 14px; font-weight: 650; color: var(--sv-text); }
+.card-sub { font-size: 12px; color: var(--sv-text-dim); margin-top: 3px; }
 .card-body { padding: 4px 18px 14px; }
 
 /* 行式布局：相邻行以发丝线分隔 */
 .row { padding: 12px 0; }
-.row.bordered-top { border-top: 1px solid rgba(255, 255, 255, 0.05); margin-top: 4px; }
+.row.bordered-top { border-top: 1px solid var(--sv-border-soft); margin-top: 4px; }
 .row.stack {
   display: flex;
   flex-direction: column;
@@ -760,13 +799,13 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   gap: 12px;
   flex-wrap: wrap;
 }
-.row-label { font-weight: 600; font-size: 13px; color: #e9ecf2; }
-.row-text { font-weight: 600; font-size: 13px; color: #e9ecf2; }
+.row-label { font-weight: 600; font-size: 13px; color: var(--sv-text); }
+.row-text { font-weight: 600; font-size: 13px; color: var(--sv-text); }
 .row-text small {
   display: block;
   font-weight: 400;
   font-size: 12px;
-  color: #9aa1ad;
+  color: var(--sv-text-dim);
   margin-top: 3px;
   max-width: 540px; /* 超宽卡片上限宽换行,避免 12px 文字拉满整行难读 */
 }
@@ -776,17 +815,39 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   gap: 8px;
   flex-wrap: wrap;
 }
-.hint { color: #9aa1ad; font-size: 12px; margin: 2px 0 6px; line-height: 1.55; max-width: 780px; }
-.hint-inline { color: #9aa1ad; font-size: 12px; }
+.hint { color: var(--sv-text-dim); font-size: 12px; margin: 2px 0 6px; line-height: 1.55; max-width: 780px; }
+.hint-inline { color: var(--sv-text-dim); font-size: 12px; }
 .save-row {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--sv-border-soft);
   margin-top: 2px;
   padding-top: 10px;
 }
+
+/* 快捷键对照表：键帽 + 说明两列 */
+.sc-grid {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px 16px;
+  align-items: baseline;
+  padding-top: 4px;
+}
+.sc-key {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--sv-text);
+  background: var(--sv-fill-2);
+  border: 1px solid var(--sv-border-mid);
+  border-radius: 5px;
+  padding: 2px 8px;
+  text-align: center;
+  white-space: nowrap;
+  justify-self: start;
+}
+.sc-desc { font-size: 12.5px; color: var(--sv-text-dim); }
 
 /* 输出位置卡 */
 .out-path-box {
@@ -794,8 +855,8 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--sv-well);
+  border: 1px solid var(--sv-border-soft);
   border-radius: 10px;
   padding: 8px 12px;
   margin-top: 10px;
@@ -804,12 +865,12 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
 .out-path {
   font-family: Consolas, 'Courier New', monospace;
   font-size: 12.5px;
-  color: #c9cdd6;
+  color: var(--sv-text-code);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.out-path.empty { color: #7c838f; font-family: inherit; }
+.out-path.empty { color: var(--sv-text-faint); font-family: inherit; }
 .out-actions { display: flex; gap: 8px; margin-top: 10px; }
 
 .version-line { display: inline-flex; align-items: center; gap: 8px; }
@@ -819,7 +880,7 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   white-space: pre-wrap;
   font-size: 12px;
   line-height: 1.6;
-  color: #c9cdd6;
+  color: var(--sv-text-dim);
   max-height: 240px;
   overflow-y: auto;
 }
@@ -833,6 +894,6 @@ h1 { font-size: 21px; font-weight: 750; letter-spacing: 0.3px; }
   align-items: baseline;
 }
 .spec-grid > span { display: inline-flex; gap: 10px; align-items: baseline; min-width: 0; }
-.spec-grid .k { color: #9aa1ad; font-size: 12.5px; flex-shrink: 0; width: 60px; }
-.spec-grid > span:nth-child(even) { color: #e9ecf2; font-size: 13px; }
+.spec-grid .k { color: var(--sv-text-dim); font-size: 12.5px; flex-shrink: 0; width: 60px; }
+.spec-grid > span:nth-child(even) { color: var(--sv-text); font-size: 13px; }
 </style>
