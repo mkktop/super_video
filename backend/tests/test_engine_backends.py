@@ -524,3 +524,122 @@ def test_worker_masked_error_decoded_on_total_failure(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match="8007000E"):
         worker._load_onnx_engine(
             tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
+
+
+# ---- GPU 设备移除（TDR/驱动重置 887A0005/6/7）：等待重试 + CPU 兜底 + 不进常驻缓存 ----
+
+_DEV_REMOVED_MSG = ("[ONNXRuntimeError] : 1 : FAIL : ...DmlExecutionProvider\\src\\"
+                    "ExecutionProvider.cpp(952)... Exception(6) tid(8e00) "
+                    "887A0005 GPU 设备实例已经暂停。")
+
+# GBK 掩盖形态：UnicodeDecodeError.args 挂原始 bytes（同 _OOM_BYTES 手法）
+_DEV_REMOVED_BYTES = (b"[ONNXRuntimeError] : 1 : FAIL : ...DmlExecutionProvider ... "
+                      b"887A0006 \xc9\xe8\xb1\xb8\xd2\xd1\xb4\xd3\xb7\xfe\xce\xf1")
+
+
+def test_worker_dev_removed_waits_then_recovers(monkeypatch, tmp_path):
+    """设备移除是环境瞬态：配置一动不动等 3s 重试，驱动恢复后原配置继续跑。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    calls: list[tuple[str, int]] = []
+    boom = {"n": 0}
+
+    class _DevRemovedThenOk:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            calls.append((device, tile))
+            self.device = device
+
+        def load(self):
+            if boom["n"] < 1:
+                boom["n"] += 1
+                raise RuntimeError(_DEV_REMOVED_MSG)
+
+        def process(self, frame):
+            return frame
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(worker_engine.time, "sleep", lambda s: sleeps.append(s))
+    spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _DevRemovedThenOk)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
+    assert [d for d, _ in calls] == ["auto", "auto"], calls  # 后端/分块零改动
+    assert all(t == 0 for _, t in calls)
+    assert sleeps == [3.0]
+
+
+def test_worker_dev_removed_persistent_falls_to_cpu(monkeypatch, tmp_path):
+    """持续移除（驱动反复重置）：两轮等待后回退 CPU 保出片；瞬态病因不进
+    常驻缓存——下一个任务重新从 GPU 起链，驱动恢复即回全速。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    calls: list[tuple[str, int]] = []
+
+    class _DevRemovedUntilCpu:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            calls.append((device, tile))
+            self.device = device
+
+        def load(self):
+            if self.device != "cpu":
+                raise RuntimeError(_DEV_REMOVED_MSG)
+
+        def process(self, frame):
+            return frame
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(worker_engine.time, "sleep", lambda s: sleeps.append(s))
+    worker_engine._ENGINE_CACHE.clear()
+    spec = types.SimpleNamespace(io={}, fp16=False, id="mangajanai")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _DevRemovedUntilCpu)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
+    assert [d for d, _ in calls] == ["auto", "auto", "auto", "cpu"], calls
+    assert calls[-1][1] == 0  # CPU 整幅，不带分块
+    assert sleeps == [3.0, 3.0]
+    assert worker_engine._ENGINE_CACHE == {}  # 兜底引擎未缓存
+
+
+def test_worker_dev_removed_masked_bytes_detected(monkeypatch, tmp_path):
+    """中文系统 GBK 掩盖形态（UnicodeDecodeError.args 带 bytes）：设备移除
+    同样被识别并走等待重试。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    calls: list[str] = []
+    boom = {"n": 0}
+
+    class _MaskedDevRemoved:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            calls.append(device)
+            self.device = device
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            if boom["n"] < 2:
+                boom["n"] += 1
+                raise UnicodeDecodeError("utf-8", _DEV_REMOVED_BYTES, 240, 1,
+                                         "invalid continuation byte")
+            return frame
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(worker_engine.time, "sleep", lambda s: sleeps.append(s))
+    spec = types.SimpleNamespace(io={}, fp16=False, id="x")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _MaskedDevRemoved)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "auto"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
+    assert calls == ["auto", "auto", "auto"], calls
+    assert sleeps == [3.0, 3.0]

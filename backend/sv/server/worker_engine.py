@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from sv.engines.onnx_engine import OnnxSrEngine
@@ -113,6 +114,23 @@ def _load_onnx_engine(
         t = str(e)
         return "RUNTIME_EXCEPTION" in t and "providers/cuda" in t
 
+    def _dev_removed(e: Exception) -> bool:
+        """DXGI 设备移除族错误（887A0005 REMOVED / 887A0006 HUNG / 887A0007
+        RESET）：驱动 TDR/设备重置，会话创建或执行撞上已被系统摘除的设备。
+        中文系统上描述可能以 GBK bytes 挂在 args（UnicodeDecodeError 掩盖
+        形态，同 _oom 的双解法），str/bytes 两侧都查。"""
+        codes = ("887a0005", "887a0006", "887a0007")
+        if any(c in str(e).lower() for c in codes):
+            return True
+        for a in e.args:
+            if isinstance(a, (bytes, bytearray)):
+                blob = bytes(a)
+                s = (blob.decode("gbk", "replace")
+                     + blob.decode("utf-8", "replace")).lower()
+                if any(c in s for c in codes):
+                    return True
+        return False
+
     # 推理后端：设置 engine=trt 走 TensorRT 链（TRT 不可用引擎层自动回退）；
     # engine=cpu 显式锁 CPUExecutionProvider（CUGAN×DML 泄漏模型的兜底通道）
     eng_setting = settings.load().get("engine")
@@ -170,6 +188,8 @@ def _load_onnx_engine(
     # 显存不足自动降档 tile 减半（最多 3 次）；CUDA 执行层内核崩溃换链重试（一次）；
     # 输出数值损坏（彩色探针）按 512 分块 → fp32 原件 → TRT 关 fp16 → DML/CUDA → CPU 降链
     fp16_for_trt = bool(spec.io.get("trt_fp16", True))
+    dev_removed_hits = 0
+    transient_dev_fallback = False
     for attempt in range(9):
         try:
             # 仅在关闭混合精度时显式传参（默认 True 走 io 声明，测试 fake 不感知新参）
@@ -239,6 +259,38 @@ def _load_onnx_engine(
                              "GPU 后端输出异常，已回退 CPU 推理重试（速度较慢）"})
                     continue
                 raise
+            # GPU 设备被驱动移除/重置（TDR）：任务开始前显卡就已被系统重置
+            # （上一个任务或任意 GPU 进程打挂后 Windows 自动恢复驱动），DML
+            # 会话创建/执行撞在被摘除的设备上——与本任务配置无关，换任何
+            # 变量都救不了。等驱动回稳后原配置重试（最多 2 次）；仍移除则
+            # 本进程 GPU 通道大概率已废，回退 CPU 保出片。此病因是环境瞬态，
+            # 落定的 CPU 引擎不进常驻缓存：下一个任务重新从 GPU 起链，驱动
+            # 恢复后自动回到全速（OOM 路径相反——进程内 DML 损坏不可逆，
+            # 缓存 CPU 才是对的）
+            if _dev_removed(e):
+                engine = None
+                import gc
+
+                gc.collect()
+                if dev_removed_hits < 2:
+                    dev_removed_hits += 1
+                    time.sleep(3.0)
+                    if log:
+                        log({"type": "log", "line":
+                             "GPU 设备被系统重置（驱动超时恢复中），等待 3 秒后重试"})
+                    continue
+                if ort_device != "cpu":
+                    ort_device = "cpu"
+                    tile = 0
+                    transient_dev_fallback = True
+                    if log:
+                        log({"type": "log", "line":
+                             "GPU 设备持续不可用（驱动反复重置），已回退 CPU 推理重试（速度较慢）"})
+                    continue
+                decoded = _unmask(e)
+                if decoded:
+                    raise RuntimeError(decoded) from e
+                raise
             # CUDA/TRT 执行层的内核崩溃（非显存问题）：MxNet 导出的 Resize 节点
             # （MangaJaNai 系）在 CUDA EP 有 fast_divmod 断言缺陷，DML/CPU 正常。
             # TRT 场景换「TRT+CPU 兜底」链重试（主图仍 TRT 编译，坏节点落 CPU，
@@ -297,6 +349,9 @@ def _load_onnx_engine(
     _ENGINE_CACHE.clear()  # 单条语义：换签名即释放旧引擎（显存）再换入
     # 降链可能已把转换版 fp16 换回 fp32 原件，精度口径按落定权重重算
     used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
-    _ENGINE_CACHE.update({"sig": sig, "engine": engine, "precision": used_precision})
+    # 设备移除兜底出的 CPU 引擎不缓存（瞬态病因，见 except 分支注释）
+    if not transient_dev_fallback:
+        _ENGINE_CACHE.update({"sig": sig, "engine": engine,
+                              "precision": used_precision})
     return engine, used_precision
 
