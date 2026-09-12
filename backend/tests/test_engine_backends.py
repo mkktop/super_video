@@ -292,3 +292,93 @@ def test_worker_large_output_preset_tile(monkeypatch, tmp_path):
     worker._load_onnx_engine(
         tmp_path / "w.onnx", spec, 4, None, "fp32", 0, (1080, 1920), log=lambda ev: None)
     assert calls == [0]
+
+
+# ---- TRT 混合精度输出损坏（DAT2 黑图）：manifest 关 fp16 + 灰图探测降链 ----
+
+def test_trt_fp16_flag_parsed_and_cache_split():
+    """io.trt_fp16=false 落到引擎开关；显式参数可覆盖（降链重建用）。"""
+    eng = OnnxSrEngine("w.onnx", 4, io={"color": "rgb", "range": "0-1", "trt_fp16": False})
+    assert eng.trt_fp16 is False
+    assert OnnxSrEngine("w.onnx", 4, io={"color": "rgb", "range": "0-1"}).trt_fp16 is True
+    # 显式参数优先于 io 声明
+    assert OnnxSrEngine("w.onnx", 4, io={"trt_fp16": True}, trt_fp16=False).trt_fp16 is False
+
+    from sv.engines.onnx_engine import _trt_provider_options
+
+    _, opts_on = _trt_provider_options(True)[0]
+    _, opts_off = _trt_provider_options(False)[0]
+    assert opts_on["trt_fp16_enable"] is True and opts_off["trt_fp16_enable"] is False
+    # 精度分家：坏 fp16 引擎缓存绝不与 fp32 链同目录（缓存键不保证区分精度开关）
+    assert opts_on["trt_engine_cache_path"] != opts_off["trt_engine_cache_path"]
+    assert opts_off["trt_engine_cache_path"].endswith("trt_cache_fp32")
+
+
+def test_dat2_manifest_declares_trt_fp32():
+    """illustrationjanai-4x-dat2（transformer）manifest 必须声明 trt_fp16=false：
+    TRT fp16 实测 100% NaN→纯黑（v0.5.0 用户 53 张黑图），声明缺失即回归。"""
+    from sv.models.registry import get_model
+
+    io = get_model("illustrationjanai-4x-dat2").io
+    assert io.get("trt_fp16") is False
+
+
+def test_worker_trt_garbage_disables_trt_fp16(monkeypatch, tmp_path):
+    """灰图探测发现 TRT fp16 输出全黑：同链改 fp32 精度重建（DAT2 实测恢复）。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    calls: list[tuple[str, bool | None]] = []
+
+    class _BlackOnFp16:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            calls.append((device, trt_fp16))
+            self.fp16 = trt_fp16 is None or trt_fp16  # None=默认开
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            import numpy as np
+
+            return np.zeros_like(frame) if self.fp16 else frame
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="illustrationjanai-4x-dat2")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _BlackOnFp16)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "trt"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 4, None, "fp32", 256, (64, 64), log=lambda ev: None)
+    assert calls == [("trt", None), ("trt", False)], \
+        f"应先 TRT fp16 探测失败、再同链关 fp16 重建: {calls}"
+
+
+def test_worker_garbage_falls_through_to_cpu(monkeypatch, tmp_path):
+    """降链全黑到底：TRT fp16 → TRT fp32 → auto → CPU，4 次尝试内保出片。"""
+    from sv.server import worker
+    from sv.server import worker_engine
+
+    calls: list[str] = []
+
+    class _BlackUntilCpu:
+        def __init__(self, weight, scale, io=None, tile=0, batch=1,
+                     device="auto", validate_hw=None, trt_fp16=None):
+            calls.append(device)
+            self.device = device
+
+        def load(self):
+            pass
+
+        def process(self, frame):
+            import numpy as np
+
+            return frame if self.device == "cpu" else np.zeros_like(frame)
+
+    spec = types.SimpleNamespace(io={}, fp16=False, id="x")
+    monkeypatch.setattr(worker_engine, "OnnxSrEngine", _BlackUntilCpu)
+    monkeypatch.setattr(worker_engine, "settings",
+                        types.SimpleNamespace(load=lambda: {"engine": "trt"}))
+    eng, prec = worker._load_onnx_engine(
+        tmp_path / "w.onnx", spec, 4, None, "fp32", 0, (64, 64), log=lambda ev: None)
+    assert calls == ["trt", "trt", "auto", "cpu"], f"应逐级降链至 CPU: {calls}"

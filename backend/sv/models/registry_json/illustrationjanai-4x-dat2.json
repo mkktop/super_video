@@ -19,7 +19,8 @@
   "io": {
     "color": "rgb",
     "range": "0-1",
-    "pad": 1
+    "pad": 1,
+    "trt_fp16": false
   },
   "description": "彩色插画 4x 画质档（DAT2 transformer，256 定长分块）：细节与线条还原上限更高，速度慢于 ESRGAN 档",
   "files": [

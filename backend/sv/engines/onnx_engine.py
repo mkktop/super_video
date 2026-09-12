@@ -8,6 +8,8 @@ pad: 输入边长需对齐的最小倍数（pixelshuffle 需要，通常 = scale
   可按倍率分档 {"2":2,"3":4}（CUGAN 系 up3x 需 4 的倍数而非 3）
 affine: [a, b]（0-1 域入图 x*a+b、出图 (y-b)/a——CUGAN Pro 动态范围压缩，
   对齐上游 vsmlrt conformance；带仿射的模型跳过 u8 包装）
+trt_fp16: false = TRT 链禁用混合精度（transformer 类模型 DAT2 实测 fp16
+  全 NaN→纯黑图，fp32 正常；引擎缓存目录按精度分离防互串）
 """
 from __future__ import annotations
 
@@ -34,16 +36,19 @@ _TRT_CHAIN = [
 ]
 
 
-def _trt_provider_options() -> list[tuple[str, dict[str, object]]]:
+def _trt_provider_options(fp16: bool = True) -> list[tuple[str, dict[str, object]]]:
     """TRT EP 选项：引擎缓存（二次运行免重建，分钟级差异）+ fp16 引擎。
 
     onnxruntime 的 TRT EP 只需 pip 包含该 provider（onnxruntime-gpu）；
     运行时另需 TensorRT 库（可选组件 tensorrt wheel）——缺失时 session
     创建失败，由 load() 分层回退到 CUDA/DML。
+    缓存目录按精度分家：ORT 的缓存键不保证区分 trt_fp16_enable，同名
+    引擎缓存可能跨精度互串（坏 fp16 缓存被 fp32 链错误复用），物理分开
+    才稳妥；fp16 沿用旧路径，存量缓存零失效。
     """
     from ..paths import TEMP_DIR
 
-    cache = TEMP_DIR / "trt_cache"
+    cache = TEMP_DIR / ("trt_cache" if fp16 else "trt_cache_fp32")
     cache.mkdir(parents=True, exist_ok=True)
     return [(
         "TensorrtExecutionProvider",
@@ -52,7 +57,7 @@ def _trt_provider_options() -> list[tuple[str, dict[str, object]]]:
             "trt_engine_cache_enable": True,
             "trt_engine_cache_path": str(cache),
             "trt_timing_cache_enable": True,
-            "trt_fp16_enable": True,
+            "trt_fp16_enable": fp16,
             "trt_max_workspace_size": 4294967296,  # 4GB
         },
     )]
@@ -71,6 +76,7 @@ class OnnxSrEngine(BaseEngine):
         u8_wrap: bool = True,  # 调用方可强制关；manifest 亦可声明 u8_wrap=false
         validate_hw: tuple[int, int] | None = None,  # 源帧 (H,W)：u8 校验形状
         manifest_allow_wrap: bool = True,
+        trt_fp16: bool | None = None,  # None=按 io.trt_fp16（默认 True）；降链重建时显式 False
     ):
         self.model_path = Path(model_path)
         self.scale = scale
@@ -104,6 +110,9 @@ class OnnxSrEngine(BaseEngine):
         # "y" 模型的包装图手术是三通道语义，同样不适用
         if self.affine or self.color == "y":
             self.u8_wrap_enabled = False
+        # TRT 混合精度开关：transformer 类（DAT2）实测 fp16 全 NaN→纯黑，
+        # manifest 按 io.trt_fp16=false 关闭；显式参数用于坏输出降链重建
+        self.trt_fp16 = bool(io.get("trt_fp16", True)) if trt_fp16 is None else bool(trt_fp16)
         self.validate_hw = validate_hw
         self.session = None
         self.provider_used: list[str] = []
@@ -317,7 +326,7 @@ class OnnxSrEngine(BaseEngine):
         while True:
             providers: list = chosen
             if "TensorrtExecutionProvider" in chosen:
-                providers = _trt_provider_options() + [
+                providers = _trt_provider_options(self.trt_fp16) + [
                     p for p in chosen if p != "TensorrtExecutionProvider"]
             try:
                 return ort.InferenceSession(model, so, providers=providers)
