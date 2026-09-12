@@ -451,9 +451,9 @@ class FakeWebSocket {
 function installSvBridge(): void {
   window.sv = {
     backendInfo: () => Promise.resolve({ baseUrl: BASE, token: 'mock' }),
-    appVersion: () => Promise.resolve('0.5.0'),
+    appVersion: () => Promise.resolve('0.5.1'),
     checkUpdate: () =>
-      Promise.resolve({ status: 'available', current: '0.5.0', version: '0.5.1', notes: '预览环境造数' }),
+      Promise.resolve({ status: 'available', current: '0.5.1', version: '0.5.2', notes: '预览环境造数' }),
     downloadUpdate: () => Promise.resolve({ ok: true }),
     installUpdate: () => Promise.resolve(),
     updateState: () => Promise.resolve({ ready: '', downloading: false, source: 'github' }),
