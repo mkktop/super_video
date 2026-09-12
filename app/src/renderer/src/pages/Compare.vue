@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NModal, NRadioButton, NRadioGroup, NTag, useMessage } from 'naive-ui'
-import { api } from '../api'
+import { api, mediaSrc } from '../api'
 import type { TaskStills } from '../api'
 import { store, ui } from '../store'
 import { useFullscreen } from '../utils'
@@ -49,10 +49,27 @@ async function pollStills(tries = 0) {
   }
 }
 
-// 对比画面源：静帧就绪用样本对（built_at 做缓存版本号），否则单帧预览对
+// 图片任务对比源：原文件 + 成品全分辨率直读（file://）。预览缩略图 960px
+// 上限会把超分补回的高频细节在下采样里抹平——源 891 和成片 3564 都被压到
+// 同一张 960p 缩略图再拉大，分割线两侧一样糊、拖动毫无差异（用户实测
+// 「成片显得不清晰、单独打开格外清晰」的根因）。全分辨率下 1:1 才是真·
+// 成片原生像素，源图由滑块平滑放大补齐到同尺寸，锐利/模糊分界一眼可见。
+const imgFullPair = computed<{ src: string; out: string } | null>(() => {
+  const t = task.value
+  if (!t || t.status !== 'done') return null
+  const imgs = t.params?.images
+  if (!Array.isArray(imgs) || !imgs.length) return null
+  const first = imgs[0] as { in?: string; out?: string } | null
+  if (!first?.in || !first?.out) return null
+  return { src: mediaSrc(first.in), out: mediaSrc(first.out) }
+})
+
+// 对比画面源：图片任务用全分辨率对；静帧就绪用样本对（built_at 做缓存
+// 版本号），否则单帧预览对
 const sliderSrc = computed(() => {
   const t = task.value
   if (!t) return ''
+  if (imgFullPair.value) return imgFullPair.value.src
   return stillsReady.value
     ? api.taskStillUrl(t.id, stillIdx.value, true, stills.value!.built_at ?? 0)
     : api.previewUrl(t.id, t.updated_at, true)
@@ -60,6 +77,7 @@ const sliderSrc = computed(() => {
 const sliderOut = computed(() => {
   const t = task.value
   if (!t) return ''
+  if (imgFullPair.value) return imgFullPair.value.out
   return stillsReady.value
     ? api.taskStillUrl(t.id, stillIdx.value, false, stills.value!.built_at ?? 0)
     : api.previewUrl(t.id, t.updated_at)
