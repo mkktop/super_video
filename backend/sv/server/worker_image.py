@@ -37,6 +37,9 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     """图片超分作业（单张或批量一个任务）：一次模型加载，逐图 解码（含 EXIF
     方向）→ 推理 → 原子落盘（.part + replace，取消/中断不留半个文件）。
 
+    漫画超分（params.kind="manga"）现阶段复用本管线；漫画专属处理
+    （去网点/双页拆合/灰度保持等）后续按 kind 在此分岔。
+
     单图失败跳过并记日志（个别坏图不拖垮整批），全部失败才算任务失败。
     merge_pdf：全部图片落盘后把成功页无损封装成一份 PDF（PNG→Flate 逐像素
     一致，JPG→原样直嵌）；合并失败任务判失败——图片产物保留（清理链对图片
@@ -73,6 +76,24 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     if scale not in spec.scale:
         emit({"type": "failed", "error": f"模型不支持 x{scale}"})
         return 1
+    # 混装双模型：彩页模型（创建期已识别每页 lane；worker 端双引擎按页分派）
+    model_id_color = str(params.get("model_id_color") or "").strip()
+    color_spec = None
+    if model_id_color:
+        if model_id_color == task.get("model_id"):
+            emit({"type": "failed", "error": "彩色页模型与主模型相同，无需混装"})
+            return 1
+        try:
+            from sv.models.registry import get_model
+
+            color_spec = get_model(model_id_color)
+        except KeyError:
+            emit({"type": "failed", "error": f"未知的彩色页模型 {model_id_color}"})
+            return 1
+        if scale not in color_spec.scale:
+            emit({"type": "failed",
+                  "error": f"彩色页模型 {color_spec.id} 不支持 x{scale}（两模型需共同支持同一倍率）"})
+            return 1
     target = int(params.get("target_scale") or scale)
     if not (1 <= target <= scale):
         emit({"type": "failed", "error": f"目标倍率 x{target} 无效（1 ~ x{scale}）"})
@@ -99,30 +120,76 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
 
     denoise = params.get("denoise")
     variant = f"denoise{int(denoise)}" if denoise is not None else None
+
+    def _lane_images(lane: str) -> list[dict]:
+        """按分派车道过滤图片清单（无彩模时全部归 bw）。"""
+        if color_spec is None:
+            return images if lane == "bw" else []
+        want_color = lane == "color"
+        return [m for m in images
+                if (m.get("lane") == "color") == want_color]
+
+    def _first_hw(lane: str) -> tuple[int, int]:
+        """该车道首图的 EXIF 转正宽高（auto_variant 选档与引擎预热基准）。"""
+        for m in _lane_images(lane):
+            with Image.open(str(m["in"])) as im:
+                im = ImageOps.exif_transpose(im)
+                return im.size
+        return width, height  # 空车道（理论不可达）：回落任务首图
+
     if variant is None:
         from sv.models.registry import auto_variant
-        variant = auto_variant(spec, scale, height)  # MangaJaNai 系按源高度选权重
-        if variant:
-            emit({"type": "log", "line": f"按源高度 {height}p 自动选择权重档: {variant}"})
-            if n > 1:
-                heights = _batch_heights(images)
-                tiers = {auto_variant(spec, scale, h) for h in heights} - {None}
-                if len(tiers) > 1:
-                    # 逐图换档 = 逐档换 engine（销毁旧 session 再建新的），DML 下
-                    # 「创建后再析构」会话有原生崩溃前科（CUGAN/V3.1 实证）——
-                    # 统一首图档 + 明示取舍，要逐档精确就按高度分批
-                    emit({"type": "log", "line":
-                          f"批量图片高度不一（{min(heights)}~{max(heights)}p），"
-                          f"理想档含 {'/'.join(sorted(tiers))}，"
-                          f"已统一按首图 {height}p 的 {variant} 档处理；"
-                          "如需逐档精确请按高度分批创建任务"})
+
+        if color_spec is None:
+            variant = auto_variant(spec, scale, height)  # MangaJaNai 系按源高度选权重
+            if variant:
+                emit({"type": "log", "line": f"按源高度 {height}p 自动选择权重档: {variant}"})
+                if n > 1:
+                    heights = _batch_heights(images)
+                    tiers = {auto_variant(spec, scale, h) for h in heights} - {None}
+                    if len(tiers) > 1:
+                        # 逐图换档 = 逐档换 engine（销毁旧 session 再建新的），DML 下
+                        # 「创建后再析构」会话有原生崩溃前科（CUGAN/V3.1 实证）——
+                        # 统一首图档 + 明示取舍，要逐档精确就按高度分批
+                        emit({"type": "log", "line":
+                              f"批量图片高度不一（{min(heights)}~{max(heights)}p），"
+                              f"理想档含 {'/'.join(sorted(tiers))}，"
+                              f"已统一按首图 {height}p 的 {variant} 档处理；"
+                              "如需逐档精确请按高度分批创建任务"})
+        else:
+            # 混装：各车道独立选档（黑白档按首张黑白页高度、彩模档按首张彩页高度）。
+            # 同理只在各自车道内统一档——引擎跨档切换 = session 销毁重建，有崩溃前科
+            hw_bw = _first_hw("bw")
+            variant = auto_variant(spec, scale, hw_bw[1])
+            if variant:
+                emit({"type": "log", "line":
+                      f"黑白页按首张 {hw_bw[1]}p 选择权重档: {variant}"})
+    variant_color = variant if denoise is not None else None  # denoise 档两模型同用
+    if color_spec is not None and denoise is None:
+        from sv.models.registry import auto_variant
+
+        hw_color = _first_hw("color")
+        variant_color = auto_variant(color_spec, scale, hw_color[1])
+        if variant_color:
+            emit({"type": "log", "line":
+                  f"彩色页按首张 {hw_color[1]}p 选择权重档: {variant_color}"})
     try:
         from sv.models.registry import file_for_scale
-        need = file_for_scale(spec, scale, variant)
+
+        need = file_for_scale(spec, scale, variant)  # 只下本任务用到的权重
         manager.ensure_files(spec, [need])
+        if color_spec is not None:
+            need_color = file_for_scale(color_spec, scale, variant_color)
+            manager.ensure_files(color_spec, [need_color])
     except Exception as e:  # 下载/校验失败
         emit({"type": "failed", "error": f"模型文件不可用: {e}"})
         return 1
+
+    if color_spec is not None:
+        n_color = sum(1 for m in images if m.get("lane") == "color")
+        emit({"type": "log", "line":
+              f"混装分派：识别出彩色 {n_color} 页 / 黑白 {n - n_color} 页，"
+              f"分别走 {color_spec.id} / {spec.id}（未出现的车道不加载引擎）"})
 
     emit({
         "type": "started", "total_frames": n,
@@ -132,28 +199,57 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         "output": images[0]["out"],
     })
     t0 = time.perf_counter()
-    t_load = time.perf_counter()
+    load_s_total = 0.0
     used_prec = "fp16-autocast"
 
-    # ---- 引擎一次性加载（首图真实尺寸预热，后续图各自形状自然重配）----
-    try:
-        if spec.engine == "torch":
+    # ---- 引擎加载（车道懒加载：首张该车道图片时构建并驻留；双引擎并存而非
+    # 切换——session 销毁重建在 DML 下有崩溃前科，并存只是各占一份显存）----
+    def _build_engine(spec_, variant_, warm_hw, slot: str):
+        if spec_.engine == "torch":
             from sv.engines.torch_engine import TorchSrEngine
 
-            engine = TorchSrEngine(
-                model_file(spec, scale), scale, io=spec.io,
+            eng = TorchSrEngine(
+                model_file(spec_, scale), scale, io=spec_.io,
                 tile=tile or 512)
-            engine.load()
-        else:
-            precision = settings.load().get("precision", "fp32")
-            weight = model_file(spec, scale, precision, variant)
-            engine, used_prec = _load_onnx_engine(
-                weight, spec, scale, variant, precision, tile,
-                (height, width), batch=1, log=emit)
+            eng.load()
+            return eng, "fp16-autocast"
+        precision = settings.load().get("precision", "fp32")
+        weight = model_file(spec_, scale, precision, variant_)
+        return _load_onnx_engine(
+            weight, spec_, scale, variant_, precision, tile,
+            warm_hw, batch=1, log=emit, slot=slot)
+
+    engines: dict[str, object] = {}
+    precisions: dict[str, str] = {}
+
+    def _engine_for(lane: str):
+        eng = engines.get(lane)
+        if eng is not None:
+            return eng
+        nonlocal load_s_total
+        spec_ = color_spec if lane == "color" else spec
+        variant_ = variant_color if lane == "color" else variant
+        warm_hw = _first_hw(lane)
+        _tl = time.perf_counter()
+        built, prec = _build_engine(spec_, variant_, warm_hw,
+                                    "color" if lane == "color" else "main")
+        load_s_total += time.perf_counter() - _tl
+        engines[lane] = built
+        precisions[lane] = prec
+        return built
+
+    try:
+        # 各车道按需预建：纯黑白本不建彩模引擎、全彩本不建主引擎（省显存）；
+        # 构建失败=该车道全灭，走主失败路径显式报错，好过循环里逐页重试跳过
+        if color_spec is None or any(m.get("lane") != "color" for m in images):
+            _engine_for("bw")
+        if color_spec is not None and any(m.get("lane") == "color" for m in images):
+            _engine_for("color")
     except Exception as e:  # noqa: BLE001 — worker 兜底，任何异常都要上报
         emit_failed("引擎加载失败", e)
         return 1
-    load_s = time.perf_counter() - t_load
+    used_prec = precisions.get("bw", used_prec)
+    load_s = load_s_total
 
     ok = 0
     out_bytes_total = 0
@@ -165,6 +261,9 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     for k, meta in enumerate(images):
         src_p = Path(meta["in"])
         name = src_p.name
+        # 混装分派：彩页走彩模引擎、其余走主引擎（车道引擎已预建，这里只取用）
+        engine = _engine_for(
+            "color" if color_spec is not None and meta.get("lane") == "color" else "bw")
         _t = time.perf_counter()
         try:
             with Image.open(str(src_p)) as im:
@@ -251,10 +350,23 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
 
     if _prof_enabled():
         el = time.perf_counter() - t0
+
+        def _prov(e) -> str:
+            return "/".join(e.provider_used) if hasattr(e, "provider_used") else "torch"
+
+        if color_spec is not None:
+            model_line = (f"模型 {spec.id}(黑白{sum(1 for m in images if m.get('lane') != 'color')})"
+                          f" + {color_spec.id}(彩色{sum(1 for m in images if m.get('lane') == 'color')})")
+            backend_line = " · ".join(f"{ln}:{_prov(e)}" for ln, e in engines.items())
+            prec_line = " · ".join(f"{ln}:{p}" for ln, p in precisions.items())
+        else:
+            model_line = f"模型 {spec.id}"
+            backend_line = _prov(engines.get("bw")) if engines.get("bw") else "torch"
+            prec_line = used_prec
         _prof_write(task["id"], "\n".join([
             f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} 图片超分任务 ====",
-            f"模型 {spec.id} · 推理后端 {'/'.join(engine.provider_used) if hasattr(engine, 'provider_used') else 'torch'}"
-            f" · 精度 {used_prec} · tile={tile} · {n}张 → {fmt.upper()}",
+            f"{model_line} · 推理后端 {backend_line}"
+            f" · 精度 {prec_line} · tile={tile} · {n}张 → {fmt.upper()}",
             f"引擎加载 {load_s:.1f}s · 解码合计 {t_dec:.2f}s · 推理合计 {t_inf:.2f}s"
             f" · 编码落盘合计 {t_sav:.2f}s",
             f"成功 {ok}/{n} 张 · 总用时 {el:.1f}s · 平均 {ok / el if el > 0 else 0:.2f} 张/秒（端到端口径）",

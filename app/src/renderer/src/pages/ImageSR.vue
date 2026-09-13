@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCheckbox,
@@ -12,7 +12,6 @@ import {
   useMessage,
 } from 'naive-ui'
 import { api, mediaSrc } from '../api'
-import type { FolderScanResult } from '../api'
 import { refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
@@ -33,11 +32,38 @@ function consumePendingModel() {
 onMounted(consumePendingModel)
 onActivated(consumePendingModel)
 
+// 任务页「改参数重试」：带原参数回填本页（图片任务分流入口）。双钩子+watch
+// 三管齐下靠置空幂等：首次直达只触发 onMounted，缓存页二次进入只触发
+// onActivated——单挂 watch 会漏掉组件尚未创建的首次直达
+function consumeRetryParams() {
+  if (ui.page !== 'imagesr' || !ui.pendingTaskParams) return
+  const t = ui.pendingTaskParams
+  ui.pendingTaskParams = null
+  const p = t.params ?? {}
+  const imgs = p.images as { in: string }[] | undefined
+  files.value = Array.isArray(imgs) && imgs.length ? imgs.map((x) => x.in) : [t.input_path]
+  // 模型可能已被删除：找不到就保持空，用户手选
+  const spec = store.models.find((m) => m.id === t.model_id)
+  if (spec?.vram_ok) {
+    modelId.value = spec.id
+    const want = Number(p.target_scale ?? p.scale ?? 0)
+    if (want && spec.scale.includes(want)) targetScale.value = want
+  }
+  if (p.format === 'jpg') {
+    format.value = 'jpg'
+    if (typeof p.jpg_quality === 'number') jpgQuality.value = p.jpg_quality
+  } else {
+    format.value = 'png'
+  }
+  if (typeof p.tile === 'number') tileChoice.value = p.tile
+  mergePdf.value = p.merge_pdf === true
+}
+onMounted(consumeRetryParams)
+onActivated(consumeRetryParams)
+watch([() => ui.page, () => ui.pendingTaskParams], consumeRetryParams)
+
 const files = ref<string[]>([])
-// 文件夹模式（整本漫画）：与散选互斥——选文件夹清散页，散选/拖拽清文件夹。
-// 扫描结果持有 rel 清单，提交时由后端按 rel 镜像输出目录结构
-const folder = ref<FolderScanResult | null>(null)
-const scanning = ref(false)
+// 整本漫画（文件夹递归+镜像输出）已独立到「漫画超分」页；本页只管散图
 const modelId = ref('')
 const targetScale = ref(2)
 const format = ref<'png' | 'jpg'>('png')
@@ -84,8 +110,8 @@ function thumbUrl(p: string): string {
 
 const IMAGE_EXT = /\.(png|jpe?g|webp|bmp|tiff?)$/i
 
-const batchN = computed(() => (folder.value ? folder.value.total : files.value.length))
-const dragHint = computed(() => !files.value.length && !folder.value)
+const batchN = computed(() => files.value.length)
+const dragHint = computed(() => !files.value.length)
 
 // ---- 拖拽入队：整个页面都是放置区（文件夹模式先让位） ----
 const dragDepth = ref(0)
@@ -102,38 +128,15 @@ function onDropFiles(e: DragEvent) {
   const imgs = dropped
     .filter((f) => IMAGE_EXT.test(f.name))
     .map((f) => window.sv.pathForFile(f))
-  if (!imgs.length) return
-  folder.value = null // 互斥：拖散图退出文件夹模式
   for (const p of imgs) if (!files.value.some((x) => x.toLowerCase() === p.toLowerCase())) files.value.push(p)
 }
 
 function pick() {
   void window.sv.pickImages().then((picked) => {
-    if (!picked.length) return
-    folder.value = null // 互斥：散选退出文件夹模式
     for (const p of picked) {
       if (!files.value.some((x) => x.toLowerCase() === p.toLowerCase())) files.value.push(p)
     }
   })
-}
-
-async function pickFolder() {
-  const dir = await window.sv.pickDir()
-  if (!dir) return
-  scanning.value = true
-  try {
-    const r = await api.scanImageFolder(dir)
-    if (!r.total) {
-      message.warning('该文件夹（含子目录）里没有受支持的图片')
-      return
-    }
-    folder.value = r
-    files.value = [] // 互斥：进文件夹模式清散选
-  } catch (e) {
-    message.error(`扫描文件夹失败: ${e instanceof Error ? e.message : e}`)
-  } finally {
-    scanning.value = false
-  }
 }
 
 function removeAt(i: number) {
@@ -142,7 +145,6 @@ function removeAt(i: number) {
 
 function clearAll() {
   files.value = []
-  folder.value = null
 }
 
 const canSubmit = computed(
@@ -164,10 +166,8 @@ function onThumbErr(f: string) {
 async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
-  // 批量合并为一个任务：后端一次模型加载循环处理全部图片；
-  // 文件夹模式额外带 folder_src，后端按相对路径镜像输出目录结构
-  const isFolder = !!folder.value
-  const list = isFolder ? folder.value!.files.map((f) => f.path) : files.value
+  // 批量合并为一个任务：后端一次模型加载循环处理全部图片
+  const list = files.value
   const n = list.length
   const wantPdf = mergePdf.value && n >= 2
   const r = await api.createTask({
@@ -181,18 +181,14 @@ async function submit() {
       ...(format.value === 'jpg' ? { jpg_quality: jpgQuality.value } : {}),
       ...(tileChoice.value ? { tile: tileChoice.value } : {}),
       ...(wantPdf ? { merge_pdf: true } : {}),
-      ...(isFolder ? { folder_src: folder.value!.folder } : {}),
     },
   })
   submitting.value = false
   if (r.ok) {
     message.success(
-      isFolder
-        ? `已加入队列（${baseName(folder.value!.folder)} 整个文件夹 ${n} 张合并为 1 个批量任务，输出将镜像目录结构${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`
-        : `已加入队列（${n} 张图片合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`,
+      `已加入队列（${n} 张图片合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`,
     )
     files.value = []
-    folder.value = null
     ui.page = 'tasks'
     refreshTasks()
   } else {
@@ -220,7 +216,7 @@ export default { name: 'ImageSR' }
     <div class="page-head">
       <div>
         <h1>图片超分</h1>
-        <p class="sub">单张 / 多选 / 整个文件夹 → 选模型放大 → 结果保存为 PNG / JPG</p>
+        <p class="sub">单张 / 多选图片 → 选模型放大 → 结果保存为 PNG / JPG；整本漫画请用侧栏「漫画超分」</p>
       </div>
     </div>
 
@@ -231,41 +227,8 @@ export default { name: 'ImageSR' }
         <NButton dashed size="large" class="grow" @click="pick">
           {{ files.length ? `已选 ${files.length} 张（点击继续追加）` : '选择图片（可多选）' }}
         </NButton>
-        <NButton dashed size="large" class="grow" :loading="scanning" @click="pickFolder">
-          选择文件夹（含子目录，漫画整本）
-        </NButton>
       </div>
-      <div v-if="dragHint" class="drop-hint">也可以直接把图片 / 文件夹拖进窗口</div>
-
-      <!-- 文件夹模式：摘要卡 + 首屏预览（替代 53 张散页缩略图墙） -->
-      <div v-if="folder" class="folder-card">
-        <div class="f-ico" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
-            <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2.2 2.5H19.5A1.5 1.5 0 0 1 21 9v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18V6.5Z"
-              stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
-          </svg>
-        </div>
-        <div class="f-info">
-          <div class="f-name" :title="folder.folder">{{ baseName(folder.folder) }}</div>
-          <div class="f-meta">
-            共 {{ folder.total }} 张图片<template v-if="folder.dirs"> · 含 {{ folder.dirs }} 个子目录</template>
-            · 输出将镜像目录结构
-          </div>
-        </div>
-        <button class="rm" title="移除文件夹" @click="folder = null">✕</button>
-        <div v-if="folder.total" class="folder-peeks">
-          <img
-            v-for="f in folder.files.slice(0, 10)"
-            :key="f.path"
-            :src="thumbUrl(f.path)"
-            class="peek"
-            loading="lazy"
-            alt=""
-            @error="onThumbErr(f.path)"
-          />
-          <span v-if="folder.total > 10" class="peek more">+{{ folder.total - 10 }}</span>
-        </div>
-      </div>
+      <div v-if="dragHint" class="drop-hint">也可以直接把图片拖进窗口</div>
 
       <div v-if="files.length" class="thumb-grid">
         <div v-for="(f, i) in files" :key="f" class="thumb-cell">
@@ -350,11 +313,9 @@ export default { name: 'ImageSR' }
           <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
         </div>
         <p class="hint-row">
-          自动=按模型默认；超大图（如 8K 扫描件）显存不足时调小分块。散选图片保存到「{{
+          自动=按模型默认；超大图（如 8K 扫描件）显存不足时调小分块。图片保存到「{{
             outDirLabel
-          }}」，目录内无同名时沿用原文件名，同名冲突自动改用「原名_倍率」后缀，不覆盖现有文件。文件夹模式输出到「{{
-            outDirLabel === '源图片所在目录' ? '源文件夹旁边' : outDirLabel
-          }}」下的「文件夹名_倍率」目录，并按源目录结构镜像（子目录原样保留）。PDF
+          }}」，目录内无同名时沿用原文件名，同名冲突自动改用「原名_倍率」后缀，不覆盖现有文件。PDF
           无损口径：PNG 结果逐像素一致直接嵌入，JPG 结果按原文件字节嵌入不再压缩。
         </p>
       </div>
@@ -418,59 +379,6 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
   font-size: 12px;
   color: var(--sv-text-faint);
   text-align: center;
-}
-
-/* 文件夹模式摘要卡：图标 + 名称 + 统计 + 首屏预览 */
-.folder-card {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1.5px solid rgba(var(--sv-accent-rgb), 0.45);
-  border-radius: var(--sv-radius-md);
-  background:
-    linear-gradient(135deg, rgba(var(--sv-accent-rgb), 0.08), rgba(var(--sv-accent2-rgb), 0.04)),
-    var(--sv-fill-1);
-}
-.f-ico {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--sv-accent-strong);
-  background: var(--sv-accent-bg);
-  border: 1px solid rgba(var(--sv-accent-rgb), 0.25);
-}
-.f-name { font-weight: 650; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.f-meta { font-size: 12px; color: var(--sv-text-dim); margin-top: 3px; }
-.folder-card .rm { position: static; }
-.folder-peeks {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-.peek {
-  width: 56px;
-  height: 42px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--sv-border-mid);
-  background: rgba(0, 0, 0, 0.28);
-}
-.peek.more {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11.5px;
-  color: var(--sv-text-dim);
-  border-style: dashed;
-  background: none;
-  flex: none;
 }
 
 /* 缩略图墙 */

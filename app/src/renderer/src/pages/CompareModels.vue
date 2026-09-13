@@ -285,12 +285,16 @@ onActivated(() => window.addEventListener('keydown', onKey)) // addEventListener
 onDeactivated(() => window.removeEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
-/** 用此模型发起正式任务：视频→新建任务（预填源视频），图片→图片超分页 */
+/** 用此模型发起正式任务：视频→新建任务（预填源视频），图片系→按模型场景
+ *  分流（漫画向进漫画超分页，其余进图片超分页） */
 function useModel(mid: string) {
   ui.pendingModel = mid
   ui.pendingScale = scale.value
   if (mode.value === 'video' && videoInput.value) openWizardWith(videoInput.value)
-  else ui.page = 'imagesr'
+  else {
+    const spec = store.models.find((m) => m.id === mid)
+    ui.page = spec && (spec.scenes ?? []).includes('manga') ? 'mangasr' : 'imagesr'
+  }
 }
 </script>
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from ..paths import TEMP_DIR
 from ..utils.process import WINDOWS_CREATE_FLAGS, kill_tree
 from . import db
+from .consts import _IMAGE_TASK_KINDS
 from .engine_select import EngineChoice, select_engine
 from .gpu_lease import release as _gpu_release
 from .gpu_lease import try_acquire as _gpu_try
@@ -136,7 +137,7 @@ def _delete_source_if_enabled(task: dict) -> None:
     if not load_settings().get("delete_source_after_done"):
         return
     params = task.get("params") or {}
-    if params.get("kind") == "image":
+    if params.get("kind") in _IMAGE_TASK_KINDS:
         items = [(i.get("in"), i.get("out"))
                  for i in params.get("images") or [] if isinstance(i, dict)]
     else:
@@ -586,7 +587,7 @@ class Runner:
         文件是完整成果，全部保留——只清可能残留的 .part 临时文件。
         """
         out = Path(task["output_path"])
-        if (task.get("params") or {}).get("kind") == "image":
+        if (task.get("params") or {}).get("kind") in _IMAGE_TASK_KINDS:
             import glob
 
             for part in glob.glob(str(out.parent / "*.part")):

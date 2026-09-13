@@ -46,6 +46,7 @@ from sv.pipeline.stream import (
     prefilter_chain,
 )
 from sv.server import db, settings
+from sv.server.consts import _IMAGE_TASK_KINDS
 from sv.server.preview_final import rewrite_final_previews
 
 from sv.server.worker_common import (  # noqa: F401 — 事件/性能日志协议（含测试 re-export）
@@ -60,6 +61,7 @@ from sv.server.worker_common import (  # noqa: F401 — 事件/性能日志协�
 from sv.server.worker_engine import (  # noqa: F401 — 引擎装配（含测试 re-export）
     _cugan_alt_hint,
     _load_onnx_engine,
+    _release_aux_slots,
 )
 from sv.server.worker_image import (  # noqa: F401 — 图片作业（含测试 re-export）
     _batch_heights,
@@ -150,6 +152,10 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         emit({"type": "failed", "error": f"任务 {task_id} 不存在"})
         return 2
 
+    # 混装彩模引擎只在混装任务生命周期内驻留：每单开始清辅助槽，
+    # 本任务是混装则随后按需重建（同签名复用不值得冒跨任务驻留显存的风险）
+    _release_aux_slots()
+
     params = task["params"]
     model_id = task["model_id"]
     input_path = Path(task["input_path"])
@@ -161,8 +167,10 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         emit({"type": "failed", "error": f"未知模型 {model_id}"})
         return 1
 
-    # 图片任务：单帧专用路径（无分段/checkpoint/补帧/音频），在视频探测前分岔
-    if params.get("kind") == "image":
+    # 图片系任务（image=图片超分 / manga=漫画超分）：单帧专用路径（无分段/
+    # checkpoint/补帧/音频），在视频探测前分岔。漫画现阶段走同一图片管线，
+    # 专属处理（去网点/双页等）后续在 worker_image 里按 kind 分岔
+    if params.get("kind") in _IMAGE_TASK_KINDS:
         return _run_image_job(task, params, spec)
 
     try:

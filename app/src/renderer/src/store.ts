@@ -83,6 +83,7 @@ export const ui = reactive({
     | 'settings'
     | 'compare'
     | 'imagesr'
+    | 'mangasr'
     | 'mcompare',
   compareTaskId: null as string | null,
   pendingInput: null as string | null, // 跳转新建任务页时预填的输入（剪切→超分衔接）

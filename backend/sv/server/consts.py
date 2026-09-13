@@ -18,3 +18,8 @@ _PRESETS_XCODE = (
 
 # 图片超分接受的输入扩展名（识别失败/损坏文件由 PIL 打开时报 400）
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+
+# 走图片管线的任务类型：image=图片超分页，manga=漫画超分页（独立入口/统计，
+# 执行同管线，漫画专属处理后续在 worker_image 分岔）。worker/runner 的
+# kind 判断必须用它，漏一处漫画任务就会掉进视频探测分支
+_IMAGE_TASK_KINDS = ("image", "manga")

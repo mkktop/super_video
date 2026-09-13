@@ -18,6 +18,7 @@ const items = computed(() => [
   { key: 'mcompare', label: '模型对比', icon: 'vs' },
   { key: 'trim', label: '视频剪切', icon: 'cut' },
   { key: 'imagesr', label: '图片超分', icon: 'image' },
+  { key: 'mangasr', label: '漫画超分', icon: 'manga' },
   { key: 'perf', label: '性能', icon: 'pulse' },
   { key: 'logs', label: '日志', icon: 'log' },
   { key: 'settings', label: '设置', icon: 'gear' },
@@ -67,6 +68,11 @@ function navTo(key: string) {
             <rect x="2" y="2.5" width="12" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
             <circle cx="5.7" cy="6.1" r="1.15" fill="currentColor" />
             <path d="M3.5 11.5l3-3 2.3 2.3L10.8 9l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <svg v-else-if="it.icon === 'manga'" width="16" height="16" viewBox="0 0 16 16">
+            <path d="M8 3.4C6.9 2.5 5.3 2.1 2.6 2.1c-.3 0-.6.3-.6.6v9.6c0 .3.3.6.6.6 2.7 0 4.3.4 5.4 1.3.1.1.3.1.4 0 1.1-.9 2.7-1.3 5-1.3.3 0 .6-.3.6-.6V2.7c0-.3-.3-.6-.6-.6-2.3 0-3.9.4-5 1.3-.1.1-.3.1-.4 0z"
+              fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+            <path d="M8 3.6v10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
           </svg>
           <svg v-else-if="it.icon === 'vs'" width="16" height="16" viewBox="0 0 16 16">
             <rect x="1.5" y="3" width="9" height="10" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />

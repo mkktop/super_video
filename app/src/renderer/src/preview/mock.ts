@@ -30,9 +30,16 @@ const MODELS = [
   },
   {
     id: 'mangajanai-x4', name: 'MangaJaNai x4', scale: [4], kind: 'sr', content: ['comic'],
-    speed: 'medium', scenes: ['hd'], vram_gb: 4, tile_hint: 256, engine: 'onnx',
+    speed: 'medium', scenes: ['manga', 'image'], vram_gb: 4, tile_hint: 256, engine: 'onnx',
     description: '漫画/扫图修复首选：网点纸与排线保留出色，灰阶过渡平滑',
     installed: true, bundled: false, size_mb: 128, vram_ok: true,
+  },
+  {
+    id: 'illustrationjanai-x2', name: 'IllustrationJaNai x2', scale: [2], kind: 'sr',
+    content: ['comic'],
+    speed: 'fast', scenes: ['manga', 'image'], vram_gb: 2, tile_hint: 0, engine: 'onnx',
+    description: '彩色漫画页 / 插画向：轻薄快速的 2 倍放大',
+    installed: false, bundled: false, size_mb: 36, vram_ok: true,
   },
   {
     id: 'realesr-x4', name: 'RealESRGAN x4plus', scale: [4], kind: 'sr', content: ['real'],
@@ -186,6 +193,29 @@ function buildTasks(): unknown[] {
       error: 'ONNX Runtime 错误：DirectML 显存分配失败 (0x8007000E)，分块已自动降至 128 仍不足。\n建议：设置 → 高级 中将分块调小，或换用显存需求更低的模型。',
       preview_path: null, preview_src: null,
       out_bytes: 0, elapsed_s: 246, queue_position: null, updated_at: now() - 43200, input_exists: true,
+    },
+    {
+      // 失败的混装漫画任务：走查「改参数重试」按类型分流到漫画超分页（folder_src 重建 + 双模型回填）
+      id: 't-manga-fail',
+      input_path: 'D:\\manga\\naruto_vol01',
+      output_path: 'D:\\manga\\naruto_vol01_2x\\naruto_vol01.pdf',
+      model_id: 'mangajanai-x4',
+      params: {
+        kind: 'manga', scale: 2, target_scale: 2, format: 'png',
+        folder_src: 'D:\\manga\\naruto_vol01', merge_pdf: true,
+        model_id_color: 'illustrationjanai-x2',
+        images: [
+          { in: 'D:\\manga\\naruto_vol01\\ch01\\p001.png', out: 'D:\\manga\\naruto_vol01_2x\\ch01\\p001.png' },
+          { in: 'D:\\manga\\naruto_vol01\\ch01\\p002.png', out: 'D:\\manga\\naruto_vol01_2x\\ch01\\p002.png', lane: 'color' },
+        ],
+      },
+      status: 'failed',
+      src_w: 1400, src_h: 2100, fps: 0,
+      total_frames: 2, progress_frames: 1,
+      fps_run: 0, fps_avg: 0, eta_sec: 0,
+      error: '彩色页模型引擎加载失败：DirectML 会话创建异常 (0x8007000E)。',
+      preview_path: null, preview_src: null,
+      out_bytes: 0, elapsed_s: 18, queue_position: null, updated_at: now() - 3600, input_exists: true,
     },
   ]
 }

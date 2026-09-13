@@ -66,13 +66,34 @@ const filterTabs: Array<{ key: Filter; label: string }> = [
   { key: 'done', label: '已完成' },
   { key: 'failed', label: '失败/取消' },
 ]
+
+// ---- 类型筛选（本地按 params.kind，不动后端搜索）----
+// 视频任务无 kind 键；漫画整本旧任务 kind 仍是 image，但带 folder_src——归入漫画
+type KindFilter = 'all' | 'video' | 'image' | 'manga'
+const kindFilter = ref<KindFilter>('all')
+const kindTabs: Array<{ key: KindFilter; label: string }> = [
+  { key: 'all', label: '全部类型' },
+  { key: 'video', label: '视频' },
+  { key: 'image', label: '图片' },
+  { key: 'manga', label: '漫画' },
+]
+function ofKind(t: Task, k: KindFilter): boolean {
+  if (k === 'all') return true
+  const p = t.params ?? {}
+  if (k === 'video') return !p.kind
+  if (k === 'manga') return p.kind === 'manga' || (!!p.folder_src && p.kind === 'image')
+  return p.kind === 'image' && !p.folder_src
+}
+
 const filtered = computed(() =>
-  baseList.value.filter((t) => {
-    if (filter.value === 'all') return true
-    if (filter.value === 'active') return t.status === 'running' || t.status === 'queued'
-    if (filter.value === 'done') return t.status === 'done'
-    return t.status === 'failed' || t.status === 'canceled'
-  }),
+  baseList.value
+    .filter((t) => ofKind(t, kindFilter.value))
+    .filter((t) => {
+      if (filter.value === 'all') return true
+      if (filter.value === 'active') return t.status === 'running' || t.status === 'queued'
+      if (filter.value === 'done') return t.status === 'done'
+      return t.status === 'failed' || t.status === 'canceled'
+    }),
 )
 const doneCount = computed(() => baseList.value.filter((t) => t.status === 'done').length)
 
@@ -288,10 +309,18 @@ function moveTask(id: string, dir: -1 | 1) {
   applyOrder(order)
 }
 
-// 失败/取消任务「改参数重试」：带原参数跳新建任务页
+// 失败/取消任务「改参数重试」：按任务类型带回原参数跳对应页
+// （视频→新建任务向导；图片→图片超分；漫画/旧文件夹漫画任务→漫画超分）
 function retryWithParams(t: Task) {
   ui.pendingTaskParams = t
-  ui.page = 'newtask'
+  const p = t.params ?? {}
+  if (p.kind === 'manga' || (p.kind === 'image' && p.folder_src)) {
+    ui.page = 'mangasr'
+  } else if (p.kind === 'image') {
+    ui.page = 'imagesr'
+  } else {
+    ui.page = 'newtask'
+  }
 }
 </script>
 
@@ -358,6 +387,17 @@ function retryWithParams(t: Task) {
           @click="filter = ft.key"
         >
           {{ ft.label }}
+        </button>
+      </div>
+      <div class="seg">
+        <button
+          v-for="kt in kindTabs"
+          :key="kt.key"
+          class="filter-btn"
+          :class="{ on: kindFilter === kt.key }"
+          @click="kindFilter = kt.key"
+        >
+          {{ kt.label }}
         </button>
       </div>
       <span class="fb-spacer" />

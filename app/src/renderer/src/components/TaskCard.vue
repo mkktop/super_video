@@ -47,9 +47,14 @@ const fileName = computed(() => {
   return imgs && imgs.length > 1 ? `${base} 等 ${imgs.length} 张图片` : base
 })
 const outName = computed(() => props.task.output_path.split(/[\\/]/).pop() ?? '')
-const modelName = computed(
-  () => store.models.find((m) => m.id === props.task.model_id)?.name ?? props.task.model_id,
-)
+// 混装双模型：模型名并列显示（彩模存 params，主模型在 task.model_id）
+const modelName = computed(() => {
+  const main = store.models.find((m) => m.id === props.task.model_id)?.name ?? props.task.model_id
+  const colorId = props.task.params?.model_id_color as string | undefined
+  if (!colorId) return main
+  const colorName = store.models.find((m) => m.id === colorId)?.name ?? colorId
+  return `${main} + ${colorName}`
+})
 
 const percent = computed(() => {
   const { progress_frames: p, total_frames: t } = props.task
@@ -70,12 +75,13 @@ function fmtElapsed(sec: number): string {
   return sec < 60 ? `${Math.round(sec)}秒` : fmtEta(Math.round(sec))
 }
 
-/** 完成态平均速度：图片任务按「张/秒」，视频按 fps；无数据不显示。
+/** 完成态平均速度：图片系任务（图片/漫画）按「张/秒」，视频按 fps；无数据不显示。
  * 口径=总帧数÷本轮用时（端到端：含引擎加载与最终合成，续跑任务会偏高） */
 const avgSpeed = computed(() => {
   const fps = props.task.fps_avg ?? 0
   if (!fps || fps <= 0) return ''
-  return props.task.params?.kind === 'image'
+  const k = props.task.params?.kind
+  return k === 'image' || k === 'manga'
     ? `平均 ${fps.toFixed(2)} 张/秒`
     : `平均 ${fps.toFixed(2)} fps`
 })
@@ -216,6 +222,9 @@ function onOpenInputFolder() {
       </div>
       <div class="badges">
         <n-tag size="small" :bordered="false">{{ modelName }}</n-tag>
+        <n-tag v-if="task.params?.kind === 'manga'" size="small" :bordered="false" type="success">
+          漫画
+        </n-tag>
         <n-tag size="small" :bordered="false" type="info">
           {{ scaleBadge }}
         </n-tag>

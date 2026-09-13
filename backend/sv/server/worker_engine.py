@@ -27,12 +27,25 @@ def _cugan_alt_hint() -> str:
             "较慢），或改用 AnimeJaNai / MangaJaNai 系模型（DirectML 正常）。")
 
 
-# 常驻引擎缓存（进程内单条）：serve 模式下同签名任务跨任务复用已预热的会话。
+# 常驻引擎缓存（进程内，按槽位）：serve 模式下同签名任务跨任务复用已预热的会话。
 # 签名只用入口参数（全是任务间确定性的量）；加载循环里的降 tile/降链（OOM 减半、
 # TRT→trt_cpu、CUDA→cpu）是同签名下的确定性修复路径——降链成功后的会话对下一个
 # 同签名任务同样适用，故缓存条目按初值签名存「落定后的引擎」。
 # 失败任务后进程被 runner 丢弃重建（runner 只在 done 后续喂），不会带着损坏会话复用。
-_ENGINE_CACHE: dict = {}
+# 槽位：main=单模型任务（视频/图片，历史单条语义不变）；color=漫画混装双模型的
+# 彩页引擎——两个 session 并存互不清退（换签名清退只发生在各自槽内）。非混装
+# 任务开始时 _release_aux_slots() 清掉彩模引擎，不占显存跨任务驻留。
+_ENGINE_CACHE: dict[str, dict] = {}
+
+
+def _release_aux_slots() -> None:
+    """清掉非 main 槽的常驻引擎（任务开始时调用）。
+
+    混装彩模引擎刻意不跨任务复用：同签名复用省的是几秒加载，但任何非混装任务
+    都得先等它释放显存——安全优先，重建即可。
+    """
+    for k in [k for k in _ENGINE_CACHE if k != "main"]:
+        _ENGINE_CACHE.pop(k, None)
 
 
 class _EngineGarbage(Exception):
@@ -67,6 +80,7 @@ def _load_onnx_engine(
     *,
     batch: int = 1,
     log=None,
+    slot: str = "main",
 ) -> tuple["OnnxSrEngine", str]:
     """构建并预热 onnx 推理引擎（视频/图片任务共用）。
 
@@ -136,16 +150,16 @@ def _load_onnx_engine(
     eng_setting = settings.load().get("engine")
     ort_device = eng_setting if eng_setting in ("trt", "cpu") else "auto"
 
-    # 常驻缓存查询：签名要素（含 ort_device 初值）全部命中才复用——
+    # 常驻缓存查询（按槽位）：签名要素（含 ort_device 初值）全部命中才复用——
     # 已预热的会话跳过整个构建+预热（warmup 一帧在 DML 上也不是零成本）。
     # 注意precision 要用补转后落定的值：fp16 补转会改变 weight 路径，
     # sig 里的 weight 串已经反映，这里只补充 used_precision 口径一致。
     sig = _engine_sig(weight, scale, variant, precision, tile, batch, warmup_hw, ort_device)
-    cached = _ENGINE_CACHE.get("sig")
-    if cached == sig:
+    entry = _ENGINE_CACHE.get(slot)
+    if entry and entry["sig"] == sig:
         if log:
             log({"type": "log", "line": "复用常驻引擎（同模型/同后端/同分辨率，跳过加载预热）"})
-        return _ENGINE_CACHE["engine"], _ENGINE_CACHE["precision"]
+        return entry["engine"], entry["precision"]
     # 大图输出像素预算：无 tile 且放大后像素超 36M（1080p x4=33M 不动、
     # 漫画扫描页 2133p x4≈51M 命中）时预设 512 分块——全尺寸会话会把 GPU
     # 打爆（中文 Windows 上 OOM 被 GBK 错误消息的解码异常掩盖成
@@ -179,9 +193,10 @@ def _load_onnx_engine(
             log({"type": "log", "line":
                  "TensorRT 引擎加载中：新模型或新分辨率首次使用需编译引擎（约 1~2 分钟），完成后可直接加载"})
     engine = None
-    if _ENGINE_CACHE.get("sig") != sig:
-        # 换签名重建：先释放上一个任务的常驻引擎（DML/CUDA 资源回收靠析构）
-        _ENGINE_CACHE.clear()
+    if entry is not None and entry["sig"] != sig:
+        # 本槽换签名重建：先释放本槽上一个常驻引擎（DML/CUDA 资源回收靠析构）；
+        # 其他槽位（混装彩模）不动——双引擎并存正依赖于此
+        _ENGINE_CACHE.pop(slot, None)
         import gc
 
         gc.collect()
@@ -346,12 +361,12 @@ def _load_onnx_engine(
             raise
     if engine is None:
         raise RuntimeError("引擎加载重试次数耗尽")  # 理论不可达：链上每档要么 continue 要么 raise
-    _ENGINE_CACHE.clear()  # 单条语义：换签名即释放旧引擎（显存）再换入
+    _ENGINE_CACHE.pop(slot, None)  # 本槽单条语义：换签名即释放旧引擎（显存）再换入
     # 降链可能已把转换版 fp16 换回 fp32 原件，精度口径按落定权重重算
     used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
     # 设备移除兜底出的 CPU 引擎不缓存（瞬态病因，见 except 分支注释）
     if not transient_dev_fallback:
-        _ENGINE_CACHE.update({"sig": sig, "engine": engine,
-                              "precision": used_precision})
+        _ENGINE_CACHE[slot] = {"sig": sig, "engine": engine,
+                               "precision": used_precision}
     return engine, used_precision
 

@@ -39,6 +39,7 @@ const commands = computed<Cmd[]>(() => {
     ['mcompare', '模型对比'],
     ['trim', '视频剪切'],
     ['imagesr', '图片超分'],
+    ['mangasr', '漫画超分'],
     ['perf', '性能监控'],
     ['logs', '服务日志'],
     ['settings', '设置'],

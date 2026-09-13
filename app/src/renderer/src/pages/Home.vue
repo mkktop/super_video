@@ -184,6 +184,7 @@ const gpuShortName = computed(() =>
       <div class="guide-actions">
         <NButton type="primary" @click="ui.page = 'newtask'">＋ 新建超分任务</NButton>
         <NButton quaternary @click="ui.page = 'mcompare'">先对比模型</NButton>
+        <NButton quaternary @click="ui.page = 'mangasr'">超分整本漫画</NButton>
       </div>
     </section>
 

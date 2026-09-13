@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import {
   NButton,
   NCard,
@@ -252,14 +252,15 @@ watch([() => ui.page, () => ui.pendingModel], () => {
 watch([targetScale, resMode, effW, effH, outKind, container], () => void autoFillOutput())
 
 // 任务页「改参数重试」入口：带原任务全部参数进本页，调完重新入队
-watch([() => ui.page, () => ui.pendingTaskParams], async () => {
+// （图片/漫画任务已分流到图片超分/漫画超分页，本页只接视频任务）。
+// 双钩子+watch 靠置空幂等：首次直达只触发 onMounted，缓存页只触发
+// onActivated——单挂 watch 会漏掉组件尚未创建的首次直达
+async function consumeRetryParams() {
   if (ui.page !== 'newtask' || !ui.pendingTaskParams) return
   const t = ui.pendingTaskParams
   ui.pendingTaskParams = null
   const p = (t.params ?? {}) as Record<string, unknown>
-  // 图片批量任务的输入在 params.images 里
-  const imgs = p.images as { in: string }[] | undefined
-  await setInput(Array.isArray(imgs) && imgs.length ? imgs.map((x) => x.in) : [t.input_path])
+  await setInput([t.input_path])
   // 模型与倍率（模型可能已被删除：找不到就保持空，用户手选）
   const spec = store.models.find((m) => m.id === t.model_id)
   if (spec) {
@@ -293,7 +294,10 @@ watch([() => ui.page, () => ui.pendingTaskParams], async () => {
   deband.value = p.deband === true
   tileChoice.value = typeof p.tile === 'number' ? p.tile : 0
   message.info('已带入原任务参数，调整后点「加入队列」')
-})
+}
+onMounted(consumeRetryParams)
+onActivated(consumeRetryParams)
+watch([() => ui.page, () => ui.pendingTaskParams], () => void consumeRetryParams())
 
 async function pickOutputFile() {
   if (isImage.value) {

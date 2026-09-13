@@ -41,7 +41,8 @@ class _Nearest2x:
 def fake_engine(monkeypatch):
     eng = _Nearest2x()
 
-    def _fake_load(weight, spec, scale, variant, precision, tile, warmup_hw, *, batch=1, log=None):
+    def _fake_load(weight, spec, scale, variant, precision, tile, warmup_hw, *,
+                   batch=1, log=None, slot="main"):
         return eng, "fp32"
 
     import sv.server.worker as worker_mod
@@ -510,3 +511,52 @@ def test_create_image_folder_task_rejects_outside_file(client, model_x2, tmp_pat
     })
     assert r.status_code == 400
     assert "文件夹内" in r.json()["detail"]
+
+
+# ---- 漫画超分独立任务类型（kind=manga：语义标记，执行同图片管线）----
+
+def test_create_manga_folder_task(client, model_x2, tmp_path, monkeypatch):
+    """漫画页提交：kind=manga + folder_src 落库为漫画任务，镜像输出结构
+    与图片文件夹模式一致（共用同一套命名/镜像纪律）。"""
+    root = tmp_path / "manga"
+    _manga_tree(root)
+    from sv.server.routes import tasks as tasks_mod
+
+    monkeypatch.setattr(tasks_mod, "load_settings", lambda: {})
+    r = client.post("/api/tasks", json={
+        "inputs": [str(root / "ch2" / "p1.png"), str(root / "cover.jpg")],
+        "model_id": model_x2,
+        "params": {"kind": "manga", "scale": 2, "folder_src": str(root)},
+    })
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["params"]["kind"] == "manga"
+    assert d["params"]["folder_src"].replace("\\", "/") == str(root).replace("\\", "/")
+    outs = [i["out"].replace("\\", "/") for i in d["params"]["images"]]
+    base = str(tmp_path / "manga_2x").replace("\\", "/")
+    assert all(o.startswith(base + "/") for o in outs), outs
+
+
+def test_create_manga_task_loose_pages(client, model_x2, tmp_path):
+    """漫画页散选单页（不带 folder_src）也合法——kind 只是入口语义标记。"""
+    src = tmp_path / "page.png"
+    _make_png(src, 10, 14)
+    r = client.post("/api/tasks", json={
+        "input": str(src), "model_id": model_x2,
+        "params": {"kind": "manga", "scale": 2},
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["params"]["kind"] == "manga"
+    assert "folder_src" not in r.json()["params"]
+
+
+def test_create_task_rejects_unknown_image_kind(client, model_x2, tmp_path):
+    """非法 kind 直接 400（合法值仅 image/manga），防手拼参数静默落成视频任务。"""
+    src = tmp_path / "page2.png"
+    _make_png(src, 10, 10)
+    r = client.post("/api/tasks", json={
+        "input": str(src), "model_id": model_x2,
+        "params": {"kind": "video", "scale": 2},
+    })
+    assert r.status_code == 400
+    assert "任务类型" in r.json()["detail"]

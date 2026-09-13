@@ -54,6 +54,24 @@ def _natural_key(s: str) -> list:
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
 
 
+def _page_is_color(im) -> bool:
+    """漫画页彩色/黑白识别（混装双模型用，创建期逐页调用）。
+
+    缩略图上算 RGB 通道极差的离散度：单色调图——纯灰、网点纸、均匀纸色
+    偏移（发黄的旧扫描件 R≈k+t/G≈k'+t/B≈k''+t，通道差恒定）——极差恒定，
+    std≈0；彩页白底/黑线（极差≈0）与彩色区（高极差）并存，std 显著。
+    判据刻意偏保守：黑白模型处理彩页会丢色（不可逆），彩模处理黑白页只是
+    次优。320² 像素操作，每页毫秒级。
+    """
+    import numpy as np
+
+    t = im.convert("RGB")
+    t.thumbnail((320, 320))
+    a = np.asarray(t, dtype=np.int16)
+    spread = a.max(axis=2) - a.min(axis=2)
+    return float(np.std(spread)) > 4.0
+
+
 @router.post("/api/images/scan")
 def scan_image_folder(body: FolderScanIn) -> dict:
     """图片超分·文件夹模式扫描：递归枚举受支持图片，隐藏目录整棵跳过。
@@ -172,12 +190,31 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     merge_pdf：逐图产物照常落盘，另把全部成功页无损封装成一份 PDF（任务
     output 指向 PDF），pdf_out 与逐图产物同命名系、不覆盖现有文件。
     文件夹模式（params.folder_src + inputs=全量图片）：输出按源目录结构镜像
-    到「输出根/文件夹名_倍率」下（输出根=设置目录，未设置则在源文件夹旁建
+    到「输出根/文件夹名_倍率」下（输出根=设置目录，未设置时在源文件夹旁建
     兄弟目录——不落回源目录内，否则产物会被下一次扫描重复吃进来）。
+    漫画超分页提交时 params.kind="manga"（缺省 image）：仅语义标记，执行
+    同管线；worker/runner 按 _IMAGE_TASK_KINDS 识别。
+    混装双模型（params.model_id_color）：黑白页走主模型、彩页走彩色模型，
+    创建期逐页识别色彩把 lane 写进 images_meta（彩页 "color"，缺省黑白），
+    结果随任务持久化——续跑/重试不重算。
     """
-    from ..consts import _IMAGE_EXTS
+    from ..consts import _IMAGE_EXTS, _IMAGE_TASK_KINDS
 
     params_in = dict(body.params)
+    kind = str(params_in.get("kind") or "image")
+    if kind not in _IMAGE_TASK_KINDS:
+        raise HTTPException(400, f"图片任务类型仅支持 {'/'.join(_IMAGE_TASK_KINDS)}，当前 {kind}")
+    # 混装彩页模型：倍率纪律与主模型同一套（scale/target 需两模型同时支持）
+    model_id_color = str(params_in.get("model_id_color") or "").strip()
+    color_spec = None
+    if model_id_color:
+        if model_id_color == body.model_id:
+            raise HTTPException(400, "彩色页模型与主模型相同，无需混装")
+        try:
+            color_spec = get_model(model_id_color)
+        except KeyError:
+            raise HTTPException(
+                404, f"未知的彩色页模型 {model_id_color}") from None
     inputs_raw = list(body.inputs) if body.inputs else [body.input]
     if not inputs_raw or any(not i for i in inputs_raw):
         raise HTTPException(400, "未提供输入图片")
@@ -219,6 +256,12 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     target = int(params_in.get("target_scale") or scale)
     if not (1 <= target <= scale):
         raise HTTPException(400, f"目标倍率需在 x1 ~ x{scale} 之间")
+    if color_spec is not None:
+        # 混装：彩色模型必须同倍率可用，且与主模型是同一档倍率（任务级单一倍率）
+        if scale not in color_spec.scale:
+            raise HTTPException(
+                400, f"彩色页模型 {color_spec.id} 不支持 x{scale}，"
+                     f"可选 {color_spec.scale}（两模型需共同支持同一倍率）")
     # 自定义目标分辨率：仅单张开放（批量需逐图校验边界，暂不支持）
     tw, th = params_in.get("target_w"), params_in.get("target_h")
     if tw is not None or th is not None:
@@ -238,15 +281,19 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
     merge_pdf = bool(params_in.get("merge_pdf"))  # 批量合并输出 PDF（无损封装）
 
-    # 逐图可用性校验 + 尺寸读取（EXIF 方向转正后的真实宽高）
+    # 逐图可用性校验 + 尺寸读取（EXIF 方向转正后的真实宽高）；混装时顺手
+    # 做彩色/黑白识别（复用已打开的图，毫秒级；先取 size 再缩略，互不影响）
     from PIL import Image, ImageOps
 
     sizes: list[tuple[int, int]] = []
+    lanes: list[str] = []
     for p in paths:
         try:
             with Image.open(str(p)) as im:
                 im = ImageOps.exif_transpose(im)
                 sizes.append(im.size)
+                if color_spec is not None:
+                    lanes.append("color" if _page_is_color(im) else "bw")
         except OSError as e:
             raise HTTPException(400, f"无法读取图片 {p.name}: {e}") from e
     src_w, src_h = sizes[0]
@@ -288,7 +335,10 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
             _reject_output_conflict(str(body.output), used, body.overwrite)
             out = str(body.output)
             used.add(os.path.normcase(out))
-        images_meta.append({"in": str(p), "out": out})
+        meta = {"in": str(p), "out": out}
+        if color_spec is not None and lanes[idx] == "color":
+            meta["lane"] = "color"  # 彩页走彩色模型；黑白页不写字段（缺省）
+        images_meta.append(meta)
     pdf_out = None
     if merge_pdf:
         # PDF 沿用首图名系（首图撞名拿了 _倍率 后缀时 PDF 跟随），与逐图
@@ -302,12 +352,14 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         raise HTTPException(400, f"无法创建输出目录 {out_root}: {e}") from e
 
     params = {
-        "kind": "image", "format": fmt,
+        "kind": kind, "format": fmt,
         "scale": scale, "target_scale": target,
         "tile": tile, "images": images_meta,
     }
     if folder_src:
         params["folder_src"] = folder_src  # 任务卡/续跑侧识别文件夹模式
+    if color_spec is not None:
+        params["model_id_color"] = model_id_color  # 混装：彩页模型（worker 双引擎分派）
     if fmt == "jpg":
         q = int(params_in.get("jpg_quality", 92))
         params["jpg_quality"] = min(100, max(60, q))
