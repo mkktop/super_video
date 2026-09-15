@@ -68,6 +68,10 @@ jobs:
           npx vue-tsc --noEmit -p tsconfig.node.json
           npx vue-tsc --noEmit -p tsconfig.web.json
 
+      - name: 前端单测
+        working-directory: app
+        run: pnpm test
+
       - name: 构建
         working-directory: app
         run: pnpm build

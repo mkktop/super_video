@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
+import { viewportSplitToFrac } from './compareSliderMath'
 
 const props = withDefaults(
   defineProps<{ srcUrl: string; outUrl: string; labelLeft?: string; labelRight?: string }>(),
@@ -186,13 +187,14 @@ const loupeMap = computed(() => {
   return { scale: zoom.value, offX: pan.value.x, offY: pan.value.y, w: n.w, h: n.h, rect: r }
 })
 
-const loupeSplit = computed(() => {
+/** 分割线在图片本地坐标的比例：竖线画在视口空间（left: pos%），而 clip-path
+ *  百分比按图片自身盒解析、随 transform 一起映射——两套参考系不能直接混用，
+ *  否则 1:1/适配下中点对齐、越往两边滑偏差越大（∝|pos−50%|·|视口宽−图显宽|）。
+ *  主视图裁剪与放大镜共用这一个换算。 */
+const splitFrac = computed(() => {
   const f = loupeMap.value
   if (!f) return 0.5
-  const dispW = f.w * f.scale
-  if (dispW <= 0) return 0.5
-  const frac = ((pos.value / 100) * f.rect.width - f.offX) / dispW
-  return Math.min(1, Math.max(0, frac))
+  return viewportSplitToFrac(pos.value, f.rect.width, f.offX, f.w * f.scale)
 })
 
 function onMove(e: MouseEvent) {
@@ -275,7 +277,7 @@ function loupeTransform() {
       class="img top"
       :src="props.srcUrl"
       draggable="false"
-      :style="[layerStyle, { clipPath: `inset(0 ${100 - pos}% 0 0)` }]"
+      :style="[layerStyle, { clipPath: `inset(0 ${(1 - splitFrac) * 100}% 0 0)` }]"
     />
     <div class="handle" :style="{ left: pos + '%' }" @pointerdown="onHandleDown">
       <div class="line" />
@@ -301,9 +303,9 @@ function loupeTransform() {
         class="loupe-img top"
         :src="props.srcUrl"
         draggable="false"
-        :style="{ transform: loupeTransform(), clipPath: `inset(0 ${(1 - loupeSplit) * 100}% 0 0)` }"
+        :style="{ transform: loupeTransform(), clipPath: `inset(0 ${(1 - splitFrac) * 100}% 0 0)` }"
       />
-      <div class="loupe-split" :style="{ left: `${loupeSplit * 100}%` }" />
+      <div class="loupe-split" :style="{ left: `${splitFrac * 100}%` }" />
       <span class="loupe-zoom">{{ loupeZoom.toFixed(1).replace(/\.0$/, '') }}×</span>
     </div>
   </div>
@@ -323,7 +325,8 @@ function loupeTransform() {
 }
 .compare.louping { cursor: crosshair; }
 .compare.grabbing { cursor: grabbing; }
-/* 两层图同尺寸同变换（成片原生像素 × zoom），分割线在视口空间裁剪 */
+/* 两层图同尺寸同变换（成片原生像素 × zoom）；竖线在视口空间定位，
+ * 裁剪按 splitFrac 换算到图片本地比例后施加（clip-path 参考系是图片盒） */
 .img {
   position: absolute;
   left: 0;

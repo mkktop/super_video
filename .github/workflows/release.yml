@@ -73,7 +73,8 @@ jobs:
         working-directory: app
         run: |
           pnpm install --frozen-lockfile
-          npx vue-tsc --noEmit -p tsconfig.json
+          npx vue-tsc --noEmit -p tsconfig.node.json
+          npx vue-tsc --noEmit -p tsconfig.web.json
           pnpm build
 
       - name: 打安装包（不发布，资产由 softprops 统一上传）
