@@ -1,6 +1,7 @@
 """Worker 图片作业：单张/批量超分，一次模型加载逐图处理。"""
 from __future__ import annotations
 
+import gc
 import os
 import time
 from pathlib import Path
@@ -10,7 +11,7 @@ from sv.models.registry import model_file
 from sv.paths import TEMP_DIR
 from sv.server import settings
 from sv.server.worker_common import _prof_enabled, _prof_write, emit, emit_failed
-from sv.server.worker_engine import _load_onnx_engine
+from sv.server.worker_engine import _load_onnx_engine, _release_slot
 
 
 def _batch_heights(images: list[dict]) -> list[int]:
@@ -46,6 +47,13 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     任务豁免），错误信息说明这一层。
     不走分段/checkpoint（单帧无意义）；取消靠 runner 杀进程兜底，已完成
     的输出文件保留（runner._cleanup_partial 对图片任务豁免）。
+
+    混装双模型执行模式（params.mix_pass，仅 model_id_color 存在时有意义）：
+    coexist=缺省并存——两引擎同时驻留，分派只换对象（无会话重建风险）；
+    split=分趟省显存——先按原页序跑完黑白趟，释放主引擎后再建彩模跑
+    彩色趟，显存峰值≈单个模型。代价：趟间销毁重建引擎（几秒 + DML 下
+    析构偶发不稳，自愈降链兜底）、进度按「先黑白后彩色」推进。两种模式
+    下输出与 PDF 均按原页序封装。
     """
     import numpy as np
     from PIL import Image, ImageOps
@@ -185,11 +193,14 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         emit({"type": "failed", "error": f"模型文件不可用: {e}"})
         return 1
 
+    split = color_spec is not None and str(params.get("mix_pass") or "") == "split"
     if color_spec is not None:
         n_color = sum(1 for m in images if m.get("lane") == "color")
         emit({"type": "log", "line":
               f"混装分派：识别出彩色 {n_color} 页 / 黑白 {n - n_color} 页，"
-              f"分别走 {color_spec.id} / {spec.id}（未出现的车道不加载引擎）"})
+              f"分别走 {color_spec.id} / {spec.id}（未出现的车道不加载引擎）"
+              + ("；分趟模式：先黑白后彩色，显存峰值≈单个模型" if split else
+                 "；两引擎同时驻留，显存约为两者之和")})
 
     emit({
         "type": "started", "total_frames": n,
@@ -202,8 +213,9 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     load_s_total = 0.0
     used_prec = "fp16-autocast"
 
-    # ---- 引擎加载（车道懒加载：首张该车道图片时构建并驻留；双引擎并存而非
-    # 切换——session 销毁重建在 DML 下有崩溃前科，并存只是各占一份显存）----
+    # ---- 引擎加载（车道懒加载：首张该车道图片时构建；缺省并存——双引擎同时
+    # 驻留、分派只换对象调用，避开 session 销毁重建在 DML 下的崩溃前科；分趟
+    # 模式 split 改为黑白趟末释放主引擎再建彩模，显存峰值≈单个模型）----
     def _build_engine(spec_, variant_, warm_hw, slot: str):
         if spec_.engine == "torch":
             from sv.engines.torch_engine import TorchSrEngine
@@ -221,6 +233,8 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
 
     engines: dict[str, object] = {}
     precisions: dict[str, str] = {}
+    # provider 在构建时记下（分趟趟末引擎已释放，剖析仍要能列出两车道后端）
+    lane_providers: dict[str, str] = {}
 
     def _engine_for(lane: str):
         eng = engines.get(lane)
@@ -236,34 +250,24 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         load_s_total += time.perf_counter() - _tl
         engines[lane] = built
         precisions[lane] = prec
+        lane_providers[lane] = ("/".join(built.provider_used)
+                                if hasattr(built, "provider_used") else "torch")
         return built
 
-    try:
-        # 各车道按需预建：纯黑白本不建彩模引擎、全彩本不建主引擎（省显存）；
-        # 构建失败=该车道全灭，走主失败路径显式报错，好过循环里逐页重试跳过
-        if color_spec is None or any(m.get("lane") != "color" for m in images):
-            _engine_for("bw")
-        if color_spec is not None and any(m.get("lane") == "color" for m in images):
-            _engine_for("color")
-    except Exception as e:  # noqa: BLE001 — worker 兜底，任何异常都要上报
-        emit_failed("引擎加载失败", e)
-        return 1
-    used_prec = precisions.get("bw", used_prec)
-    load_s = load_s_total
-
     ok = 0
+    done_count = 0
     out_bytes_total = 0
     failed_names: list[str] = []
-    written: list[Path] = []  # 本轮成功落盘的输出（PDF 按此清单与顺序封装）
+    written_idx: dict[int, Path] = {}  # 页序 k → 落盘输出（PDF 按原页序封装）
     t_dec = t_inf = t_sav = 0.0  # 剖析口径：解码 / 推理 / 编码落盘 合计
     first_pair: tuple[np.ndarray, np.ndarray] | None = None
+    first_pair_k = 1 << 60  # 预览取原页序最前的成功页（分趟下处理序≠页序）
 
-    for k, meta in enumerate(images):
+    def _process_page(k: int, meta: dict, engine) -> None:
+        nonlocal ok, done_count, out_bytes_total, t_dec, t_inf, t_sav
+        nonlocal first_pair, first_pair_k
         src_p = Path(meta["in"])
         name = src_p.name
-        # 混装分派：彩页走彩模引擎、其余走主引擎（车道引擎已预建，这里只取用）
-        engine = _engine_for(
-            "color" if color_spec is not None and meta.get("lane") == "color" else "bw")
         _t = time.perf_counter()
         try:
             with Image.open(str(src_p)) as im:
@@ -303,15 +307,57 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                 else:
                     t_sav += time.perf_counter() - _t
                     ok += 1
-                    written.append(dst)
+                    written_idx[k] = dst
                     out_bytes_total += dst.stat().st_size
-                    if first_pair is None:
+                    if k < first_pair_k:
+                        first_pair_k = k
                         first_pair = (frame, out)
-        done_now = k + 1  # 进度按处理位数计（含失败），保证走满 total
+        done_count += 1  # 进度按处理位数计（含失败），保证走满 total
         el = time.perf_counter() - t0
-        emit({"type": "progress", "frames": done_now, "total": n,
-              "fps": round(done_now / el, 2) if el > 0 else 0,
-              "eta_sec": int((n - done_now) * el / done_now) if done_now else 0})
+        emit({"type": "progress", "frames": done_count, "total": n,
+              "fps": round(done_count / el, 2) if el > 0 else 0,
+              "eta_sec": int((n - done_count) * el / done_count) if done_count else 0})
+
+    def _run_lane(lane: str, order: list[int]) -> None:
+        for k in order:
+            _process_page(k, images[k], _engine_for(lane))
+
+    try:
+        if split:
+            # 分趟：先黑白趟（原页序）→ 释放主引擎 → 彩色趟。释放必须发生在
+            # 彩模构建之前（先放再建——建新再析构旧有崩溃前科）；纯黑白/全彩
+            # 本只跑存在的趟，不空建引擎
+            bw_order = [k for k, m in enumerate(images) if m.get("lane") != "color"]
+            color_order = [k for k, m in enumerate(images) if m.get("lane") == "color"]
+            if bw_order:
+                _run_lane("bw", bw_order)
+                if color_order:
+                    engines.pop("bw", None)  # 丢引用+清槽位+gc，session 析构才归还显存
+                    _release_slot("main")
+                    gc.collect()
+                    emit({"type": "log", "line":
+                          f"黑白趟完成（{len(bw_order)} 页），已释放黑白引擎显存，"
+                          f"开始彩色趟（{len(color_order)} 页，重建引擎需几秒）"})
+            _run_lane("color", color_order)
+        else:
+            # 并存：各车道按需预建（纯黑白本不建彩模、全彩本不建主引擎）；
+            # 构建失败=该车道全灭，走主失败路径显式报错，好过循环里逐页重试跳过
+            if color_spec is None or any(m.get("lane") != "color" for m in images):
+                _engine_for("bw")
+            if color_spec is not None and any(m.get("lane") == "color" for m in images):
+                _engine_for("color")
+            for k, meta in enumerate(images):
+                _process_page(k, meta, _engine_for(
+                    "color" if color_spec is not None and meta.get("lane") == "color"
+                    else "bw"))
+    except Exception as e:  # noqa: BLE001 — worker 兜底，任何异常都要上报
+        stage = ("彩色趟引擎重建失败（黑白页产物已保留在输出目录）"
+                 if split and done_count else "引擎加载失败")
+        emit_failed(stage, e)
+        return 1
+    used_prec = precisions.get("bw", used_prec)
+    load_s = load_s_total
+    written = [written_idx[k] for k in sorted(written_idx)]
 
     if ok == 0:
         err = f"全部 {n} 张图片处理失败" + (f"（如 {failed_names[0]}）" if failed_names else "")
@@ -323,7 +369,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
               f"{len(failed_names)} 张失败/跳过: {', '.join(failed_names[:10])}"
               + ("…" if len(failed_names) > 10 else "")})
 
-    # ---- 合并输出 PDF（merge_pdf）：成功页按处理顺序无损封装 ----
+    # ---- 合并输出 PDF（merge_pdf）：成功页按原页序无损封装（分趟下处理序≠页序） ----
     pdf_pages = 0
     if params.get("merge_pdf") and written:
         if not params.get("pdf_out"):
@@ -351,17 +397,14 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     if _prof_enabled():
         el = time.perf_counter() - t0
 
-        def _prov(e) -> str:
-            return "/".join(e.provider_used) if hasattr(e, "provider_used") else "torch"
-
         if color_spec is not None:
             model_line = (f"模型 {spec.id}(黑白{sum(1 for m in images if m.get('lane') != 'color')})"
                           f" + {color_spec.id}(彩色{sum(1 for m in images if m.get('lane') == 'color')})")
-            backend_line = " · ".join(f"{ln}:{_prov(e)}" for ln, e in engines.items())
+            backend_line = " · ".join(f"{ln}:{p}" for ln, p in lane_providers.items())
             prec_line = " · ".join(f"{ln}:{p}" for ln, p in precisions.items())
         else:
             model_line = f"模型 {spec.id}"
-            backend_line = _prov(engines.get("bw")) if engines.get("bw") else "torch"
+            backend_line = lane_providers.get("bw", "torch")
             prec_line = used_prec
         _prof_write(task["id"], "\n".join([
             f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} 图片超分任务 ====",

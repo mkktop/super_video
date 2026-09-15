@@ -196,7 +196,8 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     同管线；worker/runner 按 _IMAGE_TASK_KINDS 识别。
     混装双模型（params.model_id_color）：黑白页走主模型、彩页走彩色模型，
     创建期逐页识别色彩把 lane 写进 images_meta（彩页 "color"，缺省黑白），
-    结果随任务持久化——续跑/重试不重算。
+    结果随任务持久化——续跑/重试不重算。params.mix_pass="split" 时分趟
+    执行（先黑白趟末释放引擎再建彩模，显存峰值≈单个模型），缺省并存。
     """
     from ..consts import _IMAGE_EXTS, _IMAGE_TASK_KINDS
 
@@ -262,6 +263,11 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
             raise HTTPException(
                 400, f"彩色页模型 {color_spec.id} 不支持 x{scale}，"
                      f"可选 {color_spec.scale}（两模型需共同支持同一倍率）")
+    # 混装执行模式：coexist=双引擎并存（缺省）；split=分趟省显存（先黑白趟
+    # 末释放主引擎再建彩模）。非法值直接 400；仅混装任务持久化
+    mix_pass = str(params_in.get("mix_pass") or "coexist")
+    if mix_pass not in ("coexist", "split"):
+        raise HTTPException(400, f"mix_pass 仅支持 coexist/split，当前 {mix_pass}")
     # 自定义目标分辨率：仅单张开放（批量需逐图校验边界，暂不支持）
     tw, th = params_in.get("target_w"), params_in.get("target_h")
     if tw is not None or th is not None:
@@ -360,6 +366,8 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         params["folder_src"] = folder_src  # 任务卡/续跑侧识别文件夹模式
     if color_spec is not None:
         params["model_id_color"] = model_id_color  # 混装：彩页模型（worker 双引擎分派）
+        if color_spec is not None and mix_pass == "split":
+            params["mix_pass"] = mix_pass  # 分趟：趟间释放引擎，显存峰值≈单个模型
     if fmt == "jpg":
         q = int(params_in.get("jpg_quality", 92))
         params["jpg_quality"] = min(100, max(60, q))

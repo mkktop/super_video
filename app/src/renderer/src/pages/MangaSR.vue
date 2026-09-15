@@ -76,6 +76,7 @@ async function consumeRetryParams() {
       colorModelId.value = colorId
     }
   }
+  mixSplit.value = p.mix_pass === 'split'
   if (p.format === 'jpg') {
     format.value = 'jpg'
     if (typeof p.jpg_quality === 'number') jpgQuality.value = p.jpg_quality
@@ -122,6 +123,7 @@ const selectedModel = computed(() => store.models.find((m) => m.id === modelId.v
 // ---- 混装双模型：黑白页走主模型、彩页走彩色模型（后端逐页识别分派） ----
 const mixMode = ref(false)
 const colorModelId = ref('')
+const mixSplit = ref(false) // 分趟：先黑白趟末释放引擎再建彩模（显存峰值≈单个模型）
 const colorSelected = computed(() => store.models.find((m) => m.id === colorModelId.value))
 // 倍率须两模型同时支持：混装时取交集（交集空=不可提交）
 const commonScales = computed(() => {
@@ -286,13 +288,16 @@ async function submit() {
       ...(tileChoice.value ? { tile: tileChoice.value } : {}),
       ...(wantPdf ? { merge_pdf: true } : {}),
       ...(isFolder ? { folder_src: folder.value!.folder } : {}),
-      ...(mixMode.value && colorModelId.value ? { model_id_color: colorModelId.value } : {}),
+      ...(mixMode.value && colorModelId.value
+        ? { model_id_color: colorModelId.value, ...(mixSplit.value ? { mix_pass: 'split' } : {}) }
+        : {}),
     },
   })
   submitting.value = false
   if (r.ok) {
     const mixNote = mixMode.value && colorSelected.value
       ? `，彩色页走 ${colorSelected.value.name}、黑白页走 ${selectedModel.value?.name ?? ''}`
+        + (mixSplit.value ? '，分趟处理（显存峰值≈单个模型）' : '')
       : ''
     message.success(
       isFolder
@@ -398,7 +403,7 @@ export default { name: 'MangaSR' }
         <span class="sec-num">2</span>模型与输出
         <span class="sel-chip" :class="{ on: !!selectedModel }">
           <template v-if="mixMode && selectedModel && colorSelected">
-            {{ selectedModel.name }}（黑白）＋ {{ colorSelected.name }}（彩色） · x{{ targetScale }}
+            {{ selectedModel.name }}（黑白）＋ {{ colorSelected.name }}（彩色） · x{{ targetScale }}{{ mixSplit ? ' · 分趟' : '' }}
           </template>
           <template v-else>
             {{ selectedModel ? `已选 ${selectedModel.name} · x${targetScale}` : '点击卡片选择' }}
@@ -414,7 +419,7 @@ export default { name: 'MangaSR' }
         </NCheckbox>
         <span class="mix-hint">
           整本里既有彩页又有黑白页时开启：创建时逐页识别，彩页走彩色模型、黑白页走主模型；
-          两个模型会同时驻留显存（约为两者之和）
+          两个模型会{{ mixSplit ? '分趟加载（先黑白后彩色，显存峰值≈单个模型）' : '同时驻留显存（约为两者之和）' }}
         </span>
       </div>
       <div v-if="mixMode && commonScales && commonScales.length === 0" class="mix-warn">
@@ -428,6 +433,15 @@ export default { name: 'MangaSR' }
         <MangaModelGrid :models="srModels" :selected="modelId" @select="selectModel" />
         <div class="lane-label">彩色页模型</div>
         <MangaModelGrid :models="srModels" :selected="colorModelId" @select="selectColorModel" />
+        <div class="mix-row">
+          <NCheckbox v-model:checked="mixSplit" size="small">
+            分趟处理（省显存）
+          </NCheckbox>
+          <span class="mix-hint">
+            先跑完全部黑白页、释放引擎后再加载彩色模型，显存峰值≈单个模型；代价是趟间
+            重建引擎（几秒）、进度按「先黑白后彩色」推进；输出与 PDF 页序不受影响
+          </span>
+        </div>
       </template>
       <MangaModelGrid v-else :models="srModels" :selected="modelId" @select="selectModel" />
       <div class="form-rows">

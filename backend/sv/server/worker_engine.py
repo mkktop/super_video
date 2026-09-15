@@ -48,6 +48,18 @@ def _release_aux_slots() -> None:
         _ENGINE_CACHE.pop(k, None)
 
 
+def _release_slot(slot: str) -> None:
+    """释放单个槽位的常驻引擎（漫画混装「分趟模式」趟间切换用）。
+
+    只清缓存簿记；调用方还需丢掉自己持有的引擎引用并 gc，ORT session
+    真正析构后才归还显存。析构发生在下一趟引擎构建之前（先放再建）——
+    DML 下「建新的再析构旧的」有原生崩溃前科，顺序不能反。
+    """
+    _ENGINE_CACHE.pop(slot, None)
+    for k in [k for k in _ENGINE_CACHE if k != "main"]:
+        _ENGINE_CACHE.pop(k, None)
+
+
 class _EngineGarbage(Exception):
     """引擎输出数值损坏（彩色探针均值/标准差异常）：会话能建、run 不抛，但输出
     黑图或色彩塌缩（TRT fp16×transformer / DML 大图全图两案实锤）。"""
