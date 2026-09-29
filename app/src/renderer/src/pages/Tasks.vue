@@ -310,8 +310,16 @@ function moveTask(id: string, dir: -1 | 1) {
 }
 
 // 失败/取消任务「改参数重试」：按任务类型带回原参数跳对应页
-// （视频→新建任务向导；图片→图片超分；漫画/旧文件夹漫画任务→漫画超分）
-function retryWithParams(t: Task) {
+// （视频→新建任务向导；图片→图片超分；漫画/旧文件夹漫画任务→漫画超分）。
+// 图片系任务先拉单任务详情——列表响应会裁掉超大图片清单，回填要完整版
+async function retryWithParams(t: Task) {
+  if ((t.params?.kind ?? '') === 'image' || (t.params?.kind ?? '') === 'manga') {
+    try {
+      t = await api.task(t.id)
+    } catch {
+      /* 详情拉不到（任务刚被删等）：用列表数据兜底，能填多少填多少 */
+    }
+  }
   ui.pendingTaskParams = t
   const p = t.params ?? {}
   if (p.kind === 'manga' || (p.kind === 'image' && p.folder_src)) {

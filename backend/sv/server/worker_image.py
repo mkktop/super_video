@@ -18,11 +18,15 @@ def _batch_heights(images: list[dict]) -> list[int]:
     """批量图片的展示高度（EXIF 方向转正后）：只读头部，不解码像素。
 
     读不出的图返回时略过——坏图由主循环按张跳过并记日志，这里不重复报错。
+    超大清单（十万页量级）均匀抽样：本函数只服务「高度不一」的提示日志，
+    抽样足以发现混装高度，全量读十万个头部纯属浪费。
     """
     from PIL import Image
 
+    step = max(1, len(images) // 2000)
+    metas = images if step == 1 else images[::step]
     out: list[int] = []
-    for meta in images:
+    for meta in metas:
         try:
             with Image.open(str(meta["in"])) as im:
                 w, h = im.size
@@ -45,8 +49,13 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     merge_pdf：全部图片落盘后把成功页无损封装成一份 PDF（PNG→Flate 逐像素
     一致，JPG→原样直嵌）；合并失败任务判失败——图片产物保留（清理链对图片
     任务豁免），错误信息说明这一层。
-    不走分段/checkpoint（单帧无意义）；取消靠 runner 杀进程兜底，已完成
-    的输出文件保留（runner._cleanup_partial 对图片任务豁免）。
+
+    断点续跑（暂停/取消/失败后点继续）：逐页产物即 checkpoint——原子落盘
+    保证磁盘上已有的输出文件就是完整页，重跑时按「产物 mtime ≥ 任务创建
+    时间」判定跳过。mtime 门槛用于区分两种同名产物：本任务中断前写出的
+    （跳过，续跑）与上一轮跑完留下的旧产物（重跑同文件夹刻意沿用同名输出
+    逐页覆盖，不能跳）。取消靠 runner 杀进程兜底，已完成的输出文件保留
+    （runner._cleanup_partial 对图片任务豁免）。
 
     混装双模型执行模式（params.mix_pass，仅 model_id_color 存在时有意义）：
     coexist=缺省并存——两引擎同时驻留，分派只换对象（无会话重建风险）；
@@ -257,11 +266,24 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     ok = 0
     done_count = 0
     out_bytes_total = 0
+    skipped = 0  # 断点续跑沿用已有产物的页数（计入 ok，不重复推理）
     failed_names: list[str] = []
     written_idx: dict[int, Path] = {}  # 页序 k → 落盘输出（PDF 按原页序封装）
     t_dec = t_inf = t_sav = 0.0  # 剖析口径：解码 / 推理 / 编码落盘 合计
     first_pair: tuple[np.ndarray, np.ndarray] | None = None
     first_pair_k = 1 << 60  # 预览取原页序最前的成功页（分趟下处理序≠页序）
+
+    # 断点判定：产物在「本任务创建之后」落盘且非空 → 已完成页。-5s 容差兜底
+    # 文件系统时间戳粒度（FAT32 秒级）与时钟微抖；早于创建时间的同名产物属于
+    # 上一轮跑完的旧输出（重跑同文件夹刻意沿用同名、逐页覆盖），必须重做
+    _created = float(task.get("created_at") or 0) - 5.0
+
+    def _page_done(meta: dict) -> bool:
+        try:
+            st = Path(meta["out"]).stat()
+        except OSError:
+            return False
+        return st.st_size > 0 and st.st_mtime >= _created
 
     def _process_page(k: int, meta: dict, engine) -> None:
         nonlocal ok, done_count, out_bytes_total, t_dec, t_inf, t_sav
@@ -318,20 +340,45 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
               "fps": round(done_count / el, 2) if el > 0 else 0,
               "eta_sec": int((n - done_count) * el / done_count) if done_count else 0})
 
+    def _skip_page(k: int, meta: dict) -> None:
+        """断点续跑：沿用已有产物的页，只记账不推理。跳页节奏远快于推理
+        （每秒上万页），进度事件按 1/512 限频——runner 每个事件都落一次
+        DB，全量发会把续跑开头变成十万次 UPDATE。"""
+        nonlocal ok, done_count, out_bytes_total, skipped
+        dst = Path(meta["out"])
+        if skipped == 0:
+            emit({"type": "log", "line":
+                  "检测到本任务此前已完成的页面产物，跳过这些页继续处理"})
+        skipped += 1
+        ok += 1
+        written_idx[k] = dst
+        out_bytes_total += dst.stat().st_size
+        done_count += 1
+        if done_count == n or done_count % 512 == 0:
+            el = time.perf_counter() - t0
+            emit({"type": "progress", "frames": done_count, "total": n,
+                  "fps": round(done_count / el, 2) if el > 0 else 0,
+                  "eta_sec": int((n - done_count) * el / done_count) if done_count else 0})
+
     def _run_lane(lane: str, order: list[int]) -> None:
         for k in order:
+            if _page_done(images[k]):
+                _skip_page(k, images[k])
+                continue
             _process_page(k, images[k], _engine_for(lane))
 
     try:
         if split:
             # 分趟：先黑白趟（原页序）→ 释放主引擎 → 彩色趟。释放必须发生在
             # 彩模构建之前（先放再建——建新再析构旧有崩溃前科）；纯黑白/全彩
-            # 本只跑存在的趟，不空建引擎
+            # 本只跑存在的趟，不空建引擎。黑白页已全部完成（断点续跑）时引擎
+            # 根本没建，也跳过释放
             bw_order = [k for k, m in enumerate(images) if m.get("lane") != "color"]
             color_order = [k for k, m in enumerate(images) if m.get("lane") == "color"]
+            bw_ran = any(not _page_done(images[k]) for k in bw_order)
             if bw_order:
                 _run_lane("bw", bw_order)
-                if color_order:
+                if color_order and bw_ran:
                     engines.pop("bw", None)  # 丢引用+清槽位+gc，session 析构才归还显存
                     _release_slot("main")
                     gc.collect()
@@ -340,13 +387,18 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                           f"开始彩色趟（{len(color_order)} 页，重建引擎需几秒）"})
             _run_lane("color", color_order)
         else:
-            # 并存：各车道按需预建（纯黑白本不建彩模、全彩本不建主引擎）；
-            # 构建失败=该车道全灭，走主失败路径显式报错，好过循环里逐页重试跳过
-            if color_spec is None or any(m.get("lane") != "color" for m in images):
+            # 并存：各车道按需预建（纯黑白本不建彩模、全彩本不建主引擎；车道
+            # 页全部沿用断点产物时也不建——全跳过路径不空建引擎）；构建失败=
+            # 该车道全灭，走主失败路径显式报错，好过循环里逐页重试跳过
+            if any(m.get("lane") != "color" and not _page_done(m) for m in images):
                 _engine_for("bw")
-            if color_spec is not None and any(m.get("lane") == "color" for m in images):
+            if color_spec is not None and any(
+                    m.get("lane") == "color" and not _page_done(m) for m in images):
                 _engine_for("color")
             for k, meta in enumerate(images):
+                if _page_done(meta):
+                    _skip_page(k, meta)
+                    continue
                 _process_page(k, meta, _engine_for(
                     "color" if color_spec is not None and meta.get("lane") == "color"
                     else "bw"))
@@ -368,6 +420,9 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         emit({"type": "log", "line":
               f"{len(failed_names)} 张失败/跳过: {', '.join(failed_names[:10])}"
               + ("…" if len(failed_names) > 10 else "")})
+    if skipped:
+        emit({"type": "log", "line":
+              f"断点续跑：沿用此前已完成的 {skipped} 页产物，本次新处理 {ok - skipped} 页"})
 
     # ---- 合并输出 PDF（merge_pdf）：成功页按原页序无损封装（分趟下处理序≠页序） ----
     pdf_pages = 0
@@ -412,7 +467,8 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
             f" · 精度 {prec_line} · tile={tile} · {n}张 → {fmt.upper()}",
             f"引擎加载 {load_s:.1f}s · 解码合计 {t_dec:.2f}s · 推理合计 {t_inf:.2f}s"
             f" · 编码落盘合计 {t_sav:.2f}s",
-            f"成功 {ok}/{n} 张 · 总用时 {el:.1f}s · 平均 {ok / el if el > 0 else 0:.2f} 张/秒（端到端口径）",
+            f"成功 {ok}/{n} 张（其中断点沿用 {skipped} 张）"
+            f" · 总用时 {el:.1f}s · 平均 {ok / el if el > 0 else 0:.2f} 张/秒（端到端口径）",
             *([f"PDF 合并 {pdf_pages} 页（无损封装）"] if pdf_pages else []),
         ]) + "\n\n")
 
@@ -428,9 +484,23 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         except Exception:  # noqa: BLE001
             pass
 
-    assert first_pair is not None
-    _thumb(first_pair[1], preview_dir / f"{task['id']}.jpg")
-    _thumb(first_pair[0], preview_dir / f"{task['id']}_src.jpg")
+    if first_pair is None and written:
+        # 全部页面沿用断点产物（续跑即收尾）：预览对从磁盘回读最早成功页的
+        # 源图与成品——任务卡/对比入口仍要有图可看
+        try:
+            k0 = min(written_idx)
+            with Image.open(str(images[k0]["in"])) as si:
+                src_arr = np.asarray(
+                    ImageOps.exif_transpose(si).convert("RGB"), dtype=np.uint8)
+            with Image.open(str(written_idx[k0])) as oi:
+                out_arr = np.asarray(oi.convert("RGB"), dtype=np.uint8)
+            first_pair = (src_arr, out_arr)
+        except Exception:  # noqa: BLE001 — 回读失败只损失预览，不影响主流程
+            first_pair = None
+
+    if first_pair is not None:
+        _thumb(first_pair[1], preview_dir / f"{task['id']}.jpg")
+        _thumb(first_pair[0], preview_dir / f"{task['id']}_src.jpg")
 
     emit({
         "type": "done", "frames": ok,

@@ -385,6 +385,11 @@ export const api = {
     const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''
     return _get_json(`${baseUrl}/api/tasks${qs}`)
   },
+  /** 单任务全量详情：列表响应会裁掉超大图片清单（只留首页+页数），改参数
+   * 重试要回填完整清单，走这里补全 */
+  async task(id: string): Promise<Task> {
+    return _get_json(`${baseUrl}/api/tasks/${id}`)
+  },
   async stats(): Promise<Stats> {
     return _get_json(`${baseUrl}/api/stats`)
   },

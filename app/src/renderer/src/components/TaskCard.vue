@@ -43,8 +43,11 @@ const srcGoneTip = '源文件已删除或移动，无法对比'
 
 const fileName = computed(() => {
   const base = props.task.input_path.split(/[\\/]/).pop() ?? ''
-  const imgs = props.task.params?.images as { in: string }[] | undefined
-  return imgs && imgs.length > 1 ? `${base} 等 ${imgs.length} 张图片` : base
+  // 超大图片清单在列表响应里被裁剪（只留首页）：页数优先看 images_count
+  const p = props.task.params ?? {}
+  const imgs = p.images as { in: string }[] | undefined
+  const n = Number(p.images_count ?? imgs?.length ?? 0)
+  return n > 1 ? `${base} 等 ${n} 张图片` : base
 })
 const outName = computed(() => props.task.output_path.split(/[\\/]/).pop() ?? '')
 // 混装双模型：模型名并列显示（彩模存 params，主模型在 task.model_id）

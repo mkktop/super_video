@@ -44,9 +44,9 @@ class FolderScanIn(BaseModel):
     folder: str
 
 
-# 文件夹模式单任务上限：整本漫画也就几百页，3000 已是「一个任务跑得完」的
-# 合理边界——超限创建期明确报数，好过建一个进度条走不完的任务
-_FOLDER_SCAN_CAP = 3000
+# 文件夹模式单任务上限：长篇连载/全集归档可达数万页，10 万是「一个任务跑得
+# 完」的宽松边界——超限创建期明确报数，好过建一个进度条走不完的任务
+_FOLDER_SCAN_CAP = 100_000
 
 
 def _natural_key(s: str) -> list:
@@ -287,17 +287,22 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
     merge_pdf = bool(params_in.get("merge_pdf"))  # 批量合并输出 PDF（无损封装）
 
-    # 逐图可用性校验 + 尺寸读取（EXIF 方向转正后的真实宽高）；混装时顺手
-    # 做彩色/黑白识别（复用已打开的图，毫秒级；先取 size 再缩略，互不影响）
-    from PIL import Image, ImageOps
+    # 逐图可用性校验 + 尺寸读取：尺寸只读图片头部（PIL 懒解码，EXIF 方向
+    # 横竖互换直接换算宽高）——十万页量级全量解码要几十分钟，头部读取几十
+    # 秒；混装时顺手做彩色/黑白识别（复用已打开的图、缩略图走 draft 采样，
+    # 毫秒级；这一步必须解码像素，十万页混装创建会明显偏慢，属识别的固有
+    # 成本）
+    from PIL import Image
 
     sizes: list[tuple[int, int]] = []
     lanes: list[str] = []
     for p in paths:
         try:
             with Image.open(str(p)) as im:
-                im = ImageOps.exif_transpose(im)
-                sizes.append(im.size)
+                w, h = im.size
+                if im.getexif().get(274, 1) in (5, 6, 7, 8):  # 横竖互换方向
+                    w, h = h, w
+                sizes.append((w, h))
                 if color_spec is not None:
                     lanes.append("color" if _page_is_color(im) else "bw")
         except OSError as e:
@@ -552,15 +557,44 @@ def create_task(body: TaskCreate) -> dict:
     return task
 
 
+# 列表响应携带图片清单的长度阈值：十万页任务的 params.images 序列化有几十
+# MB，任务列表 8 秒一轮询会把传输和渲染都拖垮。超过阈值只带首页（对比页
+# 取第一对全分辨率源）+ images_count（任务卡页数）；完整清单 worker/删除源
+# 等后端链路直读 DB 不受影响，「改参数重试」由前端拉单任务详情补全
+_IMAGES_TRIM_AT = 2000
+
+
+def _slim_image_manifest(t: dict) -> None:
+    """超大图片清单不出现在任务列表响应里（就地裁剪 params.images）。"""
+    p = t.get("params")
+    if not isinstance(p, dict):
+        return
+    imgs = p.get("images")
+    if isinstance(imgs, list) and len(imgs) > _IMAGES_TRIM_AT:
+        slim = dict(p)
+        slim["images"] = imgs[:1]
+        slim["images_count"] = len(imgs)
+        t["params"] = slim
+
+
 def _input_exists(t: dict) -> bool:
     """源素材是否仍在本机：对比页视频模式直接播源文件、静帧从源抽取，
-    源被删/移动后入口就该置灰。图片批量任务看 params.images 全部清单。"""
+    源被删/移动后入口就该置灰。图片批量任务看 params.images 全部清单。
+
+    超大清单（十万页）抽样检查：任务列表 8 秒一轮询，全量 stat 一次要数秒、
+    会拖死列表接口。均匀抽样 + 首尾必查——入口置灰只是 UX 门控，极端情况
+    下漏检个别被删页，点进对比页自会兜底报错，不影响正确性。"""
     imgs = t.get("params", {}).get("images")
     if isinstance(imgs, list) and imgs:
-        return all(
-            isinstance(i, dict) and bool(i.get("in")) and Path(i["in"]).exists()
-            for i in imgs
-        )
+        items = [i.get("in") for i in imgs
+                 if isinstance(i, dict) and i.get("in")]
+        if len(items) != len(imgs):
+            return False  # 清单里有畸形条目：按不可用处理（与全量 all() 同判）
+        if len(items) > 512:
+            step = max(1, len(items) // 512)
+            items = items[::step]
+            items.append(imgs[-1].get("in"))
+        return all(Path(i).exists() for i in items if i)
     ip = t.get("input_path") or ""
     return bool(ip) and Path(ip).exists()
 
@@ -591,6 +625,7 @@ def get_tasks(q: str = "") -> list[dict]:
     for t in out:
         t["has_sr_log"] = t["id"] in logs
         t["input_exists"] = _input_exists(t)
+        _slim_image_manifest(t)
     return out
 
 
@@ -740,7 +775,12 @@ async def batch_tasks(body: TaskBatch) -> dict:
 
 @router.post("/api/tasks/{task_id}/resume")
 def resume_task(task_id: str) -> dict:
-    """续跑失败/取消的任务：回到队列，worker 按 checkpoint 跳过已完成部分。"""
+    """续跑失败/取消的任务：回到队列，worker 按 checkpoint 跳过已完成部分。
+
+    视频 checkpoint=分段工作目录；图片系（image/manga）checkpoint=逐页产物
+    （worker 按产物 mtime 只跳过本任务写出的页，重跑旧产物仍会覆盖重做）。"""
+    from ..consts import _IMAGE_TASK_KINDS
+
     t = db.get_task(task_id)
     if t is None:
         raise HTTPException(404)
@@ -752,16 +792,29 @@ def resume_task(task_id: str) -> dict:
         spec = get_model(t["model_id"])
     except ModelNotFoundError:
         raise HTTPException(409, "模型已不存在，无法续跑")
-    # 流式(ONNX)任务续跑依赖分段工作目录；无目录时仅当任务从未开始（无进度）才允许从头重跑。
-    # torch 任务无目录则从头跑（解码是幂等的）
-    if spec.engine == "onnx" and not (TEMP_DIR / "segmented" / task_id).exists() \
+    # 图片系任务（image/manga）的断点是逐页产物（原子落盘，取消时保留）：
+    # 有任何一页在就按页续跑；一页都不剩且跑过一半 = 产物被清理，明确 409。
+    # 视频任务沿用分段工作目录判定：流式(ONNX)无目录时仅当任务从未开始（无
+    # 进度）才允许从头重跑；torch 无目录则从头跑（解码是幂等的）
+    params = t.get("params") or {}
+    is_image = params.get("kind") in _IMAGE_TASK_KINDS
+    if is_image:
+        imgs = params.get("images") or []
+        if (t["progress_frames"] or 0) > 0 and not any(
+                isinstance(m, dict) and m.get("out") and Path(m["out"]).exists()
+                for m in imgs):
+            raise HTTPException(
+                409, "续跑数据已不存在（输出产物已被清理），请新建任务")
+    elif spec.engine == "onnx" and not (TEMP_DIR / "segmented" / task_id).exists() \
             and (t["progress_frames"] or 0) > 0:
         raise HTTPException(409, "续跑数据已不存在（临时目录被清理），请新建任务")
-    # 半成品输出已在失败/取消时删除；万一残留，续跑前清掉避免混淆
-    try:
-        Path(t["output_path"]).unlink(missing_ok=True)
-    except OSError:
-        pass
+    # 半成品输出清理（视频）：失败/取消时已删过，此处兜底。图片系任务的
+    # 逐页产物就是断点依据，绝不能在这里删
+    if not is_image:
+        try:
+            Path(t["output_path"]).unlink(missing_ok=True)
+        except OSError:
+            pass
     db.update_task(task_id, status="queued", error=None, progress_frames=0)
     runner.notify_queue_activity_threadsafe()  # 续跑也是队列活动：撤掉完成动作倒计时
     bus.publish({"type": "task_status", "task_id": task_id, "status": "queued"})
