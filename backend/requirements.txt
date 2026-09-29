@@ -2,7 +2,7 @@
 # （CI 绿、Release 坏的事故面：PyPI 上游大版本兼容性断裂）。
 # 升级时先在本地全量跑 backend/tests 再提界。
 numpy>=2.5,<3
-onnx>=1.22,<2
+onnx>=1.22,<1.23  # 1.23 起 make_model 默认 IR 14，ORT 1.24 上限 13 拒载（2026-09-29 CI 11 连挂实证），待 ORT 升级再放开
 onnxconverter-common>=1.16,<2
 onnxruntime-directml>=1.24.4,<2
 pillow>=12.3,<13
