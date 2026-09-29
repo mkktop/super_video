@@ -114,7 +114,7 @@ async function ensureTray(): Promise<void> {
     return
   }
   tray = new Tray(img)
-  tray.setToolTip('super_video')
+  tray.setToolTip('雨帧')
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => showMainWindow() },
@@ -432,7 +432,7 @@ function createWindow() {
     frame: false, // 自绘标题栏
     backgroundColor: '#141517',
     show: false,
-    title: 'super_video',
+    title: '雨帧',
     // dev 下显示应用图标（打包后窗口自动用 exe 图标；build/ 不进 asar，故判存在）
     icon: fs.existsSync(path.join(__dirname, '../../build/icon.ico'))
       ? path.join(__dirname, '../../build/icon.ico')
@@ -500,23 +500,17 @@ let downloadBusy = false
 let readyVersion = ''
 // 当前下载/最近一次下载所用的源（进度事件携带，UI 显示"从哪下载"）
 let downloadSource: 'github' | 'r2' = 'github'
-// 更新通道：renderer 读取设置后经 IPC 同步（照 close_to_tray 模式）。默认稳定——
-// 存量用户与未同步前（启动自动检查竞态）都只看正式版 Release，宁保守不尝鲜
-let updateChannel: 'stable' | 'preview' = 'stable'
 // 更新下载源偏好：auto=GitHub 主源、网络不通才切 R2（旧行为）；github=仅 GitHub
 // 不使用备用源（代理用户可能 R2 域不通）；r2=R2 优先、失败回落 GitHub（国内直连快）
 let updateSource: 'auto' | 'github' | 'r2' = 'auto'
 
-// ---- 备用下载源（R2 镜像，v0.5 起）----
+// ---- 备用下载源（R2 镜像）----
 // 动机：国内网络对 GitHub 连通性时好时坏（本机裸连实测 GitHub Release 0/2、
 // R2 自定义域 5/5 全成）。默认 GitHub 连不上时自动切 R2 兜底；GitHub 仍是事实源
-// （通道判定/更新说明/预发布语义都在 Release 上），网络恢复即自动回主源。
-// 源优先级自 v0.4.8 起可选（update_source）。R2 布局：安装包按原名平铺，
-// 通道文件按通道分名——正式版 latest.yml、预览版 preview.yml（同名内容不同版，
-// GenericProvider 按 updater.channel 取 {channel}.yml 且 404 不回退，所以预览
-// 客户端设 channel 与 CI 同步 preview.yml 必须同版上线；旧版预览客户端不设
-// channel 读 latest.yml 只收正式版，属设计内降级）。
-const R2_UPDATE_URL = 'https://super-video.kaikun.top/'
+// （通道判定/更新说明都在 Release 上），网络恢复即自动回主源。
+// 源优先级可选（update_source）。R2 布局：安装包按原名平铺，通道文件只有
+// latest.yml（同名逐版覆盖）。桶 yuzhen / 域 yuzhen-media.yeyushi.com。
+const R2_UPDATE_URL = 'https://yuzhen-media.yeyushi.com/'
 const GITHUB_FEED = { provider: 'github', owner: 'mkktop', repo: 'super_video' } as const
 // 最近一次成功检查所用的源：下载从该源发起，失败再切另一源重试
 let checkSource: 'github' | 'r2' = 'github'
@@ -533,8 +527,8 @@ function isNetworkError(e: unknown): boolean {
   return /fetch failed|socket|timed[-_ ]?out|tunnel|network|getaddrinfo|abort|net::err_/i.test(msg)
 }
 
-/** R2 上没有该通道的 channel 文件（preview.yml 未随版同步/上传被跳过）：HTTP 404
- * 语义。newError 包装后原始 statusCode 不一定保留，code 与文案都探一遍 */
+/** R2 上没有通道文件（latest.yml 未随版上传/R2 步骤被跳过）：HTTP 404 语义。
+ * newError 包装后原始 statusCode 不一定保留，code 与文案都探一遍 */
 function isChannelFileMissing(e: unknown): boolean {
   const err = e as { statusCode?: number; message?: string }
   return (
@@ -713,10 +707,10 @@ async function checkUpdateManually(allowMirror: boolean): Promise<{
       src = order[i]
       outcome = await checkAtSource(src)
     }
-    // R2 上没有该通道文件（preview.yml 未随版同步）时回落 GitHub，
+    // R2 上没有通道文件（latest.yml 未随版上传）时回落 GitHub，
     // 别把"备用源没这份"报成"检查失败"
     if (outcome.err && src === 'r2' && isChannelFileMissing(outcome.err)) {
-      console.warn('[updater] R2 缺该通道的更新文件，回落 GitHub:', outcome.err)
+      console.warn('[updater] R2 缺更新文件，回落 GitHub:', outcome.err)
       src = 'github'
       outcome = await checkAtSource(src)
     }
@@ -749,13 +743,11 @@ async function checkAtSource(
 ): Promise<{ result: import('electron-updater').UpdateCheckResult | null; err?: unknown }> {
   const autoUpdater = getAutoUpdater()
   useUpdateSource(autoUpdater, src)
-  // 稳定通道必须显式 false：electron-updater 的默认值是"装机版本带预发布段即
-  // true"，预览版装机切回稳定通道时若不覆盖仍会收到预览推送
-  autoUpdater.allowPrerelease = updateChannel === 'preview'
-  // 通道文件选择：GitHub provider 按 Release 的 prerelease 段本就取 preview.yml，
-  // 但 R2(GenericProvider) 固定读 {channel}.yml——预览通道必须显式置 channel 才
-  // 能吃到 R2 的 preview.yml。channel setter 会顺手打开 allowDowngrade，关回去防降级
-  autoUpdater.channel = updateChannel === 'preview' ? 'preview' : 'latest'
+  // 预发布一律排除：electron-updater 的默认值是"装机版本带预发布段即 true"
+  autoUpdater.allowPrerelease = false
+  // R2(GenericProvider) 固定读 {channel}.yml，显式置 latest 防默认漂移；
+  // channel setter 会顺手打开 allowDowngrade，关回去防降级
+  autoUpdater.channel = 'latest'
   autoUpdater.allowDowngrade = false
   try {
     return { result: await autoUpdater.checkForUpdates() }
@@ -861,12 +853,7 @@ ipcMain.handle('app:update-state', () => ({
   source: downloadSource,
 }))
 
-// 更新通道同步：Settings 切换与 store 启动加载都会发；下次检查更新即生效
-ipcMain.on('app:set-update-channel', (_e, v: unknown) => {
-  updateChannel = v === 'preview' ? 'preview' : 'stable'
-})
-
-// 更新下载源同步：同上，检查/下载的源顺序按它排
+// 更新下载源同步：Settings 切换与 store 启动加载都会发；下次检查更新即生效
 ipcMain.on('app:set-update-source', (_e, v: unknown) => {
   updateSource = v === 'r2' ? 'r2' : v === 'github' ? 'github' : 'auto'
 })
@@ -985,7 +972,7 @@ ipcMain.handle('dialog:pickModel', async () => {
 
 ipcMain.handle('dialog:saveLog', async (_e, content: string) => {
   const r = await dialog.showSaveDialog({
-    defaultPath: 'super_video_日志.txt',
+    defaultPath: '雨帧_日志.txt',
     filters: [{ name: '文本', extensions: ['txt', 'log'] }],
   })
   if (r.canceled || !r.filePath) return null

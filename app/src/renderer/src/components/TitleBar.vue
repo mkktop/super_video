@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { store, ui } from '../store'
+import { versionParts } from '../utils'
 // 与桌面图标(build/icon.png, B 方案定稿)同源,标题栏保持品牌一致
 import logoUrl from '../assets/logo.png'
 
 const maximized = ref(false)
 const version = ref('')
 let off: (() => void) | null = null
+
+// 版本徽章展示：主版本进药丸，预发布段拆成独立「预览」小签
+const ver = computed(() => versionParts(version.value))
 
 const minimize = () => window.sv.win.minimize()
 const toggleMax = () => window.sv.win.toggleMaximize()
@@ -30,8 +34,9 @@ onUnmounted(() => off?.())
         <!-- 启动微光扫过：软件醒来的仪式感，只播一次 -->
         <span class="mark-sheen" aria-hidden="true" />
       </span>
-      <span class="name">super_video</span>
-      <span class="ver">v{{ version }}</span>
+      <span class="name">雨帧</span>
+      <span class="ver"><span class="ver-dot" aria-hidden="true" />v{{ ver.base }}</span>
+      <span v-if="ver.pre" class="pre">{{ ver.pre }}</span>
       <button
         v-if="hasUpdate"
         class="upd"
@@ -137,17 +142,44 @@ onUnmounted(() => off?.())
   background-clip: text;
   color: transparent;
 }
+/* 版本徽章：品牌渐变微光点 + 渐变发丝描边药丸（border-box 双层背景做 1px 渐变边） */
 .ver {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--sv-text-dim);
-  background: var(--sv-fill-3);
-  border: 1px solid var(--sv-border-mid);
+  color: var(--sv-text);
+  border: 1px solid transparent;
   border-radius: 999px;
-  padding: 1px 9px;
+  padding: 1px 9px 1px 7px;
   margin-left: 2px;
   letter-spacing: 0.2px;
+  line-height: 1.5;
+  background:
+    linear-gradient(var(--sv-fill-3), var(--sv-fill-3)) padding-box,
+    linear-gradient(90deg, rgba(var(--sv-accent-rgb), 0.55), rgba(var(--sv-accent2-rgb), 0.55)) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.ver-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgb(var(--sv-accent-rgb)), rgb(var(--sv-accent2-rgb)));
+  box-shadow: 0 0 6px rgba(var(--sv-accent-rgb), 0.55);
+}
+/* 预发布通道小签：amber 系 token，紧贴版本药丸成对出现 */
+.pre {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.5px;
+  color: var(--sv-warning);
+  background: var(--sv-warning-bg);
+  border: 1px solid rgba(var(--sv-warning-rgb), 0.38);
+  border-radius: 5px;
+  padding: 0.5px 5px;
+  margin-left: -4px;
   line-height: 1.5;
 }
 .upd {

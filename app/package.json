@@ -1,7 +1,7 @@
 {
   "name": "super-video-app",
-  "version": "0.5.5",
-  "description": "super_video 桌面端 —— AI 视频超分",
+  "version": "0.6.0",
+  "description": "雨帧（RainFrame）桌面端 —— AI 视频超分",
   "main": "out/main/index.js",
   "private": true,
   "scripts": {
@@ -14,7 +14,8 @@
   },
   "build": {
     "appId": "com.supervideo.app",
-    "productName": "super_video",
+    "productName": "雨帧",
+    "executableName": "RainFrame",
     "directories": {
       "output": "../dist-app"
     },
@@ -58,7 +59,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "super_video_${version}_setup.exe",
+      "artifactName": "RainFrame_${version}_setup.exe",
       "installerSidebar": "build/installerSidebar.bmp",
       "installerHeader": "build/installerHeader.bmp",
       "license": "build/license_zh.rtf",

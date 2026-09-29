@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN" data-page-node-id="qxyNIHSRZbWwc5aYCmMAyH">
+<head data-page-node-id="r2FiNDgJcTIM6j3lETDGqG">
+<meta charset="utf-8" data-page-node-id="EXnmuB06MBCwQeQgCZheAs">
+<title>雨帧 RainFrame — 播放键创新（第 6 批 · 6 版）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f3f4f6; color: #111827; padding: 32px 40px 64px; }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 26px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 18px 20px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .card h2 { font-size: 15px; margin-bottom: 2px; }
+  .card .desc { font-size: 12px; color: #6b7280; margin-bottom: 14px; line-height: 1.5; }
+  .stage { display: flex; align-items: flex-end; gap: 14px; }
+  .big { width: 128px; height: 128px; flex: none; }
+  .big svg { width: 128px; height: 128px; border-radius: 24px; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+  .sizes { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; }
+  .row.light { background: #e5e7eb; }
+  .row.dark { background: #1f2937; }
+  .row svg { flex: none; }
+  .row .lbl { font-size: 10px; color: #9ca3af; width: 26px; }
+</style>
+</head>
+<body data-page-node-id="TDUDmNERE9IQvthmZZxFEa">
+
+<h1 data-page-node-id="1A0Mcrjx2FyHQOCvxDNigS">播放键创新 — 基于 F3-1「断环衔滴」骨架</h1>
+<p class="sub" data-page-node-id="iWheW3LJKx8xxIBaMgV0GY">环、雨滴、配色全部固定，只替换中央播放键的演绎方式：像素 / 雨丝 / 双影 / 滴心 / 升维箭头 / 雨滴列队。</p>
+
+<svg width="0" height="0" style="position:absolute" data-page-node-id="0Ing9eHwvi3y0XgpnkeVA9">
+  <defs data-page-node-id="PHo1IwFSiBa1wDPvvxoAch">
+    <linearGradient id="bga" x1="0" y1="0" x2="1" y2="1" data-page-node-id="wQfcFGDr5sUM9RsfHJn7PD">
+      <stop offset="0" stop-color="#082f49" data-page-node-id="BAQ9RCFpiHk4NqG3B66wco"/><stop offset="1" stop-color="#164e63" data-page-node-id="24qfeDBtcDmDNR0DC9ci6a"/>
+    </linearGradient>
+    <linearGradient id="drop1" x1="0" y1="0" x2="0" y2="1" data-page-node-id="Nrfydp7KuG8Jx2O4gLBICW">
+      <stop offset="0" stop-color="#e0f2fe" data-page-node-id="0qc52JCkPMPR3H3nz1uK8P"/><stop offset="1" stop-color="#22d3ee" data-page-node-id="AGOHzBs603gO27iOnHPBwJ"/>
+    </linearGradient>
+    <linearGradient id="tri5" x1="0" y1="0" x2="1" y2="0" data-page-node-id="X0ODkCSfzq9X9KoaSy65Fm">
+      <stop offset="0" stop-color="#a5f3fc" data-page-node-id="TaaUW0rjoJ3pMemSxZFyHN"/><stop offset="1" stop-color="#ffffff" data-page-node-id="12HKsHXBaXOiBNpKZOF8qz"/>
+    </linearGradient>
+    <mask id="mDropHole" data-page-node-id="XJLDVwr1Ft5QYL0AudbJvk">
+      <rect width="512" height="512" fill="#ffffff" data-page-node-id="7Uf9ibeQ3nHn1ZHiImrJrt"/>
+      <path d="M258 228 C258 228 238 250 238 264 a20 20 0 0 1 40 0 C278 250 258 228 258 228 Z" fill="#000000" data-page-node-id="OnGw9Yh6VLYe1QrlyacLZ8"/>
+    </mask>
+    <!-- 公共骨架：断环 + 粉弧 + 雨滴 -->
+    <g id="base" data-page-node-id="yC8DPCkcQkX5yVPBlb7eHr">
+      <rect width="512" height="512" rx="112" fill="url(#bga)" data-page-node-id="10XE8j2JAxIiBi04DToeII"/>
+      <circle cx="256" cy="256" r="142" fill="none" stroke="#22d3ee" stroke-width="26"
+              stroke-dasharray="734 158" stroke-linecap="round" transform="rotate(-58 256 256)" data-page-node-id="ZFFlTEPxEaaLbcPFvtVemH"/>
+      <circle cx="256" cy="256" r="142" fill="none" stroke="#f472b6" stroke-width="26"
+              stroke-dasharray="120 772" stroke-linecap="round" transform="rotate(140 256 256)" data-page-node-id="78XglCAr6T8FEFWQ4ffccR"/>
+      <path d="M256 74 C256 74 222 112 222 136 a34 34 0 0 1 68 0 C290 112 256 74 256 74 Z" fill="url(#drop1)" data-page-node-id="Mm6pKgvRRPa1nIvB4ex1VQ"/>
+    </g>
+  </defs>
+
+  <!-- P1 像素升格三角 -->
+  <symbol id="p1" viewBox="0 0 512 512" data-page-node-id="QrWjpqKHw1MCLdex6pSTfx">
+    <use href="#base" data-page-node-id="e2UV2cL6YIddaake1D17Pa"/>
+    <g fill="#ffffff" data-page-node-id="CfuBDBv9dt7A9u0QGqnpzX">
+      <g opacity=".5" data-page-node-id="HxTi9KcWdbBJHvaMxcSv12"><rect x="212" y="186" width="30" height="26" rx="4" data-page-node-id="7g3drRaRN3wIJaoPHJwINL"/><rect x="212" y="214" width="30" height="26" rx="4" data-page-node-id="KDIgcddnWaXCTWoguZYmNN"/><rect x="212" y="242" width="30" height="26" rx="4" data-page-node-id="QvDQ3od3sK6qqjFFEIxpSh"/><rect x="212" y="270" width="30" height="26" rx="4" data-page-node-id="lfwi8jWdij73ddZuWsX5iV"/><rect x="212" y="298" width="30" height="26" rx="4" data-page-node-id="DJNbDewkxkcDXj9SPAwCCJ"/></g>
+      <g opacity=".68" data-page-node-id="2C9oQGArFzqbDoWhc34DMl"><rect x="248" y="200" width="26" height="24" rx="4" data-page-node-id="7aJ0IDmwZBnqELWCuMDZrz"/><rect x="248" y="226" width="26" height="24" rx="4" data-page-node-id="pqAVJR33xgf3HmZsPKEhSu"/><rect x="248" y="252" width="26" height="24" rx="4" data-page-node-id="6xGMjjwl7da2DP2FYoZ5vs"/><rect x="248" y="278" width="26" height="24" rx="4" data-page-node-id="eCkdgYudUcLvzYPlDHfvQ9"/></g>
+      <g opacity=".84" data-page-node-id="JrfpWSOpSBEOpDQeclKjqB"><rect x="280" y="214" width="22" height="20" rx="4" data-page-node-id="hQKad2kl1Rlm75MXsPTqh3"/><rect x="280" y="236" width="22" height="20" rx="4" data-page-node-id="ThTWQXbPkhdfMKIvP5h7oe"/><rect x="280" y="258" width="22" height="20" rx="4" data-page-node-id="vskBmv3omXQx0WGIifGTDA"/></g>
+      <rect x="308" y="230" width="18" height="16" rx="3" data-page-node-id="CHKNg6LOb7Bqe2ug5Gv1mQ"/><rect x="308" y="250" width="18" height="16" rx="3" data-page-node-id="lFxM8JBSPt2sutJ6fJ2DRW"/>
+      <path d="M332 244 V268 L354 256 Z" data-page-node-id="hTFqPgiLoWvx6dcV1f0vvZ"/>
+    </g>
+  </symbol>
+
+  <!-- P2 雨丝三角 -->
+  <symbol id="p2" viewBox="0 0 512 512" data-page-node-id="8prstCoAYPfyYkfPSUqM43">
+    <use href="#base" data-page-node-id="5R6CKCPgMnMRFX63LRBKPP"/>
+    <g stroke="#ffffff" stroke-width="20" stroke-linecap="round" data-page-node-id="jPp0iMEEVn6nURfqXUW3FT">
+      <path d="M216 190 V322" data-page-node-id="kCViJFfXSytWDz72WYqanx"/>
+      <path d="M244 204 V308" opacity=".85" data-page-node-id="jISkJm7yltfBNoJCnjESJE"/>
+      <path d="M272 218 V294" opacity=".7" data-page-node-id="M0UQ44UFyuMZ1jiJUBxh17"/>
+      <path d="M300 232 V280" opacity=".85" data-page-node-id="Q8NECkMGM1ETfxPHo7fHfM"/>
+      <path d="M328 244 V268" data-page-node-id="fuoF8V2TAc0u4XJb56AQ37"/>
+    </g>
+  </symbol>
+
+  <!-- P3 双影升格 -->
+  <symbol id="p3" viewBox="0 0 512 512" data-page-node-id="jhAEtiz8pY7tssmJWuEl6Q">
+    <use href="#base" data-page-node-id="FY35g4isNMNVRCrFx0vyKm"/>
+    <path d="M228 202 V334 L358 268 Z" fill="#ffffff" opacity=".3" data-page-node-id="CAgfrowqFCOd9pbrU8A5ML"/>
+    <path d="M216 184 V316 L346 250 Z" fill="#ffffff" opacity=".45" data-page-node-id="gKagaiXEKXLohvsNPWVFtN"/>
+    <path d="M222 192 V324 L352 258 Z" fill="#ffffff" data-page-node-id="ldwhv9PjDWVtpn1QKo4beJ"/>
+  </symbol>
+
+  <!-- P4 滴心三角 -->
+  <symbol id="p4" viewBox="0 0 512 512" data-page-node-id="XTDYu6qO7CNprKJugB6aP3">
+    <use href="#base" data-page-node-id="c8DGySRGvpp2NIuHgrcYrx"/>
+    <path d="M222 196 V316 L340 256 Z" fill="#ffffff" stroke="#ffffff" stroke-width="28"
+          stroke-linejoin="round" mask="url(#mDropHole)" data-page-node-id="kzJPJS3SBGzyDi5YfqXGQe"/>
+  </symbol>
+
+  <!-- P5 播放·升维 -->
+  <symbol id="p5" viewBox="0 0 512 512" data-page-node-id="MfblbyWNWa2CqqBDlymNHl">
+    <use href="#base" data-page-node-id="T6kYyXQFMZBvZ8pbaNj5lQ"/>
+    <path d="M214 196 V322 L326 262 Z" fill="#ffffff" data-page-node-id="TFGi2UvMmXuqGcwg1c9Th2"/>
+    <path d="M318 270 L374 214 M374 214 h-34 M374 214 v34" stroke="url(#tri5)" stroke-width="22"
+          stroke-linecap="round" stroke-linejoin="round" fill="none" data-page-node-id="5NEbQ2Qtr83XEcww44Aw0e"/>
+  </symbol>
+
+  <!-- P6 雨滴列队 -->
+  <symbol id="p6" viewBox="0 0 512 512" data-page-node-id="uhpKLPHKNSWbrKDaBbTjR4">
+    <use href="#base" data-page-node-id="MGJ9d7czB5Wns35lzDlSUq"/>
+    <g fill="url(#drop1)" data-page-node-id="bXav9qOJGOc8nPoPysDJde">
+      <path d="M216 232 C216 232 200 250 200 262 a16 16 0 0 0 32 0 C232 250 216 232 216 232 Z" data-page-node-id="C15gO0fMJUyypPNbVl6ZEd"/>
+      <path d="M256 210 C256 210 240 228 240 240 a16 16 0 0 0 32 0 C272 228 256 210 256 210 Z" data-page-node-id="qxFEKZWIq6evC5jco20Z4L"/>
+      <path d="M256 262 C256 262 240 280 240 292 a16 16 0 0 0 32 0 C272 280 256 262 256 262 Z" data-page-node-id="aCD2hPKyu24wAln2GuEAo9"/>
+      <path d="M296 188 C296 188 280 206 280 218 a16 16 0 0 0 32 0 C312 206 296 188 296 188 Z" data-page-node-id="3H5L4Ma3YEiRTiFC30BZHN"/>
+      <path d="M296 240 C296 240 280 258 280 270 a16 16 0 0 0 32 0 C312 258 296 240 296 240 Z" data-page-node-id="faREVuOQk8g5kyfFUnbUUd"/>
+      <path d="M296 292 C296 292 280 310 280 322 a16 16 0 0 0 32 0 C312 310 296 292 296 292 Z" data-page-node-id="TJZ80qEOjC4FNGVkO1Xf7G"/>
+    </g>
+  </symbol>
+</svg>
+
+<div class="grid" id="grid" data-page-node-id="FBkh39UfdIh8OE5tS3pvRB"></div>
+
+<script>
+const variants = [
+  { id: 'p1', name: 'P1 · 像素升格三角', desc: '播放键由像素块拼成：左侧粗大模糊、向右逐级变细变锐——超分算法本身画进了播放键。' },
+  { id: 'p2', name: 'P2 · 雨丝三角', desc: '五根雨丝长短错落排成三角，既是播放键又是雨帘，还带着点均衡器的律动。' },
+  { id: 'p3', name: 'P3 · 双影升格', desc: '三层三角错位叠影：两层「残影」在后、清晰本体在前，像画面从拖影中被重建清晰。' },
+  { id: 'p4', name: 'P4 · 滴心三角', desc: '圆角播放键中央挖出一滴负形雨——镂空的「戏眼」，与顶部的雨滴上下呼应。' },
+  { id: 'p5', name: 'P5 · 播放·升维', desc: '三角尖端顺势发射出一枚右上箭头：播放即升格。动态感、目的性最强。' },
+  { id: 'p6', name: 'P6 · 雨滴列队', desc: '六滴雨按 1-2-3 队列排成三角阵，「雨帧」二字的最直白演绎，可爱向。' },
+];
+
+const sizes = [64, 48, 32, 24, 16];
+const grid = document.getElementById('grid');
+for (const v of variants) {
+  const rowImgs = () => sizes.map(s =>
+    `<svg width="${s}" height="${s}" style="border-radius:${Math.max(3, s * 0.22)}px"><use href="#${v.id}"/></svg>`
+  ).join('');
+  grid.insertAdjacentHTML('beforeend', `
+    <div class="card">
+      <h2>${v.name}</h2>
+      <p class="desc">${v.desc}</p>
+      <div class="stage">
+        <div class="big"><svg viewBox="0 0 512 512"><use href="#${v.id}"/></svg></div>
+        <div class="sizes">
+          <div class="row light"><span class="lbl">浅底</span>${rowImgs()}</div>
+          <div class="row dark"><span class="lbl">深底</span>${rowImgs()}</div>
+        </div>
+      </div>
+    </div>`);
+}
+</script>
+
+</body>
+</html>

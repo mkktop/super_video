@@ -82,7 +82,7 @@ def _execute_power_action(action: str) -> bool:
     try:
         if action == "shutdown":
             subprocess.run(
-                ["shutdown", "/s", "/t", "5", "/c", "super_video：任务队列已全部完成"],
+                ["shutdown", "/s", "/t", "5", "/c", "雨帧：任务队列已全部完成"],
                 check=True, creationflags=WINDOWS_CREATE_FLAGS)
         elif action == "sleep":
             subprocess.run(

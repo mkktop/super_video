@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<!-- 雨帧 Logo 变体画板 · 第二批（12 版，方向拉开）：雨番同系列 DNA（#12172a 暗夜底 / 极光渐变底 /
+     #ff5c8a→#a78bfa→#22d3ee / 圆头雨丝），主形各不相同。选定后回写 rainframe.svg 重出全套。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  body { background: #fff; font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; padding: 18px 22px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #7d8aa0; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: 240px repeat(2, 128px) 220px; gap: 14px 18px; align-items: center; }
+  .head { font-size: 13px; font-weight: 700; color: #47536e; padding-bottom: 2px; }
+  .cname { font-size: 15px; font-weight: 700; color: #1d2638; }
+  .cname small { display: block; font-size: 12px; font-weight: 400; color: #7d8aa0; margin-top: 3px; line-height: 1.55; }
+  .tile svg { width: 112px; height: 112px; display: block; border-radius: 24px; }
+  .tile.light { background: #f4f6fa; border-radius: 24px; padding: 8px; width: 128px; }
+  .tile.dark { background: #0b0e14; border-radius: 24px; padding: 8px; width: 128px; }
+  .minis { display: flex; align-items: center; gap: 10px; }
+  .minis .chip-light, .minis .chip-dark { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; }
+  .minis .chip-light { background: #f4f6fa; }
+  .minis .chip-dark { background: #0b0e14; }
+  .minis svg { display: block; }
+  .hsec { margin-top: 26px; }
+  .hsec h2 { font-size: 16px; margin-bottom: 12px; }
+  .hbar { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 18px; border-radius: 12px; margin-bottom: 10px; width: 640px; }
+  .hbar.light { background: #f7f8fb; border: 1px solid #e7ebf3; }
+  .hbar.dark { background: #141517; border: 1px solid #23252a; }
+  .hbar svg { width: 34px; height: 34px; display: block; border-radius: 8px; }
+  .hbar .wname { font-size: 19px; font-weight: 700; }
+  .hbar.light .wname { color: #26324f; }
+  .hbar.dark .wname { color: #e8eaed; }
+  .hbar .wver { font-size: 12px; margin-left: 2px; }
+  .hbar.light .wver { color: #8a94a8; }
+  .hbar.dark .wver { color: #6f7680; }
+  .hbar nav { display: flex; gap: 18px; margin-left: 26px; font-size: 14px; }
+  .hbar.light nav { color: #47536e; }
+  .hbar.dark nav { color: #aab3c5; }
+  .hbar nav .on { color: #4f8cff; font-weight: 600; }
+  .hbar .tag { margin-left: auto; font-size: 12px; opacity: .55; }
+</style>
+</head>
+<body>
+<h1>雨帧 Logo · 第二批 12 版（雨番同系列 DNA，主形各不同）</h1>
+<div class="sub">01–12 · 亮/暗底 128px + 32/24/16px 小尺寸 · 底部顶栏模拟（34px 亮/暗）· 选定编号告诉我即可</div>
+<div class="grid" id="grid"></div>
+<div class="hsec" id="hsec"><h2>顶栏实际效果（34px，亮 / 暗）</h2></div>
+
+<script>
+// ---------- 基建 ----------
+const slash = (x1, y1, x2, y2, w = 3.5, o = .85, c = '#fff') =>
+  `<path d="M${x1} ${y1}L${x2} ${y2}" stroke="${c}" stroke-width="${w}" stroke-linecap="round" opacity="${o}" fill="none"/>`;
+const play = (x, y, w2, h, sw, fill) =>
+  `<path d="M${x} ${y}v${h}l${w2} -${h / 2}z" fill="${fill}" stroke="${fill}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+const dark = () =>
+  `<rect width="64" height="64" rx="15" fill="#12172a"/><rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="rgba(255,255,255,.1)"/>`;
+const lin = (id, stops, x1 = 14, y1 = 14, x2 = 50, y2 = 50) =>
+  `<linearGradient id="${id}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" gradientUnits="userSpaceOnUse">`
+  + stops.map(([o, c]) => `<stop offset="${o}" stop-color="${c}"/>`).join('') + '</linearGradient>';
+const blur = (id, dev = 2.8) =>
+  `<filter id="${id}" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="${dev}"/></filter>`;
+const auroraDef = (id) => lin(id, [[0, '#ff5c8a'], [.5, '#a78bfa'], [1, '#22d3ee']], 6, 4, 58, 60);
+const auroraBg = (id) =>
+  `<rect width="64" height="64" rx="15" fill="url(#${id})"/>`
+  + `<rect width="64" height="64" rx="15" fill="url(#gloss)"/>`;
+const GLOSS = `<linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient>`;
+const NEON = [[0, '#ff5c8a'], [1, '#22d3ee']];
+const NEON3 = [[0, '#ff5c8a'], [.5, '#a78bfa'], [1, '#22d3ee']];
+const svgWrap = (inner) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${inner}</svg>`;
+
+// 雨滴（尖上圆下，圆心 32,39 半径 14.5）
+const DROP = 'M32 13 C32 13 17.5 30.5 17.5 39 A14.5 14.5 0 0 0 46.5 39 C46.5 30.5 32 13 32 13 Z';
+// 连续圆角框（缺口用 dasharray+rotate 落右上）
+const frame = (stroke, w, extra = '') =>
+  `<rect x="17" y="17" width="30" height="30" rx="10" pathLength="100" fill="none" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round" stroke-dasharray="83 17" transform="rotate(-52 32 32)" ${extra}/>`;
+// 四角括号
+const BRACKETS = 'M17 27L17 21Q17 17 21 17L27 17M37 17L43 17Q47 17 47 21L47 27M47 37L47 43Q47 47 43 47L37 47M27 47L21 47Q17 47 17 43L17 37';
+const brackets = (stroke, w = 5.5) =>
+  `<path d="${BRACKETS}" fill="none" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round"/>`;
+// 星芒
+function starPath(cx, cy, r) {
+  const ri = r * .22, pts = [];
+  for (let i = 0; i < 8; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 4, rad = i % 2 === 0 ? r : ri;
+    pts.push(`${(cx + rad * Math.cos(a)).toFixed(2)} ${(cy + rad * Math.sin(a)).toFixed(2)}`);
+  }
+  return 'M' + pts.join('L') + 'Z';
+}
+const star = (cx, cy, r, fill) => `<path d="${starPath(cx, cy, r)}" fill="${fill}"/>`;
+// 小雨滴（环内用，圆心 32,36 半径 8）
+const DROP_S = 'M32 22 C32 22 24 31.5 24 36 A8 8 0 0 0 40 36 C40 31.5 32 22 32 22 Z';
+
+// ---------- 12 版 ----------
+const V = [];
+
+// 01 霓虹雨滴·镂空彩键：渐变雨滴为主形，播放键镂空
+V.push(['01 霓虹雨滴·镂空彩键', '「雨」为主形最直观；镂空键=视频', (() => {
+  const inner = `<defs>${lin('a', NEON3, 32, 13, 32, 53)}${blur('b')}</defs>` + dark()
+    + slash(45, 6, 41, 12)
+    + `<path d="${DROP}" fill="url(#a)" filter="url(#b)" opacity=".85"/>`
+    + `<path d="${DROP}" fill="url(#a)"/>`
+    + play(28.5, 33.5, 10.5, 11, 3.5, '#12172a');
+  return inner;
+})()]);
+
+// 02 雨滴描边·星芒：描边雨滴 + 白星芒
+V.push(['02 雨滴描边·星芒', '轻盈一点；星芒=超分', (() => {
+  return `<defs>${lin('a', NEON)}${blur('b')}</defs>` + dark()
+    + slash(45, 6, 41, 12)
+    + `<path d="${DROP}" fill="none" stroke="url(#a)" stroke-width="4.5" stroke-linejoin="round" filter="url(#b)" opacity=".9"/>`
+    + `<path d="${DROP}" fill="none" stroke="url(#a)" stroke-width="4.5" stroke-linejoin="round"/>`
+    + `<g filter="url(#b)" opacity=".5">${star(32, 38.5, 7.5, '#fff')}</g>` + star(32, 38.5, 7.5, '#fff');
+})()]);
+
+// 03 霓虹夜滴·彩键：渐变大播放键 + 右上双雨丝（与雨番「霓虹夜滴」同构，雨丝换到右侧）
+V.push(['03 霓虹夜滴·彩键', '与雨番最亲的一版；纯键无框', (() => {
+  return `<defs>${lin('a', NEON3, 26, 24, 41, 40)}${blur('b')}</defs>` + dark()
+    + slash(46.5, 6.5, 42, 13, 3.5, .9)
+    + slash(53, 13.5, 50.3, 17.8, 3, .75, '#22d3ee')
+    + `<g filter="url(#b)" opacity=".9">${play(26, 24, 15, 16, 5, 'url(#a)')}</g>`
+    + play(26, 24, 15, 16, 5, 'url(#a)');
+})()]);
+
+// 04 连续框·缺口雨丝·彩键：圆角方框开口落雨丝（雨番环的方框镜像）+ 渐变键
+V.push(['04 连续框·雨丝·彩键', '「帧」= 闭环方框；结构感强', (() => {
+  return `<defs>${lin('a', NEON)}${lin('p', NEON3, 28.5, 27, 37.5, 37)}${blur('b')}</defs>` + dark()
+    + `<g filter="url(#b)" opacity=".9">${frame('url(#a)', 5)}</g>` + frame('url(#a)', 5)
+    + slash(43, 6.5, 39.5, 12.5)
+    + play(28.5, 27, 10, 10.5, 4, 'url(#p)');
+})()]);
+
+// 05 胶片帧·彩键：胶片取景框（两侧齿孔）+ 渐变键，「帧」的字面表达
+V.push(['05 胶片帧·彩键', '胶片齿孔=「帧」的字面梗', (() => {
+  const hole = (x, ys) => ys.map(y => `<rect x="${x}" y="${y}" width="3.4" height="3.4" rx="1" fill="url(#a)" opacity=".95"/>`).join('');
+  return `<defs>${lin('a', NEON)}${lin('p', NEON3, 28.5, 27.5, 37.5, 36.5)}${blur('b')}</defs>` + dark()
+    + slash(45, 5.5, 41.5, 11)
+    + `<rect x="17" y="15" width="30" height="34" rx="7" fill="none" stroke="url(#a)" stroke-width="3.4" filter="url(#b)" opacity=".9"/>`
+    + `<rect x="17" y="15" width="30" height="34" rx="7" fill="none" stroke="url(#a)" stroke-width="3.4"/>`
+    + hole(20.4, [19.5, 25.5, 31.5, 37.5, 43.5 - 6]) + hole(40.2, [19.5, 25.5, 31.5, 37.5, 43.5 - 6])
+    + play(28.5, 27.5, 9.5, 9.5, 3.6, 'url(#p)');
+})()]);
+
+// 06 取景框·渐变星芒（V1 加强版）：粗括号 + 渐变大星芒
+V.push(['06 取景框·渐变星芒', '上批 V1 的加强：星芒上渐变', (() => {
+  return `<defs>${lin('a', NEON)}${lin('s', NEON3, 32, 21, 32, 43)}${blur('b')}</defs>` + dark()
+    + slash(45, 6, 41, 12)
+    + `<g filter="url(#b)" opacity=".9">${brackets('url(#a)')}</g>` + brackets('url(#a)')
+    + `<g filter="url(#b)" opacity=".6">${star(32, 32, 11, 'url(#s)')}</g>` + star(32, 32, 11, 'url(#s)');
+})()]);
+
+// 07 层叠双帧：两帧斜向层叠（多帧/翻页叙事）
+V.push(['07 层叠双帧', '前后两帧层叠；小尺寸略糊', (() => {
+  const fr = (x, y, stroke, w) =>
+    `<rect x="${x}" y="${y}" width="27" height="27" rx="8" fill="none" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round"/>`;
+  return `<defs>${lin('a', [[0, '#a78bfa'], [1, '#22d3ee']], 21, 13, 48, 40)}${lin('p', [[0, '#ff5c8a'], [1, '#a78bfa']], 16, 24, 43, 51)}${blur('b')}</defs>` + dark()
+    + slash(51, 6, 47.5, 11)
+    + `<g filter="url(#b)" opacity=".85">${fr(21, 13, 'url(#a)', 4)}</g>` + fr(21, 13, 'url(#a)', 4)
+    + `<rect x="12" y="24" width="27" height="27" rx="8" fill="#12172a"/>`
+    + fr(16, 24, 'url(#p)', 4)
+    + play(24.5, 31.5, 9, 9.5, 3.6, '#fff');
+})()]);
+
+// 08 进化双框：内外双框反向渐变 + 白星（放大叙事）
+V.push(['08 进化双框', '外框→内框 = 放大；反向渐变', (() => {
+  return `<defs>${lin('a', NEON, 14, 14, 50, 50)}${lin('c', [[0, '#22d3ee'], [1, '#ff5c8a']], 22, 22, 42, 42)}${blur('b')}</defs>` + dark()
+    + slash(45, 6, 41, 12)
+    + `<g filter="url(#b)" opacity=".85"><rect x="14" y="14" width="36" height="36" rx="12" fill="none" stroke="url(#a)" stroke-width="4"/></g>`
+    + `<rect x="14" y="14" width="36" height="36" rx="12" fill="none" stroke="url(#a)" stroke-width="4"/>`
+    + `<rect x="23" y="23" width="18" height="18" rx="6" fill="none" stroke="url(#c)" stroke-width="3.6"/>`
+    + star(32, 32, 6, '#fff');
+})()]);
+
+// 09 极光底·白框彩键：极光渐变底 + 全白框键（雨番「粉装/极光」路线）
+V.push(['09 极光底·白框彩键', '渐变底高亮；桌面上一眼跳出', (() => {
+  return `<defs>${auroraDef('au')}${GLOSS}</defs>` + auroraBg('au')
+    + frame('#fff', 5)
+    + slash(43, 6.5, 39.5, 12.5)
+    + play(28.5, 27, 10, 10.5, 4, '#fff');
+})()]);
+
+// 10 极光底·白雨滴：极光底 + 白雨滴镂空键
+V.push(['10 极光底·白雨滴', '雨滴主形 × 渐变底', (() => {
+  return `<defs>${auroraDef('au')}${GLOSS}</defs>` + auroraBg('au')
+    + `<path d="${DROP}" fill="#fff"/>`
+    + play(28.5, 33.5, 10.5, 11, 3.5, 'url(#au)');
+})()]);
+
+// 11 霓虹环·雨滴：雨番环 + 中心渐变小雨滴（系列相似度天花板）
+V.push(['11 霓虹环·雨滴', '与雨番最终版同构：环+雨滴', (() => {
+  const ring = `<circle cx="32" cy="32" r="17.5" fill="none" stroke="url(#a)" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="88 22" transform="rotate(-52 32 32)"/>`;
+  return `<defs>${lin('a', NEON)}${lin('d', NEON3, 32, 22, 32, 44)}${blur('b')}</defs>` + dark()
+    + slash(43, 6.5, 39.5, 12.5)
+    + `<g filter="url(#b)" opacity=".9">${ring}</g>` + ring
+    + `<path d="${DROP_S}" fill="url(#d)"/>`;
+})()]);
+
+// 12 星雨：渐变大星芒 + 三色雨丝（超分+雨的意象混合，最抽象）
+V.push(['12 星雨', '星芒+三色雨丝；最抽象', (() => {
+  return `<defs>${lin('s', NEON3, 26, 24, 40, 46)}${blur('b')}</defs>` + dark()
+    + slash(45.5, 8, 41.5, 14, 3.5, .9)
+    + slash(52.5, 17, 49.8, 21.2, 3, .75, '#22d3ee')
+    + slash(38.5, 6.5, 36.3, 10.2, 3, .6, '#ff5c8a')
+    + `<g filter="url(#b)" opacity=".6">${star(30, 35, 12, 'url(#s)')}</g>` + star(30, 35, 12, 'url(#s)');
+})()]);
+
+// ---------- 画板渲染 ----------
+const grid = document.getElementById('grid');
+grid.innerHTML = `<div></div><div class="head">亮底 128px</div><div class="head">暗底 128px</div><div class="head">小尺寸 32 / 24 / 16px</div>`;
+for (const [name, desc, inner] of V) {
+  const row = document.createElement('div');
+  row.className = 'cname';
+  row.innerHTML = `${name}<small>${desc}</small>`;
+  grid.appendChild(row);
+  for (const cls of ['light', 'dark']) {
+    const d = document.createElement('div');
+    d.className = 'tile ' + cls;
+    d.innerHTML = svgWrap(inner);
+    grid.appendChild(d);
+  }
+  const m = document.createElement('div');
+  m.className = 'minis';
+  m.innerHTML = `<div class="chip-light">${[32, 24, 16].map(n => svgWrap(inner).replace('viewBox="0 0 64 64"', `viewBox="0 0 64 64" width="${n}" height="${n}"`)).join('')}</div>`
+    + `<div class="chip-dark">${[32, 24, 16].map(n => svgWrap(inner).replace('viewBox="0 0 64 64"', `viewBox="0 0 64 64" width="${n}" height="${n}"`)).join('')}</div>`;
+  grid.appendChild(m);
+}
+
+// ---------- 顶栏模拟（01 / 04 / 09 / 11） ----------
+const hsec = document.getElementById('hsec');
+for (const [cls] of [['light'], ['dark']]) {
+  for (const idx of [0, 3, 8, 10]) {
+    const bar = document.createElement('div');
+    bar.className = 'hbar ' + cls;
+    bar.innerHTML = svgWrap(V[idx][2]) + `<span class="wname">雨帧</span><span class="wver">v0.5.5</span>`
+      + `<nav><span class="on">首页</span><span>任务</span><span>对比</span><span>设置</span></nav>`
+      + `<span class="tag">${V[idx][0].slice(0, 2)} · ${cls === 'light' ? '亮' : '暗'}</span>`;
+    hsec.appendChild(bar);
+  }
+}
+</script>
+</body>
+</html>

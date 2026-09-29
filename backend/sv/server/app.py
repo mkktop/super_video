@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI):
     perf.stop()
 
 
-app = FastAPI(title="super_video sidecar", version=__version__, lifespan=lifespan)
+app = FastAPI(title="雨帧 sidecar", version=__version__, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )

@@ -19,6 +19,16 @@ export function fmtBytes(b: number): string {
   return `${b} B`
 }
 
+/** 版本号拆段：主版本与预发布段分开展示（顶栏徽章/关于卡用）。
+ *  容忍带 v 前缀；pre 归一成展示标签——preview.N →「预览」，其余段（rc.N 等）原样。 */
+export function versionParts(v: string): { base: string; pre: string } {
+  const s = (v || '').trim().replace(/^v/, '')
+  const i = s.indexOf('-')
+  if (i === -1) return { base: s, pre: '' }
+  const raw = s.slice(i + 1)
+  return { base: s.slice(0, i), pre: /^preview/i.test(raw) ? '预览' : raw }
+}
+
 /** 元素级全屏切换（Electron=Chromium 原生支持，ESC 可退出）。
  *  用户按 ESC 原生退出时靠 fullscreenchange 同步状态。 */
 export function useFullscreen(target: Ref<HTMLElement | null>) {

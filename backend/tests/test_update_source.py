@@ -1,7 +1,6 @@
 """更新下载源设置：合法值持久化 + 默认 auto（存量用户零迁移）+ 非法值 400。
 
-与 update_channel 同构：消费方在 Electron 主进程（检查/下载走哪个源的白名单），
-后端只负责存储与校验——这里钉死三档，防止 renderer 侧拼错字符串静默吞掉切换。
+消费方在 Electron 主进程（检查/下载走哪个源的白名单），后端只负责存储与校验——这里钉死三档，防止 renderer 侧拼错字符串静默吞掉切换。
 """
 import pytest
 from fastapi.testclient import TestClient

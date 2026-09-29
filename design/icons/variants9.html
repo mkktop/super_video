@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN" data-page-node-id="CwAJNOInwu9t7rQMdGBwBb">
+<head data-page-node-id="txvLYzdyFa4BbgN3gbAxRx">
+<meta charset="utf-8" data-page-node-id="YVjm2QvGSHZjW2n9w1VKTh">
+<title>雨帧 RainFrame — R2 无雨滴 · 律动 / 浸泡（第 9 批 · 6 版）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f3f4f6; color: #111827; padding: 32px 40px 64px; }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 10px; }
+  .group { font-size: 13px; font-weight: 600; color: #374151; margin: 26px 0 12px; padding-left: 10px; border-left: 4px solid #d1d5db; }
+  .group.m { border-color: #a78bfa; }
+  .group.s { border-color: #22d3ee; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 18px 20px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .card h2 { font-size: 15px; margin-bottom: 2px; }
+  .card .desc { font-size: 12px; color: #6b7280; margin-bottom: 14px; line-height: 1.5; }
+  .stage { display: flex; align-items: flex-end; gap: 14px; }
+  .big { width: 128px; height: 128px; flex: none; }
+  .big svg { width: 128px; height: 128px; border-radius: 24px; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+  .sizes { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; }
+  .row.light { background: #e5e7eb; }
+  .row.dark { background: #1f2937; }
+  .row svg { flex: none; }
+  .row .lbl { font-size: 10px; color: #9ca3af; width: 26px; }
+</style>
+</head>
+<body data-page-node-id="8wWRgFhioLoQwHLTFhxmIE">
+
+<h1 data-page-node-id="AjIc6AfipOtCEIUFzqfSG3">R2 无雨滴 · 主环两种气质</h1>
+<p class="sub" data-page-node-id="J9UJLOf1lII6QRE6DbqV42">去掉雨滴，把戏份还给圆环：<b data-page-node-id="a9Rfq0TL4r6Y921IHMcZi4">律动系</b>让环像音频可视化一样起伏，<b data-page-node-id="wlh5mjAaZKtl8LfJCKppLT">浸泡系</b>让环像沉在水下——折射、水面、气泡。炫彩播放键不变。</p>
+
+<svg width="0" height="0" style="position:absolute" data-page-node-id="2LpM4a4e8PzSePEfwIUYxh">
+  <defs data-page-node-id="vpBQT96RjHqbVvf80YkzNT">
+    <radialGradient id="water1" cx=".5" cy=".42" r=".78" data-page-node-id="cmeMuCSYWudtPo7SFZqvZo">
+      <stop offset="0" stop-color="#0e3d50" data-page-node-id="mftNuep5DuaSTIAPtVpK5u"/><stop offset="1" stop-color="#061a26" data-page-node-id="5Ges174oCq9QRBE8ALP6ey"/>
+    </radialGradient>
+    <linearGradient id="iridV" x1="0" y1="0" x2="0" y2="1" data-page-node-id="3Rdu0kBmdehpHJ2IhOnIuG">
+      <stop offset="0" stop-color="#22d3ee" data-page-node-id="w1vZXSQ9WtmSTqqUgTSieK"/><stop offset=".5" stop-color="#a78bfa" data-page-node-id="rsIbrCQFgLLjcFIOiaL2VU"/><stop offset="1" stop-color="#ff5c8a" data-page-node-id="bIarSI30O2BCbQQcB6GMjL"/>
+    </linearGradient>
+    <filter id="soft10" x="-40%" y="-40%" width="180%" height="180%" data-page-node-id="3hYRwpNAdPztGI7jdfMn6L">
+      <feGaussianBlur stdDeviation="10" data-page-node-id="HiCEvYp82HzCGCU36j1cj7"/>
+    </filter>
+    <filter id="wobble" x="-20%" y="-20%" width="140%" height="140%" data-page-node-id="vQBDdMDJMV18GbFT13yYn3">
+      <feTurbulence type="fractalNoise" baseFrequency="0.015 0.09" numOctaves="2" seed="7" result="n" data-page-node-id="18AnE3V3YiCw6I7hlfD0lH"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="16" xChannelSelector="R" yChannelSelector="G" data-page-node-id="aeiaTGwq2XRFwRucJpLwun"/>
+    </filter>
+    <filter id="soft2" x="-20%" y="-20%" width="140%" height="140%" data-page-node-id="nt03pjv0SLLNkyKP6VhVLF">
+      <feGaussianBlur stdDeviation="1.6" data-page-node-id="TE5tA3ykzkadDn8ccoz4ie"/>
+    </filter>
+    <clipPath id="topHalf" data-page-node-id="CUW0mqqgNdng3wTT8XDTbe"><rect x="0" y="0" width="512" height="248" data-page-node-id="8qKoPC6JbM7lnYK9p2Se8Q"/></clipPath>
+    <clipPath id="btmHalf" data-page-node-id="RBofIv2vVUHLsy6Ol8nJ9s"><rect x="0" y="248" width="512" height="264" data-page-node-id="KAHqUlcfrtFZnGqP9GUO7n"/></clipPath>
+    <clipPath id="ringIn" data-page-node-id="EK4mRpyl8hFbysAvpEaula"><circle cx="256" cy="256" r="124" data-page-node-id="1uoYFoDpCFcrnXSUWEhfd0"/></clipPath>
+  </defs>
+
+  <!-- M1 律动环（径向均衡器） -->
+  <symbol id="m1" viewBox="0 0 512 512" data-page-node-id="ujTCaEEB61Zj7MnE76eHeF">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="q2BCT5XGBCwCblwN6dl7ZM"/>
+    <circle cx="256" cy="256" r="202" fill="none" stroke="#67e8f9" stroke-width="4" opacity=".14" data-page-node-id="mfxrCX0UISTZpiZNePDuew"/>
+    <g id="eqBars" data-page-node-id="FZqJkoNFh4xzhmByL0eUEJ"></g>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="l0dhH2pGnRfYkoTOTIPIrE"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="JlZnfSObj2JsV2dM9EaW1A"/>
+  </symbol>
+
+  <!-- M2 双波环 -->
+  <symbol id="m2" viewBox="0 0 512 512" data-page-node-id="OdYyF6utamTMlELwuJfY90">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="omRpcFuGcgvIDQ0W0tk3K7"/>
+    <circle cx="256" cy="256" r="132" fill="none" stroke="#67e8f9" stroke-width="4" opacity=".22" data-page-node-id="k0xnBisbFboJJs4zgJFEer"/>
+    <path id="wave1" fill="none" stroke="#22d3ee" stroke-width="11" stroke-linecap="round" data-page-node-id="s8wRwW5DYNYfOYDFzGsuVH"/>
+    <path id="wave2" fill="none" stroke="#f472b6" stroke-width="11" stroke-linecap="round" opacity=".55" data-page-node-id="r6190gZI1DGsBB0IRl75bK"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="MV0Aa262nPGkLZdrmNTiVG"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="Ryi3Ipw1qAJdoU3E39dREh"/>
+  </symbol>
+
+  <!-- M3 节拍断弧 -->
+  <symbol id="m3" viewBox="0 0 512 512" data-page-node-id="fRdiNM0HfPMxx322MS4yJF">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="n0wAd1cdBXo4CtHSEgEuci"/>
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#67e8f9" stroke-width="5" opacity=".4"
+            stroke-dasharray="6 12" data-page-node-id="iwp3iFCXDSaCaUHk7w79s8"/>
+    <circle cx="256" cy="256" r="132" fill="none" stroke="#22d3ee" stroke-width="17"
+            stroke-dasharray="70 20 30 20 110 20 30 20 46 20 30 20 150 20 30 20" stroke-linecap="round" data-page-node-id="ytqamFAyfD1SZfZeFTc6uD"/>
+    <circle cx="256" cy="256" r="132" fill="none" stroke="#f472b6" stroke-width="17" opacity=".5"
+            stroke-dasharray="30 20 110 20 30 20 70 20 30 20 150 20 46 20 30 20" stroke-linecap="round"
+            transform="rotate(14 256 256)" data-page-node-id="qxJRI6qXKZs4gf1JxdY0kE"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="OV9vaWDnr1fh0UMGUYl0pb"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="SBSU0Gus9AA1srHYYSAqsE"/>
+  </symbol>
+
+  <!-- S1 水下折射 -->
+  <symbol id="s1" viewBox="0 0 512 512" data-page-node-id="3vRUj8c7xHIygqxCqZjVG1">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="7N3JamE1JJNkwfcY0H1jIg"/>
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#67e8f9" stroke-width="6" opacity=".35"
+            stroke-dasharray="500 681" stroke-linecap="round" transform="rotate(100 256 256)" data-page-node-id="UEZsn8r4hPO7hBDvmxoH66"/>
+    <g clip-path="url(#btmHalf)" data-page-node-id="tNTNXBWPAT65HzPWinxIUj">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#7dd3fc" stroke-width="16" opacity=".55" filter="url(#wobble)" data-page-node-id="8etA1S4DYF0i2r1eyHLpK2"/>
+    </g>
+    <g clip-path="url(#topHalf)" data-page-node-id="6H1EN0eURmoWvKtwiCtbGA">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#22d3ee" stroke-width="16" data-page-node-id="7an7cEwfFJUHXUcl7rx0va"/>
+    </g>
+    <path d="M124 248 Q190 238 256 248 T 388 248" stroke="#a5f3fc" stroke-width="5" fill="none" opacity=".55" stroke-linecap="round" data-page-node-id="8L0dEGkvJ5FBpyEUTotEZH"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="VB0yPETyqFJWOPHKv3P6Il"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="su9KUrLMbwLYZ13UzkAklb"/>
+  </symbol>
+
+  <!-- S2 半浸水面 -->
+  <symbol id="s2" viewBox="0 0 512 512" data-page-node-id="8i2plQ74jXVsj52k4m46i4">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="I7enAgAsLvZGA5P109dMeC"/>
+    <g clip-path="url(#ringIn)" data-page-node-id="zJjj6byDDFq3eWExBVAm7V">
+      <path d="M120 250 Q188 236 256 250 T 392 250 V400 H120 Z" fill="#22d3ee" opacity=".14" data-page-node-id="2c9LF8ZPe9oMgTyxfJj1jI"/>
+    </g>
+    <g clip-path="url(#btmHalf)" data-page-node-id="hthI1nqNirj9dUw4WB0BbV">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#7dd3fc" stroke-width="16" opacity=".4" filter="url(#wobble)" data-page-node-id="ILdQhu0J4ZDQ8QGajX3G2a"/>
+    </g>
+    <g clip-path="url(#topHalf)" data-page-node-id="LumjCXjbTHdqFd9yD4f0uq">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#22d3ee" stroke-width="16" data-page-node-id="2ih9tQKrBONu5zQn8IKf8X"/>
+    </g>
+    <path d="M132 250 Q200 238 256 250 T 380 250" stroke="#cffafe" stroke-width="6" fill="none" opacity=".7" stroke-linecap="round" data-page-node-id="y22jrOO9uJM7A6g03JtYfF"/>
+    <path d="M228 186 V306 L332 246 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="QUcT4HSyGfI2p1WDf50QRf"/>
+    <path d="M228 186 V306 L332 246 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="WOcChxQxIQmFlnZgSu5bk9"/>
+  </symbol>
+
+  <!-- S3 气泡上浮 -->
+  <symbol id="s3" viewBox="0 0 512 512" data-page-node-id="2uZktdOKfBAzUuXZwgNxbN">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="k51mIzy2pWX88lZC81eIeD"/>
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#67e8f9" stroke-width="6" opacity=".3"
+            stroke-dasharray="500 681" stroke-linecap="round" transform="rotate(100 256 256)" data-page-node-id="zKRFaYzFNn1b8v6cyVdKZr"/>
+    <circle cx="256" cy="256" r="132" fill="none" stroke="#22d3ee" stroke-width="16" opacity=".85" filter="url(#soft2)" data-page-node-id="6c569U2ds5gN7jYYFeF6HT"/>
+    <path id="caustic" fill="none" stroke="#a5f3fc" stroke-width="5" opacity=".5" stroke-linecap="round" data-page-node-id="XeFIu7On4IDndcPsDLVFrI"/>
+    <g stroke="#e0f2fe" fill="#cffafe" data-page-node-id="8P5AMBLeGQLWPtuOo8SYC2">
+      <circle cx="196" cy="310" r="9" opacity=".3" stroke-width="3" data-page-node-id="vL1KEc6RaPYPtBl7GAJnjR"/>
+      <circle cx="214" cy="242" r="6" opacity=".35" stroke-width="3" data-page-node-id="czshuk7PsD3xCmNDaGQAcn"/>
+      <circle cx="316" cy="300" r="7" opacity=".3" stroke-width="3" data-page-node-id="cz8wbEZ11vECNJl8bnhBQl"/>
+      <circle cx="330" cy="212" r="5" opacity=".4" stroke-width="3" data-page-node-id="PbeVMqzcxs1dtzRBKBbTK9"/>
+      <circle cx="262" cy="150" r="4" opacity=".45" stroke-width="2.5" data-page-node-id="iO8ovilYkIhl3u4JPItoeR"/>
+    </g>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="BX6KKPaVXRryVdJKiWB0Yt"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="JQEm93UPJeI5BjEfZz2Mwd"/>
+  </symbol>
+</svg>
+
+<p class="group m" data-page-node-id="J7bW1oDkOZX795wuRoey74">律动系 · 圆环像音频可视化</p>
+<div class="grid" id="gridM" data-page-node-id="g9QicUyhR1EntlhLpixC9Y"></div>
+
+<p class="group s" data-page-node-id="dxBA8eMoAvpbHNvbzXOn51">浸泡系 · 圆环沉在水下</p>
+<div class="grid" id="gridS" data-page-node-id="dC7iHBrlm9HBb45KvOg9SF"></div>
+
+<script>
+// ---- 生成类图元 ----
+// M1 径向均衡器
+(function () {
+  const g = document.getElementById('eqBars');
+  const N = 56, r0 = 120;
+  const stops = [[34, 211, 238], [167, 139, 250], [255, 92, 138]]; // 青→紫→粉
+  const lerp = (a, b, t) => a + (b - a) * t;
+  function triColor(p) {
+    const seg = p * (stops.length - 1), i = Math.min(Math.floor(seg), stops.length - 2), t = seg - i;
+    const c = stops[i].map((v, k) => Math.round(lerp(v, stops[i + 1][k], t)));
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  }
+  let s = '';
+  for (let i = 0; i < N; i++) {
+    const t = i / N * Math.PI * 2;
+    const h = 15 + 20 * Math.abs(Math.sin(3 * t)) + 7 * Math.sin(7 * t + 1.3);
+    const x1 = 256 + r0 * Math.cos(t), y1 = 256 + r0 * Math.sin(t);
+    const x2 = 256 + (r0 + h) * Math.cos(t), y2 = 256 + (r0 + h) * Math.sin(t);
+    s += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
+      stroke="${triColor(i / N)}" stroke-width="8" stroke-linecap="round"/>`;
+  }
+  g.innerHTML = s;
+})();
+
+// 波形圆工具
+function wavePath(cx, cy, r, amp, freq, phase) {
+  let d = '';
+  const N = 240;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N * Math.PI * 2;
+    const rr = r + amp * Math.sin(freq * t + phase);
+    d += (i ? 'L' : 'M') + (cx + rr * Math.cos(t)).toFixed(1) + ' ' + (cy + rr * Math.sin(t)).toFixed(1);
+  }
+  return d + 'Z';
+}
+document.getElementById('wave1').setAttribute('d', wavePath(256, 256, 132, 9, 6, 0));
+document.getElementById('wave2').setAttribute('d', wavePath(256, 256, 132, 9, 6, Math.PI));
+document.getElementById('caustic').setAttribute('d', wavePath(256, 256, 132, 5, 9, 2.1));
+
+// ---- 卡片渲染 ----
+const variants = [
+  { gid: 'gridM', id: 'm1', name: 'M1 · 律动环', desc: '主环变成 56 根径向均衡器柱，高低随正弦起伏，颜色沿环青→紫→粉流转——和炫彩播放键同一套色彩语言。' },
+  { gid: 'gridM', id: 'm2', name: 'M2 · 双波环', desc: '两条相位相反的正弦波环（青+粉）交叠缠绕，像两条声波在环上对冲，静图也有「正在播放」的动感。' },
+  { gid: 'gridM', id: 'm3', name: 'M3 · 节拍断弧', desc: '圆环按节拍切成长短不一的断弧，青粉两轨错开 14°，像音频时间轴上的块状波形；外圈一圈刻度点收边。' },
+  { gid: 'gridS', id: 's1', name: 'S1 · 水下折射', desc: '一道水面横过圆环：水上清晰、水下经湍流置换扭曲变淡——光线穿过水层的折射感。' },
+  { gid: 'gridS', id: 's2', name: 'S2 · 半浸水面', desc: '浸泡感最强：环内蓄起半池水，播放键立于水面之上，水下那段环彻底化开。' },
+  { gid: 'gridS', id: 's3', name: 'S3 · 气泡上浮', desc: '整只环微微失焦像隔着水看，一道焦散光纹缠绕环身，几颗气泡正向上浮。' },
+];
+
+const sizes = [64, 48, 32, 24, 16];
+for (const v of variants) {
+  const rowImgs = () => sizes.map(s =>
+    `<svg width="${s}" height="${s}" style="border-radius:${Math.max(3, s * 0.22)}px"><use href="#${v.id}"/></svg>`
+  ).join('');
+  document.getElementById(v.gid).insertAdjacentHTML('beforeend', `
+    <div class="card">
+      <h2>${v.name}</h2>
+      <p class="desc">${v.desc}</p>
+      <div class="stage">
+        <div class="big"><svg viewBox="0 0 512 512"><use href="#${v.id}"/></svg></div>
+        <div class="sizes">
+          <div class="row light"><span class="lbl">浅底</span>${rowImgs()}</div>
+          <div class="row dark"><span class="lbl">深底</span>${rowImgs()}</div>
+        </div>
+      </div>
+    </div>`);
+}
+</script>
+
+</body>
+</html>

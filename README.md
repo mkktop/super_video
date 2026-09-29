@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="design/icons/final/icon@256.png" width="120" alt="super_video 图标" />
+<img src="design/icons/final/icon@256.png" width="120" alt="雨帧图标" />
 
-# super_video
+# 雨帧（RainFrame）
 
 **AI 视频超分辨率桌面软件 —— 低清视频一键变高清**
 
@@ -16,7 +16,7 @@
 
 ## 简介
 
-super_video 是一款面向 Windows 的 AI 视频超分辨率桌面软件：通过 GAN 超分模型将低分辨率视频重建为高分辨率画面，并内置补帧、剪切、对比等完整工作流。软件采用 Electron + FastAPI sidecar 架构，全部推理在本机完成，视频数据不出设备。
+雨帧（RainFrame，原名 super_video）是一款面向 Windows 的 AI 视频超分辨率桌面软件：通过 GAN 超分模型将低分辨率视频重建为高分辨率画面，并内置补帧、剪切、对比等完整工作流。软件采用 Electron + FastAPI sidecar 架构，全部推理在本机完成，视频数据不出设备。
 
 内置模型开箱即用，无需配置环境；NVIDIA 用户可在设置页一键安装 TensorRT 加速组件，配合双路并行与硬件编码，4K 超分可达到实时处理级别（详见[性能](#性能)）。
 
@@ -61,7 +61,7 @@ super_video 是一款面向 Windows 的 AI 视频超分辨率桌面软件：通�
 
 画质收益（原片 1080p 降采样至 480p 后 x4 超分，与原片对比；AnimeVideo v3 相对 lanczos 直接放大基线）：
 
-| 指标 | lanczos 基线 | super_video | 提升 |
+| 指标 | lanczos 基线 | 雨帧 | 提升 |
 |---|---|---|---|
 | PSNR | 21.54 dB | **23.54 dB** | +2.0 dB |
 | SSIM | 0.916 | **0.939** | +0.023 |
@@ -72,7 +72,7 @@ super_video 是一款面向 Windows 的 AI 视频超分辨率桌面软件：通�
 
 ### 安装
 
-从 [Releases](https://github.com/mkktop/super_video/releases) 下载最新版安装包 `super_video_<版本>_setup.exe`（如 `super_video_0.3.2_setup.exe`，基础包约 250MB），双击安装，无需管理员权限。
+从 [Releases](https://github.com/mkktop/super_video/releases) 下载最新版安装包 `RainFrame_<版本>_setup.exe`（基础包约 250MB；v0.5.5 及更早版本名为 `super_video_<版本>_setup.exe`），双击安装，无需管理员权限。
 
 模型、TensorRT 组件、设置与任务历史统一存放在安装目录同级的 `super_video_data/` 目录——**升级或重装不会丢失任何数据**。应用内置自动更新：设置页检查更新 → 下载（带进度条）→ 重启静默安装，全程 sha512 校验。
 
@@ -167,8 +167,11 @@ cd app && pnpm preview   # → http://localhost:5199/preview.html
 ### 测试
 
 ```bash
-cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q
-# 393 通过 + 2 跳过（无 GPU/部分模型缺失时按机器跳过）
+# 后端（从 backend 目录跑；无 GPU/部分模型缺失时按机器跳过）
+cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q    # 445 项
+
+# 前端（vitest；CI 同样跑类型检查 + 单测 + 构建）
+cd app && pnpm test
 ```
 
 ### 打包发布
@@ -183,18 +186,15 @@ cd app && pnpm dist
 
 发新版本：更新仓库根 `RELEASE_NOTES.md`（应用内"检查更新"会展示其内容）→ 推送后打 tag → GitHub Actions 自动完成 sidecar 打包、安装包构建、Release 上传与模型资产同步。
 
-版本分两个更新通道（设置 → 应用与更新 → 更新通道，默认稳定版）：
-
-- **稳定版** `v0.4.0`：与上述流程一致，正式 Release，所有用户可见。
-- **预览版** `v0.4.0-preview.1`：三方版本号（tag / `app/package.json` / `backend/sv/__init__.py`）带 `-preview.N` 后缀，`RELEASE_NOTES.md` 写对应 `## v0.4.0-preview.1` 节。CI 识别 tag 后缀自动把 Release 标记为 prerelease——稳定通道客户端查的是 GitHub `releases/latest`（该端点不返回 prerelease），因此存量用户看不到预览版；预览通道客户端可正常发现并升级，转正后发同号正式版（`v0.4.0` > `v0.4.0-preview.1`）即可把预览用户接回稳定序列。
+版本只有单一稳定通道（预览通道 2026-09-29 移除）：tag 一律为正式版（不再使用 `-preview.N` 后缀），三方版本号（tag / `app/package.json` / `backend/sv/__init__.py`）保持一致，`RELEASE_NOTES.md` 写对应 `## vX.Y.Z` 节。历史预览版客户端升级到首个正式版后自动并入稳定序列。
 
 ### R2 备用下载源（v0.4.0 起）
 
-GitHub 对国内网络连通性不稳定，客户端内置 R2 镜像（Cloudflare R2 桶 `super-video`，自定义域 `https://super-video.kaikun.top/`）作为备用源。下载源自 v0.4.8 起可选（设置 → 应用与更新 → 更新下载源）：**自动**（默认，仅手动「检查更新」时 GitHub 连通失败才切 R2 重查，启动自动检查只走 GitHub 省请求）、**R2 优先**（先查 R2，网络不通回落 GitHub，国内直连推荐）、**仅 GitHub**（不使用备用源）。**下载**从最近成功检查的源发起，网络错误自动切另一源重试一次（仅 GitHub 档除外）。GitHub 仍是事实源（通道判定/更新说明），网络恢复后自动回主源。R2 通道文件按通道分名：正式版 `latest.yml`、预览版 `preview.yml`（同一构建产物改名上传，客户端按更新通道各读各的），安装包按原名平铺。
+GitHub 对国内网络连通性不稳定，客户端内置 R2 镜像（Cloudflare R2 桶 `yuzhen`，自定义域 `https://yuzhen-media.yeyushi.com/`）作为备用源。下载源自 v0.4.8 起可选（设置 → 应用与更新 → 更新下载源）：**自动**（默认，仅手动「检查更新」时 GitHub 连通失败才切 R2 重查，启动自动检查只走 GitHub 省请求）、**R2 优先**（先查 R2，网络不通回落 GitHub，国内直连推荐）、**仅 GitHub**（不使用备用源）。**下载**从最近成功检查的源发起，网络错误自动切另一源重试一次（仅 GitHub 档除外）。GitHub 仍是事实源（通道判定/更新说明），网络恢复后自动回主源。R2 通道文件只有 `latest.yml`（同名逐版覆盖），安装包按原名平铺。
 
 - 配置：仓库 Actions secrets 加 `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`（Cloudflare 控制台建 R2 编辑权限的 API Token）。未配置时 release.yml 对应步骤自动跳过，不影响发版。
-- 上传：release.yml 在 tag 发版时用 wrangler 把同一次构建的通道文件（latest.yml 或 preview.yml）+ 安装包传 R2（与 GitHub Release 同产物，sha512 跨源一致）。
-- 发版后核验：`curl https://super-video.kaikun.top/latest.yml`（预览版为 `preview.yml`）的 version/sha512 应与 GitHub Release 配套。
+- 上传：release.yml 在 tag 发版时用 wrangler 把同一次构建的通道文件 latest.yml + 安装包传 R2（与 GitHub Release 同产物，sha512 跨源一致）。
+- 发版后核验：`curl https://yuzhen-media.yeyushi.com/latest.yml` 的 version/sha512 应与 GitHub Release 配套。
 
 ### 模型镜像（ModelScope，v0.4.2 起）
 
@@ -219,6 +219,10 @@ GitHub 对国内网络连通性不稳定，客户端内置 R2 镜像（Cloudflar
 
 ## 相关文档
 
+- [app/README.md](app/README.md) — 桌面端开发文档（进程结构、设计 token 体系、页面管理机制）
+- [backend/README.md](backend/README.md) — 后端开发文档（CLI、代码结构、HTTP API、WS 事件契约、模型 IO 约定）
+- [design/README.md](design/README.md) — 设计资产索引（图标源文件与渲染管线、UI 需求书）
 - [BENCH.md](BENCH.md) — 基准测试方法论与全部实测数据（IO 校准、质量评估、各加速手段 A/B）
-- [PLAN.md](PLAN.md) — 项目规划与里程碑
-- [RELEASE_NOTES.md](RELEASE_NOTES.md) — 版本更新说明
+- [PLAN.md](PLAN.md) — 项目规划与里程碑（历史文档，与现状的偏离见其状态注记）
+- [RELEASE_NOTES.md](RELEASE_NOTES.md) — 版本更新说明（仅保留当前版本，历史见 GitHub Releases）
+- [LICENSE](LICENSE) — 软件许可协议（与安装器内 EULA 条款一致）

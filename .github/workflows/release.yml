@@ -81,17 +81,12 @@ jobs:
         working-directory: app
         run: npx electron-builder --win nsis --publish never
 
-      # 预览版（tag 含 -preview.N）：Release 标记 prerelease——稳定通道客户端走
-      # GitHub releases/latest 端点（天然排除 prerelease），靠这个标记才看不到预览版。
-      # channel 文件说明：electron-builder 对 GitHub publish 不按版本号切换
-      # （预览版也产 latest.yml）；预览通道客户端先请求 preview.yml，404 后自动
-      # 回退 latest.yml（electron-updater 内建 fallback），显式只传 latest.yml
-      # （*.yml 通配会把 builder-debug.yml 一并传上 Release，v0.4.0 实证已回滚）
+      # 只传 latest.yml 不用 *.yml 通配：会把 builder-debug.yml 一并传上 Release
+      # （v0.4.0 实证已回滚）
       - name: 上传到 GitHub Release（正文取自仓库根 RELEASE_NOTES.md）
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: ${{ contains(github.ref_name, '-preview.') }}
           body_path: RELEASE_NOTES.md
           files: |
             dist-app/*.exe
@@ -102,11 +97,7 @@ jobs:
       - name: 上传到 R2 备用源（GitHub 连通失败时客户端自动回退下载）
         # secrets 缺失（未配置备用源）时跳过，不阻塞发版；配置了 CLOUDFLARE_API_TOKEN
         # + CLOUDFLARE_ACCOUNT_ID 即生效。安装包按原名平铺不重名；与 GitHub Release
-        # 同步同一次构建产物，sha512 跨源一致。通道文件按通道分名：正式版 latest.yml、
-        # 预览版 preview.yml（内容即本次构建的 latest.yml 改名，exe 引用不变）——
-        # 客户端 GenericProvider 按 updater.channel 取 {channel}.yml（预览通道主进程
-        # 显式置 channel=preview，与本步骤同版生效），两通道各读各的互不越界：
-        # 稳定兜底只会收到正式版，预览兜底也能收到预览版。同名通道文件逐版覆盖。
+        # 同步同一次构建产物，sha512 跨源一致。通道文件只有 latest.yml（同名逐版覆盖）。
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
@@ -125,7 +116,7 @@ jobs:
           # 而步骤末尾 $LASTEXITCODE 才暴露失败）。逐文件显式校验退出码 + 重试 3 次
           function Put-R2($key, $file) {
             for ($i = 1; $i -le 3; $i++) {
-              npx --yes wrangler@4 r2 object put "super-video/$key" --file $file --remote
+              npx --yes wrangler@4 r2 object put "yuzhen/$key" --file $file --remote
               if ($LASTEXITCODE -eq 0) { return }
               Write-Host "::warning::wrangler put $key 第 $i 次失败（exit=$LASTEXITCODE），重试"
               Start-Sleep -Seconds (10 * $i)
@@ -133,12 +124,9 @@ jobs:
             Write-Host "::error::wrangler put $key 三次均失败"
             exit 1
           }
-          $isPreview = $env:GITHUB_REF_NAME -match '-preview\.'
-          $channelYml = if ($isPreview) { "preview.yml" } else { "latest.yml" }
-          if ($isPreview) { Copy-Item "dist-app/latest.yml" "dist-app/preview.yml" }
-          Put-R2 $channelYml "dist-app/$channelYml"
-          Put-R2 "super_video_${ver}_setup.exe" "dist-app/super_video_${ver}_setup.exe"
-          Write-Host "R2 备用源已更新 $channelYml + super_video_${ver}_setup.exe"
+          Put-R2 "latest.yml" "dist-app/latest.yml"
+          Put-R2 "RainFrame_${ver}_setup.exe" "dist-app/RainFrame_${ver}_setup.exe"
+          Write-Host "R2 备用源已更新 latest.yml + RainFrame_${ver}_setup.exe"
 
       - name: 模型资产同步到 models-v1 Release（注册表驱动，缺什么补什么）
         # 仅 tag 发版时执行：workflow_dispatch 的 commit 上移动 models-v1 tag 是意外行为

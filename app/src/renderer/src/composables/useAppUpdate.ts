@@ -1,4 +1,4 @@
-/** 应用更新域：通道/自动检查设置、检查/下载/安装动作与全部展示态派生。
+/** 应用更新域：下载源/自动检查设置、检查/下载/安装动作与全部展示态派生。
  *  更新状态本体在全局 store.update（事件监听在 store 层注册，切页不丢）。 */
 import { computed, ref } from 'vue'
 import { useMessage } from 'naive-ui'
@@ -9,12 +9,10 @@ export function useAppUpdate() {
   const message = useMessage()
   const checking = ref(false)
   const autoCheck = ref(true)
-  const updateChannel = ref<'stable' | 'preview'>('stable') // 预览版可收到 -preview.N 预发布推送
   const updateSource = ref<'auto' | 'github' | 'r2'>('auto') // 更新下载源：auto=GitHub 失败切 R2 | r2=R2 优先 | github=仅 GitHub
 
   function apply(s: Record<string, unknown>) {
     autoCheck.value = s.auto_update_check !== false
-    updateChannel.value = s.update_channel === 'preview' ? 'preview' : 'stable'
     updateSource.value = s.update_source === 'r2' || s.update_source === 'github' ? s.update_source : 'auto'
   }
 
@@ -66,19 +64,6 @@ export function useAppUpdate() {
     }
   }
 
-  async function saveUpdateChannel(v: 'stable' | 'preview') {
-    const r = await api.saveSettings({ update_channel: v })
-    if (!r.ok) {
-      message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)
-      updateChannel.value = v === 'preview' ? 'stable' : 'preview'
-      return
-    }
-    store.settings = { ...store.settings, update_channel: v }
-    // 通道由主进程在检查时消费：先同步过去，再立即重查一次让用户看到新通道结果
-    window.sv.setUpdateChannel(v)
-    void checkUpdate()
-  }
-
   async function saveUpdateSource(v: 'auto' | 'github' | 'r2') {
     const prev = updateSource.value // v-model 已先改 ref，落库失败要回滚到切换前
     const r = await api.saveSettings({ update_source: v })
@@ -120,8 +105,8 @@ export function useAppUpdate() {
   }
 
   return {
-    checking, autoCheck, updateChannel, updateSource, updateVersion, updateNotes, readyVersion,
+    checking, autoCheck, updateSource, updateVersion, updateNotes, readyVersion,
     downloading, downloadPercent, updateMsg, updateTag,
-    saveAutoCheck, saveUpdateChannel, saveUpdateSource, checkUpdate, doDownload, doInstall, apply,
+    saveAutoCheck, saveUpdateSource, checkUpdate, doDownload, doInstall, apply,
   }
 }

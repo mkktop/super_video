@@ -395,9 +395,7 @@ export async function initStore() {
     }
     // 「关闭到托盘」行为由主进程执行：读到设置后同步过去（托盘随之建立）
     window.sv.win.setCloseToTray(store.settings.close_to_tray === true)
-    // 更新通道同样由主进程消费：须在下方启动自动检查之前同步，否则首查用错通道
-    window.sv.setUpdateChannel(store.settings.update_channel === 'preview' ? 'preview' : 'stable')
-    // 下载源偏好同理（检查/下载的源顺序），也须先于首查
+    // 下载源偏好由主进程消费（检查/下载的源顺序），须在下方启动自动检查之前同步
     window.sv.setUpdateSource(
       store.settings.update_source === 'r2' || store.settings.update_source === 'github'
         ? store.settings.update_source

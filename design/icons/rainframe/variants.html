@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<!-- 雨帧 Logo 变体画板：与雨番（Framix）同系列——暗夜底 + 三色霓虹（粉→紫→青）+ 圆头雨丝。
+     「帧」= 取景框角括号；「雨」= 斜贯雨丝；「超分」= 中心星芒（低清变高清的锐化暗示）。
+     选定后回写 rainframe.svg，用 ../make_icons.js 流程重出 PNG/ICO。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  body { background: #fff; font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; padding: 18px 22px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #7d8aa0; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: 250px repeat(2, 128px) 220px; gap: 14px 18px; align-items: center; }
+  .head { font-size: 13px; font-weight: 700; color: #47536e; padding-bottom: 2px; }
+  .cname { font-size: 15px; font-weight: 700; color: #1d2638; }
+  .cname small { display: block; font-size: 12px; font-weight: 400; color: #7d8aa0; margin-top: 3px; line-height: 1.55; }
+  .tile svg { width: 112px; height: 112px; display: block; border-radius: 24px; }
+  .tile.light { background: #f4f6fa; border-radius: 24px; padding: 8px; width: 128px; }
+  .tile.dark { background: #0b0e14; border-radius: 24px; padding: 8px; width: 128px; }
+  .minis { display: flex; align-items: center; gap: 10px; }
+  .minis .chip-light, .minis .chip-dark { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; }
+  .minis .chip-light { background: #f4f6fa; }
+  .minis .chip-dark { background: #0b0e14; }
+  .minis svg { display: block; }
+  .hsec { margin-top: 26px; }
+  .hsec h2 { font-size: 16px; margin-bottom: 12px; }
+  .hbar { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 18px; border-radius: 12px; margin-bottom: 10px; }
+  .hbar.light { background: #f7f8fb; border: 1px solid #e7ebf3; }
+  .hbar.dark { background: #141517; border: 1px solid #23252a; }
+  .hbar svg { width: 34px; height: 34px; display: block; border-radius: 8px; }
+  .hbar .wname { font-size: 19px; font-weight: 700; }
+  .hbar.light .wname { color: #26324f; }
+  .hbar.dark .wname { color: #e8eaed; }
+  .hbar .wver { font-size: 12px; margin-left: 2px; }
+  .hbar.light .wver { color: #8a94a8; }
+  .hbar.dark .wver { color: #6f7680; }
+  .hbar nav { display: flex; gap: 18px; margin-left: 26px; font-size: 14px; }
+  .hbar.light nav { color: #47536e; }
+  .hbar.dark nav { color: #aab3c5; }
+  .hbar nav .on { color: #4f8cff; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>雨帧 Logo · 霓虹取景框家族（与雨番同系列）</h1>
+<div class="sub">6 变体 · 亮/暗底 128px + 32/24/16px 实际可读性 · 下方顶栏模拟（34px，亮 / 暗）</div>
+<div class="grid" id="grid"></div>
+<div class="hsec" id="hsec"><h2>顶栏实际效果（34px，亮 / 暗）</h2></div>
+
+<script>
+// ---------- 工具 ----------
+const s = (x1, y1, x2, y2, w, o, color = '#fff') =>
+  `<path d="M${x1} ${y1}L${x2} ${y2}" stroke="${color}" stroke-width="${w}" stroke-linecap="round" opacity="${o}" fill="none"/>`;
+const play = (x, y, w2, h, sw, fill) =>
+  `<path d="M${x} ${y}v${h}l${w2} -${h / 2}z" fill="${fill}" stroke="${fill}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+function base() {
+  return `<rect width="64" height="64" rx="15" fill="#12172a"/>`
+    + `<rect x=".5" y=".5" width="63" height="63" rx="14.5" fill="none" stroke="rgba(255,255,255,.1)"/>`;
+}
+function linDef(id, stops, x1 = 14, y1 = 14, x2 = 50, y2 = 50) {
+  return `<linearGradient id="${id}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" gradientUnits="userSpaceOnUse">`
+    + stops.map(([o, c]) => `<stop offset="${o}" stop-color="${c}"/>`).join('') + '</linearGradient>';
+}
+const blurDef = (id, dev = 2.8) =>
+  `<filter id="${id}" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="${dev}"/></filter>`;
+const svgWrap = (inner) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${inner}</svg>`;
+
+// 三色霓虹（与雨番 favicon 同色）
+const NEON = [[0, '#ff5c8a'], [1, '#22d3ee']];
+const NEON3 = [[0, '#ff5c8a'], [.5, '#a78bfa'], [1, '#22d3ee']];
+
+// 取景框四角括号：外框 17..47，臂长 10，圆角转折
+const BRACKETS = 'M17 27 L17 21 Q17 17 21 17 L27 17 M37 17 L43 17 Q47 17 47 21 L47 27 '
+  + 'M47 37 L47 43 Q47 47 43 47 L37 47 M27 47 L21 47 Q17 47 17 43 L17 37';
+const brackets = (stroke, w = 4.5) =>
+  `<path d="${BRACKETS}" fill="none" stroke="${stroke}" stroke-width="${w}" stroke-linecap="round"/>`;
+
+// 四角星芒（锐化/超分暗示）：凹边四角星
+const starPath = (cx, cy, r) => {
+  const ri = r * 0.22;
+  const pts = [];
+  for (let i = 0; i < 8; i++) {
+    const ang = -Math.PI / 2 + i * Math.PI / 4;
+    const rad = i % 2 === 0 ? r : ri;
+    pts.push(`${(cx + rad * Math.cos(ang)).toFixed(2)} ${(cy + rad * Math.sin(ang)).toFixed(2)}`);
+  }
+  return 'M' + pts.join(' L') + ' Z';
+};
+const star = (cx, cy, r, fill = '#fff') =>
+  `<path d="${starPath(cx, cy, r)}" fill="${fill}"/>`;
+
+// ---------- 变体 ----------
+const V = [];
+
+// V1 取景框 × 星芒 × 雨丝（本命候选）：渐变括号 + 白星芒 + 右上白雨丝
+{
+  const inner = `<defs>${linDef('g1', NEON)}${blurDef('b1')}</defs>` + base()
+    + `<g filter="url(#b1)" opacity=".9">${brackets('url(#g1)')}</g>`
+    + brackets('url(#g1)')
+    + s(45, 6.5, 40.5, 13.5, 3.5, .85)
+    + `<g filter="url(#b1)" opacity=".55">${star(32, 32, 10)}</g>` + star(32, 32, 10);
+  V.push(['V1 取景框·星芒·雨丝', '「帧」括号 + 超分星芒 + 雨丝三元素齐', inner]);
+}
+
+// V2 双雨丝：括号 + 粉白双雨丝（雨感更强），星芒收小
+{
+  const inner = `<defs>${linDef('g2', NEON)}${blurDef('b2')}</defs>` + base()
+    + `<g filter="url(#b2)" opacity=".9">${brackets('url(#g2)')}</g>`
+    + brackets('url(#g2)')
+    + s(45, 5.5, 40, 13.5, 3.5, .9)
+    + s(52.5, 12, 49.5, 17, 3, .75, '#22d3ee')
+    + star(32, 32, 8.5);
+  V.push(['V2 取景框·双雨丝', '雨感更强；星芒收小让位', inner]);
+}
+
+// V3 连续框·缺口雨丝（雨番环的直接镜像）：渐变圆角细框，右上开口落雨丝 + 星芒
+{
+  const inner = `<defs>${linDef('g3', NEON)}${blurDef('b3')}</defs>` + base()
+    + `<g filter="url(#b3)" opacity=".9"><rect x="19" y="19" width="26" height="26" rx="8" pathLength="100" fill="none" stroke="url(#g3)" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="84 16" transform="rotate(-52 32 32)"/></g>`
+    + `<rect x="19" y="19" width="26" height="26" rx="8" pathLength="100" fill="none" stroke="url(#g3)" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="84 16" transform="rotate(-52 32 32)"/>`
+    + s(43, 6.5, 39.5, 12.5, 3.5, .85)
+    + star(32, 32, 9);
+  V.push(['V3 连续框·缺口雨丝', '雨番「霓虹环」的镜像：环→框', inner]);
+}
+
+// V4 框 × 彩键：括号 + 渐变播放键（与雨番「霓虹环彩键」最亲），去星芒
+{
+  const inner = `<defs>${linDef('g4', NEON)}${linDef('p4', NEON3, 27.5, 26.5, 40, 38.5)}${blurDef('b4')}</defs>` + base()
+    + `<g filter="url(#b4)" opacity=".9">${brackets('url(#g4)')}</g>`
+    + brackets('url(#g4)')
+    + s(45, 6.5, 40.5, 13.5, 3.5, .85)
+    + play(28.5, 26.5, 11, 11.5, 4, 'url(#p4)');
+  V.push(['V4 取景框·彩键', '系列感最强：框+键双视频语汇', inner]);
+}
+
+// V5 大星芒·角标：星芒主导（超分身份），括号退为短角标
+{
+  const tick = (x, y, dx, dy) =>
+    `<path d="M${x} ${y}l${dx * 7} 0 M${x} ${y}l0 ${dy * 7}" stroke="url(#g5)" stroke-width="4" stroke-linecap="round" fill="none"/>`;
+  const inner = `<defs>${linDef('g5', NEON)}${blurDef('b5')}</defs>` + base()
+    + `<g filter="url(#b5)" opacity=".9">${tick(17, 17, 1, 1)}${tick(47, 17, -1, 1)}${tick(47, 47, -1, -1)}${tick(17, 47, 1, -1)}</g>`
+    + tick(17, 17, 1, 1) + tick(47, 17, -1, 1) + tick(47, 47, -1, -1) + tick(17, 47, 1, -1)
+    + s(45, 6.5, 40.5, 13.5, 3.5, .85)
+    + `<g filter="url(#b5)" opacity=".55">${star(32, 32, 13)}</g>` + star(32, 32, 13);
+  V.push(['V5 大星芒·短角标', '超分身份最强，括号退为角标', inner]);
+}
+
+// V6 嵌套双框：外粉内青双层括号（低清→高清的放大叙事），中心白点
+{
+  const BR_IN = 'M25 29 L25 27 Q25 25 27 25 L29 25 M35 25 L37 25 Q39 25 39 27 L39 29 '
+    + 'M39 35 L39 37 Q39 39 37 39 L35 39 M29 39 L27 39 Q25 39 25 37 L25 35';
+  const inner = `<defs>${linDef('g6', NEON)}${linDef('g6b', [[0, '#22d3ee'], [1, '#ff5c8a']], 25, 25, 39, 39)}${blurDef('b6')}</defs>` + base()
+    + `<g filter="url(#b6)" opacity=".9">${brackets('url(#g6)')}</g>`
+    + brackets('url(#g6)')
+    + `<path d="${BR_IN}" fill="none" stroke="url(#g6b)" stroke-width="3.5" stroke-linecap="round" opacity=".95"/>`
+    + s(45, 6.5, 40.5, 13.5, 3.5, .85)
+    + star(32, 32, 5.5);
+  V.push(['V6 嵌套双框', '外框→内框 = 放大叙事；小尺寸最易糊', inner]);
+}
+
+// ---------- 渲染画板 ----------
+const grid = document.getElementById('grid');
+grid.innerHTML = `<div></div><div class="head">亮底 128px</div><div class="head">暗底 128px</div><div class="head">小尺寸 32 / 24 / 16px</div>`;
+for (const [name, desc, inner] of V) {
+  const row = document.createElement('div');
+  row.className = 'cname';
+  row.innerHTML = `${name}<small>${desc}</small>`;
+  grid.appendChild(row);
+  for (const cls of ['light', 'dark']) {
+    const d = document.createElement('div');
+    d.className = 'tile ' + cls;
+    d.innerHTML = svgWrap(inner);
+    grid.appendChild(d);
+  }
+  const m = document.createElement('div');
+  m.className = 'minis';
+  m.innerHTML = `<div class="chip-light">${[32, 24, 16].map(n => svgWrap(inner).replace('viewBox="0 0 64 64"', `viewBox="0 0 64 64" width="${n}" height="${n}"`)).join('')}</div>`
+    + `<div class="chip-dark">${[32, 24, 16].map(n => svgWrap(inner).replace('viewBox="0 0 64 64"', `viewBox="0 0 64 64" width="${n}" height="${n}"`)).join('')}</div>`;
+  grid.appendChild(m);
+}
+
+// ---------- 顶栏模拟 ----------
+const pick = V[0][2], pick2 = V[3][2];
+const hsec = document.getElementById('hsec');
+for (const [cls, label] of [['light', '亮'], ['dark', '暗']]) {
+  for (const [inner, nm] of [[pick, 'V1'], [pick2, 'V4']]) {
+    const bar = document.createElement('div');
+    bar.className = 'hbar ' + cls;
+    bar.innerHTML = svgWrap(inner) + `<span class="wname">雨帧</span><span class="wver">v0.5.5</span>`
+      + `<nav><span class="on">首页</span><span>任务</span><span>对比</span><span>设置</span></nav>`
+      + `<span style="margin-left:auto;font-size:12px;opacity:.55">${nm} · ${label}</span>`;
+    hsec.appendChild(bar);
+  }
+}
+</script>
+</body>
+</html>

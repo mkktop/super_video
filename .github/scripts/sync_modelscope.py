@@ -48,9 +48,9 @@ _README_HEADER = """---
 license: other
 ---
 
-# super_video 模型镜像
+# 雨帧模型镜像
 
-[super_video](https://github.com/mkktop/super_video)（视频/图片 AI 超分，Windows 桌面版）
+[雨帧 RainFrame](https://github.com/mkktop/super_video)（视频/图片 AI 超分，Windows 桌面版）
 全部模型资产的国内加速镜像，与 GitHub `models-v1` Release 内容逐字节一致
 （客户端按 sha256 校验）。应用内下载主源走本仓库，GitHub 为备用源。
 

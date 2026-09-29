@@ -82,7 +82,7 @@ def make_long_image(src_path: Path, out_path: Path, t_src: float, t_out: float,
     card = Image.new("RGB", (CARD_W, total_h), (13, 14, 16))
     d = ImageDraw.Draw(card)
 
-    title = f"super_video · {meta.get('model', '')} · {meta.get('scale', '')}"
+    title = f"雨帧 · {meta.get('model', '')} · {meta.get('scale', '')}"
     d.text((20, 16), title, font=f_title, fill=(232, 234, 237))
 
     y = head_h
@@ -140,7 +140,7 @@ def make_slider_gif(src_path: Path, out_path: Path, t_src: float, t_out: float,
                stroke_width=2, stroke_fill=(0, 0, 0))
         d.text((min(w - 150, cut + 14), canvas_y + 8), "处理后", font=f_small, fill=(79, 140, 255),
                stroke_width=2, stroke_fill=(0, 0, 0))
-        title = f"super_video · {meta.get('model', '')} · {meta.get('scale', '')}"
+        title = f"雨帧 · {meta.get('model', '')} · {meta.get('scale', '')}"
         d.text((14, 10), title, font=f_title, fill=(232, 234, 237))
         d.text((14, head_h + h + 10), str(meta.get("name", "")), font=f_small, fill=(120, 126, 132))
         frames.append(fr)

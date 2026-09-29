@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""super_video CLI（M0）：probe / gen / models / run。"""
+"""雨帧（RainFrame）CLI（M0）：probe / gen / models / run。"""
 from __future__ import annotations
 
 import argparse
@@ -284,7 +284,7 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, OSError):
             pass
-    ap = argparse.ArgumentParser(prog="sv", description="super_video CLI (M0)")
+    ap = argparse.ArgumentParser(prog="sv", description="雨帧 CLI (M0)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("probe", help="探测媒体信息")

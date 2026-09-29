@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN" data-page-node-id="FtYalnYQmWbB4iPHdh4SSD">
+<head data-page-node-id="9xjOTEIWGz2BvDoM8eZdXv">
+<meta charset="utf-8" data-page-node-id="vsgjh2YzOk3a1p5K34gJ9J">
+<title>雨帧 RainFrame — S1 水下折射 精进（第 10 批 · 4 版）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f3f4f6; color: #111827; padding: 32px 40px 64px; }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 26px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 18px 20px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .card h2 { font-size: 15px; margin-bottom: 2px; }
+  .card .desc { font-size: 12px; color: #6b7280; margin-bottom: 14px; line-height: 1.5; }
+  .stage { display: flex; align-items: flex-end; gap: 14px; }
+  .big { width: 128px; height: 128px; flex: none; }
+  .big svg { width: 128px; height: 128px; border-radius: 24px; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+  .sizes { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; }
+  .row.light { background: #e5e7eb; }
+  .row.dark { background: #1f2937; }
+  .row svg { flex: none; }
+  .row .lbl { font-size: 10px; color: #9ca3af; width: 26px; }
+  .ref { background: #fffbeb; border: 1px dashed #f59e0b; }
+</style>
+</head>
+<body data-page-node-id="E0xFHWaJi41AFvHHwJtrTD">
+
+<h1 data-page-node-id="jn3bZZyIk1yx98yXLdUMlv">S1 水下折射 · 精进</h1>
+<p class="sub" data-page-node-id="FxzNrh6uUPDTSBYvGcIntC">在 S1 基础上打磨水面物理感：折射错位、水下光斑、触水涟漪、紫夜配色。末卡为原 S1 参照。</p>
+
+<svg width="0" height="0" style="position:absolute" data-page-node-id="75K7y2uMhQ4vxTGasGo3K4">
+  <defs data-page-node-id="am1mQkNJYuwi99SL5n38pt">
+    <radialGradient id="water1" cx=".5" cy=".42" r=".78" data-page-node-id="OQkhYHL3dEGeeysRGCFa6f">
+      <stop offset="0" stop-color="#0e3d50" data-page-node-id="THXOlxg4xs27UcrF9DSN1h"/><stop offset="1" stop-color="#061a26" data-page-node-id="Me5VgNM0HUw7PaiEDjdEJM"/>
+    </radialGradient>
+    <radialGradient id="water2" cx=".5" cy=".42" r=".78" data-page-node-id="fdx2meupH35NEeaqLkL3WF">
+      <stop offset="0" stop-color="#2b1b52" data-page-node-id="p10vvOjxJuP4kXSDGUbusB"/><stop offset="1" stop-color="#0d0819" data-page-node-id="HbfeXUvR2HC4dGdhZOY56E"/>
+    </radialGradient>
+    <linearGradient id="iridV" x1="0" y1="0" x2="0" y2="1" data-page-node-id="dJq20OxHJPtUs2ih8KKrZy">
+      <stop offset="0" stop-color="#22d3ee" data-page-node-id="7M5nD2lASBC8Hu8GNG8Toy"/><stop offset=".5" stop-color="#a78bfa" data-page-node-id="feLeYoGbsvAEtQd40p7lol"/><stop offset="1" stop-color="#ff5c8a" data-page-node-id="sDW2UXEki0QAtdnxbxSOfA"/>
+    </linearGradient>
+    <linearGradient id="surfG" x1="0" y1="0" x2="1" y2="0" data-page-node-id="hBqYKSFQVgFh9VKA7Uw5rb">
+      <stop offset="0" stop-color="#a5f3fc" stop-opacity="0" data-page-node-id="g30XlPxmbBh7fEEGfuSCki"/>
+      <stop offset=".2" stop-color="#a5f3fc" stop-opacity=".75" data-page-node-id="WUME1YKfDxQ6W1rlurwNGG"/>
+      <stop offset=".8" stop-color="#a5f3fc" stop-opacity=".75" data-page-node-id="D2vKtD923dv4u6KWSEkAAT"/>
+      <stop offset="1" stop-color="#a5f3fc" stop-opacity="0" data-page-node-id="gonxCgkjEIh2J55gHnnVy3"/>
+    </linearGradient>
+    <linearGradient id="surfV" x1="0" y1="0" x2="1" y2="0" data-page-node-id="SCBch86QPuExsP81nW7qUl">
+      <stop offset="0" stop-color="#ddd6fe" stop-opacity="0" data-page-node-id="VIeehcP6zFkfepaUDUSWM7"/>
+      <stop offset=".2" stop-color="#ddd6fe" stop-opacity=".75" data-page-node-id="mZPEFB17MBMPyaTWNzhUQp"/>
+      <stop offset=".8" stop-color="#ddd6fe" stop-opacity=".75" data-page-node-id="uCCAjH6jeKnXXGjlYny6E7"/>
+      <stop offset="1" stop-color="#ddd6fe" stop-opacity="0" data-page-node-id="3nlLOsSXIksgb8h4qu6A8v"/>
+    </linearGradient>
+    <filter id="soft10" x="-40%" y="-40%" width="180%" height="180%" data-page-node-id="tKN51Ms2lFMq5bKysLHiKp">
+      <feGaussianBlur stdDeviation="10" data-page-node-id="jEKzjfbP2GO8uFkZ7Bf8LU"/>
+    </filter>
+    <filter id="wobble" x="-20%" y="-20%" width="140%" height="140%" data-page-node-id="v59K8BKYIeqZfCnWpbhWgT">
+      <feTurbulence type="fractalNoise" baseFrequency="0.015 0.09" numOctaves="2" seed="7" result="n" data-page-node-id="RGGAwN7PFcnk8B26jcCkaK"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="16" xChannelSelector="R" yChannelSelector="G" data-page-node-id="Ns1C2B1F8dCbDNFbUS0OJ0"/>
+    </filter>
+    <filter id="wobbleBlur" x="-20%" y="-20%" width="140%" height="140%" data-page-node-id="fCHvkSHjlg4PqODFcV4zdD">
+      <feTurbulence type="fractalNoise" baseFrequency="0.015 0.09" numOctaves="2" seed="7" result="n" data-page-node-id="3QGOzr7AcSQz3koXipRJHh"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="13" xChannelSelector="R" yChannelSelector="G" result="d" data-page-node-id="VSdwwg85ApGMvIXfPKJL8u"/>
+      <feGaussianBlur in="d" stdDeviation="1.4" data-page-node-id="Zk5kBROqOwD0dR3GOS8bDJ"/>
+    </filter>
+    <clipPath id="top250" data-page-node-id="NzooyUS34beWx8ymGhqZnT"><rect x="0" y="0" width="512" height="250" data-page-node-id="TfMmAZDQfg54WSJjzu9iVX"/></clipPath>
+    <clipPath id="btm250" data-page-node-id="gCjCm3LD8MmkOTS8SyDJQc"><rect x="0" y="250" width="512" height="262" data-page-node-id="H8XvkMuRK4Nifn4caqfEd2"/></clipPath>
+    <clipPath id="top292" data-page-node-id="HXaJZcKWAbyMuHGIPaoD3k"><rect x="0" y="0" width="512" height="292" data-page-node-id="Tp0cue0rwWINsIZ6vWbBQZ"/></clipPath>
+    <clipPath id="btm292" data-page-node-id="hldVBnbrK6cPj1TQKfvAQs"><rect x="0" y="292" width="512" height="220" data-page-node-id="07vag5uTMsl4BpQI5b17rm"/></clipPath>
+  </defs>
+
+  <!-- S1+ 折射错位 -->
+  <symbol id="s1a" viewBox="0 0 512 512" data-page-node-id="iKuTL63hkLDXbmkJ98zuED">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="4aFdSSTpcvFT1UzLiNxE7u"/>
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#67e8f9" stroke-width="6" opacity=".35"
+            stroke-dasharray="500 681" stroke-linecap="round" transform="rotate(100 256 256)" data-page-node-id="probC1IKc20CKjPJm9n2V0"/>
+    <g clip-path="url(#btm250)" data-page-node-id="ZAeG0GgC5DqhWrMnvq6Zct">
+      <g transform="translate(10 2)" data-page-node-id="mSYtVy2Kin3Fd76pBFqqs9">
+        <circle cx="256" cy="256" r="132" fill="none" stroke="#7dd3fc" stroke-width="16" opacity=".5" filter="url(#wobble)" data-page-node-id="pzXhSIXD7sgrUxAKmMqvnD"/>
+      </g>
+    </g>
+    <g clip-path="url(#top250)" data-page-node-id="kU00FECmi7ua3dI6HlNJuj">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#22d3ee" stroke-width="16" data-page-node-id="NC4ChqFFka2My8MylC0k4k"/>
+    </g>
+    <path d="M110 250 Q188 240 256 250 T 402 250" stroke="url(#surfG)" stroke-width="5" fill="none" stroke-linecap="round" data-page-node-id="51VOlgSbJePHH3chEeVcGV"/>
+    <path d="M119 243 L131 253 M393 243 L381 253" stroke="#cffafe" stroke-width="4" stroke-linecap="round" opacity=".7" data-page-node-id="cZcKrrfNgAfAT8QzwHb2WR"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="rwToixnClOzA86lfJVEGH0"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="RKjYOZr0ZXdKjNoCF8cemv"/>
+  </symbol>
+
+  <!-- S1b 深水光斑 -->
+  <symbol id="s1b" viewBox="0 0 512 512" data-page-node-id="7bQcJ3Ttvrxzu8xG3KbxOI">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="bqheQh3tJW9lCyK5sACxrH"/>
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#67e8f9" stroke-width="6" opacity=".35"
+            stroke-dasharray="500 681" stroke-linecap="round" transform="rotate(100 256 256)" data-page-node-id="yb0uKHKug3w8Ze7Zh4M6vH"/>
+    <ellipse cx="212" cy="332" rx="58" ry="18" fill="#67e8f9" opacity=".12" filter="url(#soft10)" data-page-node-id="pAYSDR9JJPFz4DCCBgVhAU"/>
+    <ellipse cx="306" cy="352" rx="46" ry="14" fill="#67e8f9" opacity=".09" filter="url(#soft10)" data-page-node-id="PFl8gWmsCOHoiDaCfF4YNT"/>
+    <g clip-path="url(#btm250)" data-page-node-id="B8LcEwitYAzOZwFjaehOzx">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#7dd3fc" stroke-width="16" opacity=".45" filter="url(#wobbleBlur)" data-page-node-id="kQgkMxFa0RMPNLiFEl4TDb"/>
+    </g>
+    <g clip-path="url(#top250)" data-page-node-id="1RcKa9MSpDg5lXYFaEXiFq">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#22d3ee" stroke-width="16" data-page-node-id="Jx3uV6AYzcy4iSflzKyw72"/>
+    </g>
+    <ellipse cx="256" cy="250" rx="110" ry="9" fill="#a5f3fc" opacity=".2" filter="url(#soft10)" data-page-node-id="ATIp8TrbWCKpXFgAA1CH5r"/>
+    <path d="M110 250 Q188 240 256 250 T 402 250" stroke="url(#surfG)" stroke-width="5" fill="none" stroke-linecap="round" data-page-node-id="6mBKQRIUrqs0IeqFFKlEbn"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="qWFmjngNBDKLuLFgGyuOlK"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="MdLHM4ZbF9uKhVYNlzIwos"/>
+  </symbol>
+
+  <!-- S1c 触水涟漪 -->
+  <symbol id="s1c" viewBox="0 0 512 512" data-page-node-id="gAIyADFh9CFZXAhL3M5dVR">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="GhVcTpAAo9IQHDQ9WfJcKQ"/>
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#67e8f9" stroke-width="6" opacity=".35"
+            stroke-dasharray="500 681" stroke-linecap="round" transform="rotate(100 256 256)" data-page-node-id="v1emayf0C3uymzef4rGc8d"/>
+    <g clip-path="url(#btm292)" data-page-node-id="fnTJg0FFxTnDeNkTvNc5t4">
+      <g transform="translate(8 2)" data-page-node-id="QvUMhtPoU244HnQujhzd9N">
+        <circle cx="256" cy="256" r="132" fill="none" stroke="#7dd3fc" stroke-width="16" opacity=".5" filter="url(#wobble)" data-page-node-id="rvOVrJkhTSPPwKkCnJwwJd"/>
+      </g>
+    </g>
+    <g clip-path="url(#top292)" data-page-node-id="qWijYDMb7ZdzkH6tu26gxa">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#22d3ee" stroke-width="16" data-page-node-id="zzc9gmOZ80HL19rVGz1cFW"/>
+    </g>
+    <path d="M118 292 Q190 283 256 292 T 394 292" stroke="url(#surfG)" stroke-width="5" fill="none" stroke-linecap="round" data-page-node-id="QMDA8hVRkBe2YK96ysLfNb"/>
+    <ellipse cx="238" cy="298" rx="34" ry="8" fill="none" stroke="#a5f3fc" stroke-width="4" opacity=".55" data-page-node-id="jjE6nU1qAnfpiQXvBUJZe0"/>
+    <ellipse cx="238" cy="300" rx="54" ry="13" fill="none" stroke="#a5f3fc" stroke-width="3" opacity=".28" data-page-node-id="r3QCOToFx450nJ1r4pKc9e"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="SqAMITgbg7a5oHV2hWRcAP"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="cCcYmBpfmXMZIWVKdKEWWB"/>
+  </symbol>
+
+  <!-- S1d 紫夜水面 -->
+  <symbol id="s1d" viewBox="0 0 512 512" data-page-node-id="bs6u0bOR10Ei6QlJyukZkk">
+    <rect width="512" height="512" rx="112" fill="url(#water2)" data-page-node-id="SkDnZEbwwgoJe72buDnJpK"/>
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#c4b5fd" stroke-width="6" opacity=".35"
+            stroke-dasharray="500 681" stroke-linecap="round" transform="rotate(100 256 256)" data-page-node-id="dxD5rzBCuS8VKPNmW3kH37"/>
+    <g clip-path="url(#btm250)" data-page-node-id="6U8RjeppmD7nRBIhMDqGoz">
+      <g transform="translate(10 2)" data-page-node-id="HG8XAZNJapFAZ7worqyeHt">
+        <circle cx="256" cy="256" r="132" fill="none" stroke="#c4b5fd" stroke-width="16" opacity=".5" filter="url(#wobble)" data-page-node-id="4ZKHcJvKggmMf9ofS9aDd7"/>
+      </g>
+    </g>
+    <g clip-path="url(#top250)" data-page-node-id="D9688oQDK2DHLxm5GumjtG">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#a78bfa" stroke-width="16" data-page-node-id="znxfTfDqHmOSIbI94E7M29"/>
+    </g>
+    <path d="M110 250 Q188 240 256 250 T 402 250" stroke="url(#surfV)" stroke-width="5" fill="none" stroke-linecap="round" data-page-node-id="q2Vb4VMhOFIYerHFJ210PQ"/>
+    <path d="M119 243 L131 253 M393 243 L381 253" stroke="#ede9fe" stroke-width="4" stroke-linecap="round" opacity=".7" data-page-node-id="SdqhiJNeOgDNX9U9DzRHY7"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="g7oLIlS0LqRPocomuKaRkH"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="mWX56kCwVHMcU4t3ExapUa"/>
+  </symbol>
+
+  <!-- 原 S1 参照 -->
+  <symbol id="s1old" viewBox="0 0 512 512" data-page-node-id="gwMIE32Y77wueENnU2Q0kw">
+    <rect width="512" height="512" rx="112" fill="url(#water1)" data-page-node-id="bBfAEfoMf6307e892dxHz5"/>
+    <circle cx="256" cy="256" r="162" fill="none" stroke="#67e8f9" stroke-width="6" opacity=".35"
+            stroke-dasharray="500 681" stroke-linecap="round" transform="rotate(100 256 256)" data-page-node-id="7TXTD2DKnz4UGxYwppogAz"/>
+    <g clip-path="url(#btm250)" data-page-node-id="ZeSh1efjJPe2HirbJJfJmi">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#7dd3fc" stroke-width="16" opacity=".55" filter="url(#wobble)" data-page-node-id="eYuM8WlA8PfhPrUQOXbKXF"/>
+    </g>
+    <g clip-path="url(#top250)" data-page-node-id="0dilhOxtXhHFg5sI3997lu">
+      <circle cx="256" cy="256" r="132" fill="none" stroke="#22d3ee" stroke-width="16" data-page-node-id="4MIN0w7rmrycYRVmDE9O4q"/>
+    </g>
+    <path d="M124 250 Q190 240 256 250 T 388 250" stroke="#a5f3fc" stroke-width="5" fill="none" opacity=".55" stroke-linecap="round" data-page-node-id="dqogdRLBvJvC7pVeDDM282"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" filter="url(#soft10)" opacity=".6" data-page-node-id="894wheTAcMlr0ekotZE8pg"/>
+    <path d="M228 192 V320 L338 256 Z" fill="url(#iridV)" stroke="url(#iridV)" stroke-width="26" stroke-linejoin="round" data-page-node-id="RVpgKba7KwqJxhWG6BdBae"/>
+  </symbol>
+</svg>
+
+<div class="grid" id="grid" data-page-node-id="PojSSFPvA10M1aVGjAd9Gb"></div>
+
+<script>
+const variants = [
+  { id: 's1a', name: 'S1+ · 折射错位', desc: '补上真正的折射物理：水下那段环向右错位 10px——像插进水里的筷子在水面处「折」了一下；水线与环的两个交点加了细小水花。' },
+  { id: 's1b', name: 'S1b · 深水光斑', desc: '水下段改为「扭曲+失焦」双重弱化，环内底部浮两块柔和光斑，水线中央一团微光——水深感最强。' },
+  { id: 's1c', name: 'S1c · 触水涟漪', desc: '水面下移到环的下三分之一，播放键的底角刚好点在水面上，荡出两圈椭圆涟漪——播放键与水面有了互动。' },
+  { id: 's1d', name: 'S1d · 紫夜水面', desc: 'S1+ 的完整构图换靛紫夜色（与雨番暗夜系呼应），炫彩三角在紫底上更艳。' },
+  { id: 's1old', name: '原 S1 · 参照', desc: '第 9 批 S1 原样，便于对比。', ref: true },
+];
+
+const sizes = [64, 48, 32, 24, 16];
+const grid = document.getElementById('grid');
+for (const v of variants) {
+  const rowImgs = () => sizes.map(s =>
+    `<svg width="${s}" height="${s}" style="border-radius:${Math.max(3, s * 0.22)}px"><use href="#${v.id}"/></svg>`
+  ).join('');
+  grid.insertAdjacentHTML('beforeend', `
+    <div class="card${v.ref ? ' ref' : ''}">
+      <h2>${v.name}</h2>
+      <p class="desc">${v.desc}</p>
+      <div class="stage">
+        <div class="big"><svg viewBox="0 0 512 512"><use href="#${v.id}"/></svg></div>
+        <div class="sizes">
+          <div class="row light"><span class="lbl">浅底</span>${rowImgs()}</div>
+          <div class="row dark"><span class="lbl">深底</span>${rowImgs()}</div>
+        </div>
+      </div>
+    </div>`);
+}
+</script>
+
+</body>
+</html>

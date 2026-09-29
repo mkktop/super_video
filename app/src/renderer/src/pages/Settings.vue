@@ -17,7 +17,7 @@ import {
 } from 'naive-ui'
 import { api } from '../api'
 import { refreshTrt, store } from '../store'
-import { fmtBytes } from '../utils'
+import { fmtBytes, versionParts } from '../utils'
 import { themeMode, type ThemeMode } from '../theme'
 import { useAppUpdate } from '../composables/useAppUpdate'
 import { useCompareCache } from '../composables/useCompareCache'
@@ -30,6 +30,7 @@ const engine = ref<'auto' | 'cuda' | 'trt' | 'directml' | 'cpu'>('auto')
 const precision = ref<'fp16' | 'fp32'>('fp16')
 const saving = ref(false)
 const appVersion = ref('')
+const verParts = computed(() => versionParts(appVersion.value))
 const proxyMode = ref<'auto' | 'direct' | 'custom'>('auto')
 const proxyAddr = ref('')
 const savingProxy = ref(false)
@@ -56,9 +57,9 @@ const {
 } = useCompareCache()
 const { trcBusy, trcDownloadBytes, installTrc, uninstallTrc } = useTrtComponent()
 const {
-  checking, autoCheck, updateChannel, updateSource, updateVersion, updateNotes, readyVersion,
+  checking, autoCheck, updateSource, updateVersion, updateNotes, readyVersion,
   downloading, downloadPercent, updateMsg, updateTag,
-  saveAutoCheck, saveUpdateChannel, saveUpdateSource, checkUpdate, doDownload, doInstall, apply: applyUpdate,
+  saveAutoCheck, saveUpdateSource, checkUpdate, doDownload, doInstall, apply: applyUpdate,
 } = useAppUpdate()
 
 const queueDoneOptions = [
@@ -156,7 +157,6 @@ onMounted(async () => {
     download_proxy?: string
     perf_sampling?: boolean
     auto_update_check?: boolean
-    update_channel?: 'stable' | 'preview'
     output_dir?: string
     parallel_streams?: boolean
     notify_task_done?: boolean
@@ -845,16 +845,6 @@ const proxyDirty = computed(() => settingsLoaded.value && (
               <p v-if="updateMsg" class="hint" style="margin-top: 8px">{{ updateMsg }}</p>
               <div class="row switch-row bordered-top">
                 <span class="row-text">
-                  更新通道
-                  <small>预览版更早获得新功能，成熟度可能不如稳定版；切换后立即按新通道检查</small>
-                </span>
-                <NRadioGroup v-model:value="updateChannel" size="small" @update:value="saveUpdateChannel">
-                  <NRadioButton value="stable">稳定版</NRadioButton>
-                  <NRadioButton value="preview">预览版</NRadioButton>
-                </NRadioGroup>
-              </div>
-              <div class="row switch-row bordered-top">
-                <span class="row-text">
                   更新下载源
                   <small>R2 为自建备用镜像，国内直连通常更快；自动=默认 GitHub、连不上才切 R2；仅 GitHub 不使用备用源</small>
                 </span>
@@ -915,9 +905,10 @@ const proxyDirty = computed(() => settingsLoaded.value && (
             <div class="card-body">
               <div class="about-body">
                 <div class="about-app">
-                  <div class="about-name">super_video</div>
+                  <div class="about-name">雨帧</div>
                   <div class="about-ver">
-                    <span class="sv-num">v{{ appVersion }}</span>
+                    <span class="sv-num ver-display">v{{ verParts.base }}</span>
+                    <span v-if="verParts.pre" class="pre-tag">{{ verParts.pre }}</span>
                     <NTag v-if="updateTag" size="small" :bordered="false" :type="updateTag.type">{{ updateTag.text }}</NTag>
                   </div>
                 </div>
@@ -1215,6 +1206,28 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
   margin-top: 6px;
   font-size: 13px;
   color: var(--sv-text-dim);
+}
+/* 版本主展示：品牌双色渐变字（蓝→紫），大一号加粗成为关于卡的数字主角 */
+.ver-display {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: linear-gradient(120deg, rgb(var(--sv-accent-rgb)), rgb(var(--sv-accent2-rgb)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* 预发布通道签：与顶栏徽章同款 amber 小签 */
+.pre-tag {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.5px;
+  color: var(--sv-warning);
+  background: var(--sv-warning-bg);
+  border: 1px solid rgba(var(--sv-warning-rgb), 0.38);
+  border-radius: 5px;
+  padding: 1px 6px;
+  line-height: 1.5;
 }
 .spec-grid {
   flex: 1;

@@ -20,8 +20,6 @@ declare global {
         downloading: boolean
         source: 'github' | 'r2'
       }>
-      /** 更新通道同步给主进程（下次检查更新生效） */
-      setUpdateChannel: (channel: 'stable' | 'preview') => void
       /** 更新下载源同步给主进程：auto=GitHub 失败切 R2 | r2=R2 优先 | github=仅 GitHub */
       setUpdateSource: (source: 'auto' | 'github' | 'r2') => void
       onUpdateProgress: (cb: (p: { percent: number; source: 'github' | 'r2' }) => void) => () => void

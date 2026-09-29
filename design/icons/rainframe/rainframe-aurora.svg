@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- 雨帧品牌方标「极光取景框」（2026-09-25 二批 12 版中用户选定 09）：粉→紫→青极光渐变底
+       + 白色开口取景框（帧，开口落雨丝）+ 白色播放键（视频）。
+       与雨番（Framix）同系列同色系（NEON3: #ff5c8a→#a78bfa→#22d3ee），雨番走暗夜底、雨帧走极光底互为姊妹。
+       改版后需重出全套产物：make_icons.js（PNG 套图）+ build_assets.py（ICO/logo/安装器位图） -->
+  <defs>
+    <linearGradient id="rf-au" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff5c8a"/>
+      <stop offset=".5" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="rf-gl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".22"/>
+      <stop offset=".55" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#rf-au)"/>
+  <rect width="64" height="64" rx="15" fill="url(#rf-gl)"/>
+  <!-- 雨丝：框开口处落下 -->
+  <path d="M43 6.5L39.5 12.5" stroke="#fff" stroke-width="3.5" stroke-linecap="round" opacity=".9" fill="none"/>
+  <!-- 取景框：pathLength 归一后 dasharray 留 17% 开口，rotate(-52) 把开口转到右上 -->
+  <rect x="17" y="17" width="30" height="30" rx="10" pathLength="100" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-dasharray="83 17" transform="rotate(-52 32 32)"/>
+  <!-- 播放键 -->
+  <path d="M28.5 27v10.5l10 -5.25z" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+</svg>
