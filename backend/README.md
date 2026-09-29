@@ -1,4 +1,4 @@
-# super_video backend
+# 雨帧 backend（RainFrame）
 
 视频超分核心管线：ffmpeg 流式管道 + ONNX Runtime / PyTorch / TensorRT 推理 + FastAPI sidecar + CLI。里程碑范围见根目录 `PLAN.md`。
 
@@ -100,7 +100,7 @@ sv/
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
 scripts/               calibrate_color.py（IO 校准）、convert_fp16.py / export_onnx_x4plus.py、build_trt_component.py、bench_*.py（基准）
-tests/                 50 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/GPU 租约/DB 迁移/回归）
+tests/                 54 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/GPU 租约/DB 迁移/回归）
 ```
 
 ## HTTP API 一览
@@ -117,7 +117,35 @@ sidecar 仅监听 localhost（本地 token 鉴权），完整定义见 `server/a
 | 剪切 | POST `/api/trim` · GET `/api/trim/{job_id}` · POST `…/cancel` | smart / fast / exact 三模式后台作业 |
 | 对比 | POST `/api/compare` · GET `/api/compare/{job_id}` · POST `…/cancel` · GET `…/asset/{key:path}` | 多模型对比作业（素材切割 × 各模型处理）/ 白名单资产读取 |
 | TRT | GET `/api/trt-component` · POST `…/install` · DELETE | TensorRT 组件状态 / 安装 / 卸载 |
-| 事件 | WS `/ws` | 进度 / 状态 / 日志 / 下载进度 / TRT 安装进度广播 |
+| 事件 | WS `/ws` | 见下「WS 事件契约」 |
+
+## WS 事件契约（`/ws`）
+
+连接带本地令牌（`ws://127.0.0.1:<port>/ws?token=…`，与 HTTP 同源鉴权）。每条事件是
+一个 JSON dict，`type` 取值如下（发布点：`server/events.py` 总线；任务 worker 事件由
+`runner.py` 转发并附加 `task_id`；后台线程一律走 `publish_threadsafe`）：
+
+| type | 载荷（除 type 外的字段） | 说明 |
+|---|---|---|
+| `task_status` | `task_id`，`status`（queued/running/done/failed/canceled），失败附 `error` | 任务状态变更的唯一权威信号（创建/入队/开跑/终态/取消） |
+| `started` | `task_id`，`total_frames`，`output` | worker 开跑（runner 转发） |
+| `progress` | `task_id`，`frames`，`total`，`fps`，`eta_sec` | worker 进度（转发同时落库） |
+| `log` | `task_id`，`line` | 任务日志行（一行一条） |
+| `task_deleted` | `task_id` | 任务被删除 |
+| `recovered` | `count` | sidecar 启动时恢复的孤儿任务数 |
+| `queue_gate` | `active`，`reason` | 队列处理时机门控（立即/时段/空闲）的启停与原因 |
+| `queue_done` | `action`，`grace_s` | 队列完成后动作（通知/关机/休眠）进入反悔倒计时 |
+| `queue_done_fired` | `action`，`ok` | 倒计时结束动作实际执行 |
+| `queue_done_canceled` | — | 反悔窗口内被用户取消 |
+| `model_download` | `model_id` + `progress`（0~1）/ `source`（modelscope\|github）/ `done` / `failed` | 下载进度（先发一条 `progress:0` 让 UI 立刻出进度条）、实际命中的下载源、完成/失败 |
+| `trim` | `job_id`，`state`（当前仅 canceled） | 剪切作业只有取消走 WS；进度与结果轮询 `GET /api/trim/{job_id}` |
+| `compare` | `id`，`status`（running/canceled/failed/entry_done/entry_failed…），运行中附 `model_id` | 模型对比作业状态机（每个候选模型开始/完成/失败各一条） |
+| `compare_log` | `id`，`line` | 对比作业日志行 |
+| `trt_component` | `phase`（download/extract/done/error）；download 附 `file`/`done`/`total`/`source`，extract 附 `file`，error 附 `error` | TensorRT 组件安装进度 |
+| `perf` | `t`，`cpu`，`mem_pct`，`mem_used_gb`，`gpus`，`task` | 性能采样推送（与 `GET /api/perf/history` 同构） |
+
+worker 的 `done`/`failed`/`canceled` 终态事件不直接上 WS——runner 消化后统一发
+`task_status`。前端消费方式见 `app/src/renderer/src/store.ts`。
 
 ## 模型 IO 约定（manifest `io` 字段；结论均为真机实测）
 
@@ -143,6 +171,7 @@ sidecar 仅监听 localhost（本地 token 鉴权），完整定义见 `server/a
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 306 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归；从 backend 目录跑）
+$py -m pytest tests/ -q          # 445 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归；从 backend 目录跑；无 GPU/部分模型缺失时按机器跳过）
+cd ../app && pnpm test           # 前端 vitest（CI 同跑：ci.yml 后端 pytest + 前端类型检查/单测/构建）
 $py scripts/bench.py             # 速度与内存基准表
 ```
