@@ -13,6 +13,7 @@ import {
 } from 'naive-ui'
 import { api, mediaSrc } from '../api'
 import { refreshTasks, store, ui } from '../store'
+import { useTileDefault } from '../composables/useTileDefault'
 
 const message = useMessage()
 
@@ -68,7 +69,7 @@ const modelId = ref('')
 const targetScale = ref(2)
 const format = ref<'png' | 'jpg'>('png')
 const jpgQuality = ref(92)
-const tileChoice = ref(0) // 0 = 模型默认
+const tileChoice = useTileDefault('image') // 默认 256，localStorage 记忆上次选择
 const mergePdf = ref(false) // 批量 ≥2 张可勾选：另出一份无损封装的 PDF
 const submitting = ref(false)
 

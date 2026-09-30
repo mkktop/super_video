@@ -14,6 +14,7 @@ import { api, mediaSrc } from '../api'
 import type { FolderScanResult } from '../api'
 import { refreshTasks, store, ui } from '../store'
 import { hasScene } from '../composables/useModelOptions'
+import { useTileDefault } from '../composables/useTileDefault'
 import MangaModelGrid from '../components/MangaModelGrid.vue'
 
 const message = useMessage()
@@ -84,7 +85,7 @@ async function consumeRetryParams() {
     format.value = 'png'
   }
   if (typeof p.tile === 'number') tileChoice.value = p.tile
-  mergePdf.value = p.merge_pdf !== false // 漫画页默认开：仅任务显式关过才关
+  mergePdf.value = p.merge_pdf === true // 预设显式开过才开（默认关，与图片超分页同语义）
 }
 onMounted(consumeRetryParams)
 onActivated(consumeRetryParams)
@@ -99,8 +100,8 @@ const modelId = ref('')
 const targetScale = ref(2)
 const format = ref<'png' | 'jpg'>('png')
 const jpgQuality = ref(92)
-const tileChoice = ref(0) // 0 = 模型默认
-const mergePdf = ref(true) // 整本漫画默认出 PDF：阅读场景第一诉求
+const tileChoice = useTileDefault('manga') // 默认 256，localStorage 记忆上次选择
+const mergePdf = ref(false) // 默认关：超分后的整本图片体积大，无损封装 PDF 易失败/耗时；需要阅读版可勾选
 const submitting = ref(false)
 
 // ---- 模型：默认只列漫画向（scenes 含 manga），开关兜底展开全部 ----
