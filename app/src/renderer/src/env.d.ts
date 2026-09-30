@@ -3,7 +3,10 @@
 declare global {
   interface Window {
     sv: {
-      backendInfo: () => Promise<{ baseUrl: string; token?: string }>
+      backendInfo: () => Promise<{
+        baseUrl: string; token?: string
+        mcpCommand?: { command: string; args: string[] }
+      }>
       appVersion: () => Promise<string>
       /** allowMirror：仅手动检查传 true，允许 GitHub 失败后切 R2 备用源 */
       checkUpdate: (allowMirror?: boolean) => Promise<{

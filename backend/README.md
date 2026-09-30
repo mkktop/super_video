@@ -43,7 +43,33 @@ $py cli.py run xxx.mp4 -m realesrgan-x4plus --tile 64 --crf 17
 $py cli.py serve --port 8730
 ```
 
-其余子命令 `worker` / `ort-check` / `selftest` 为打包链路与自检内部使用，日常开发不需直接调用。
+其余子命令 `worker` / `ort-check` / `selftest` 为打包链路与自检内部使用，日常开发不需直接调用；`mcp` 见下节。
+
+## MCP 接入（AI 客户端直接下超分任务）
+
+`sv/mcp_server.py` 是一个 stdio MCP server，把运行中 sidecar 的能力暴露给 Claude Desktop / ZCode / Cursor 等 AI 客户端——对话式完成「探测 → 选模型 → 建任务 → 轮询进度」。
+
+**前置条件：雨帧须在运行**。bridge 只代理不拉起（自拉 headless sidecar 会与 Electron 版形成双 runner 抢 GPU 队列与 SQLite）。发现逻辑与 Electron 主进程同款：扫描 127.0.0.1:8730-8739、`/api/health` 健康标记校验、版本一致者优先；鉴权令牌自动从 SV_TOKEN / 数据根 token 文件候选逐个试探（frozen 态从 exe 位置复刻 `resolveDataRoot` 候选序列），UI 重启轮换令牌时自动重读重试一次。
+
+**准入总闸**：settings `mcp_enabled`（默认开）——sidecar 中间件对 bridge UA（`rainframe-mcp/*`）在关闭时返回 403，文案自解释由 bridge 转告；`/api/health` 豁免（bridge 靠它发现 sidecar 才能报出「去开闸」而非表现为连不上）；普通 UI 流量不受闸门影响（仅 bridge UA 才读设置文件）。侧栏「MCP 服务」页（日志下方）提供状态、开关与三段预填本机路径的客户端配置片段（`backend:info` 的 `mcpCommand`：安装版 `sidecar.exe mcp`、dev 为仓库 venv python 跑 `cli.py mcp`），另附「任意 AI 客户端（通用）」指令块——跨客户端无统一深链标准，通用路径是把接入指令（命令行+验证步骤+两种报错指引）发给 AI，由它写自己宿主的配置并自行验证。
+
+客户端配置（stdio，三客户端通用形状）：
+
+```jsonc
+{
+  "mcpServers": {
+    "rainframe": {
+      "command": "C:\\...\\RainFrame\\resources\\sidecar\\sidecar.exe",  // 安装版
+      "args": ["mcp"]
+    }
+  }
+}
+// dev 仓库：command 指向 .venv\\Scripts\\python.exe，args 为 ["-m", "sv.mcp_server"]（cwd 需在 backend）
+```
+
+工具面 10 个（`rf_` 前缀）：`rf_status`（版本/GPU/引擎）、`rf_probe`（探测+智能推荐）、`rf_models` / `rf_model_download`、`rf_task_create`（视频单输入 / 图片批量 inputs / 漫画整夹 `input_folder`+`kind=manga`）、`rf_tasks` / `rf_task`（轮询进度；漫画批量 images 清单自动瘦身防灌爆上下文）、`rf_task_cancel` / `rf_task_resume`、`rf_scan_folder`。长任务契约：创建立即返回任务 id，客户端轮询 `rf_task` 直到终态。
+
+协议层零依赖手写（initialize / tools/list / tools/call / ping 的逐行 JSON-RPC，Python stdlib），刻意不引入官方 mcp SDK——其 httpx 传递依赖与本仓库 pin 的 httpx2 共存未经验证，且该协议子集自 2024-11-05 以来稳定；PyInstaller 经 cli.py 惰性 import 自动发现，打包零改动。安全边界：不暴露 delete_model / remove_task / reorder / settings 写等破坏性与配置类端点；输出纪律：任务列表 ≤30 条、扫描预览 ≤20 文件、images 清单 >20 条只回计数+样例。
 
 ## 桌面端（app/）
 
@@ -56,6 +82,7 @@ cd app && pnpm install && pnpm build && npx electron .   # 或 pnpm dev
 ```
 sv/
 ├─ paths.py            项目路径 / ffmpeg 定位 / 数据目录迁移
+├─ mcp_server.py       MCP stdio bridge（AI 客户端接入：发现/鉴权/协议层零依赖手写）
 ├─ pdfmerge.py         批量图片 → 单份 PDF 无损封装（Flate+PNG 预测器 / JPEG 直嵌，零依赖手写 PDF 对象）
 ├─ pipeline/
 │  ├─ probe.py         ffprobe 封装 + 探测缓存（接受 10bit/VFR→CFR 化，拒绝 HDR）
@@ -100,7 +127,7 @@ sv/
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
 scripts/               calibrate_color.py（IO 校准）、convert_fp16.py / export_onnx_x4plus.py、build_trt_component.py、bench_*.py（基准）
-tests/                 54 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/GPU 租约/DB 迁移/回归）
+tests/                 54 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/GPU 租约/DB 迁移/回归/MCP bridge）
 ```
 
 ## HTTP API 一览
@@ -171,7 +198,7 @@ worker 的 `done`/`failed`/`canceled` 终态事件不直接上 WS——runner �
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 445 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归；从 backend 目录跑；无 GPU/部分模型缺失时按机器跳过）
+$py -m pytest tests/ -q          # 476 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归/MCP bridge；从 backend 目录跑；无 GPU/部分模型缺失时按机器跳过）
 cd ../app && pnpm test           # 前端 vitest（CI 同跑：ci.yml 后端 pytest + 前端类型检查/单测/构建）
 $py scripts/bench.py             # 速度与内存基准表
 ```

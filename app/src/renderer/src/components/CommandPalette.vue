@@ -42,6 +42,7 @@ const commands = computed<Cmd[]>(() => {
     ['mangasr', '漫画超分'],
     ['perf', '性能监控'],
     ['logs', '服务日志'],
+    ['aiassistant', 'MCP 服务'],
     ['settings', '设置'],
   ]
   const out: Cmd[] = pages.map(([key, label]) => ({

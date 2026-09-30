@@ -21,6 +21,7 @@ const items = computed(() => [
   { key: 'mangasr', label: '漫画超分', icon: 'manga' },
   { key: 'perf', label: '性能', icon: 'pulse' },
   { key: 'logs', label: '日志', icon: 'log' },
+  { key: 'aiassistant', label: 'MCP 服务', icon: 'spark' },
   { key: 'settings', label: '设置', icon: 'gear' },
 ])
 
@@ -91,6 +92,10 @@ function navTo(key: string) {
           <svg v-else-if="it.icon === 'log'" width="16" height="16" viewBox="0 0 16 16">
             <rect x="2" y="2.5" width="12" height="11" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2" />
             <path d="M4.5 6l1.8 1.5L4.5 9M7.8 9.5h3.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <svg v-else-if="it.icon === 'spark'" width="16" height="16" viewBox="0 0 16 16">
+            <path d="M7.6 2.2l1.5 3.6 3.6 1.5-3.6 1.5-1.5 3.6-1.5-3.6L2.5 7.3l3.6-1.5z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+            <path d="M12.7 2.5v1.9M11.75 3.45h1.9" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" />
           </svg>
           <svg v-else width="16" height="16" viewBox="0 0 16 16">
             <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3" />

@@ -314,7 +314,7 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
       }))
     }
     if (method === 'GET' && path === '/api/settings')
-      return Promise.resolve(json({ update_source: 'auto' }))
+      return Promise.resolve(json({ update_source: 'auto', mcp_enabled: true }))
     if (method === 'PUT' && path === '/api/settings') return Promise.resolve(json({ ok: true }))
     if (method === 'GET' && path === '/api/tasks') {
       const q = (url.searchParams.get('q') ?? '').toLowerCase()
@@ -490,7 +490,7 @@ class FakeWebSocket {
 
 function installSvBridge(): void {
   window.sv = {
-    backendInfo: () => Promise.resolve({ baseUrl: BASE, token: 'mock' }),
+    backendInfo: () => Promise.resolve({ baseUrl: BASE, token: 'mock', mcpCommand: { command: 'C:\\Programs\\RainFrame\\resources\\sidecar\\sidecar.exe', args: ['mcp'] } }),
     appVersion: () => Promise.resolve('0.5.6-preview.1'),
     checkUpdate: () =>
       Promise.resolve({ status: 'available', current: '0.5.6-preview.1', version: '0.5.6', notes: '预览环境造数' }),

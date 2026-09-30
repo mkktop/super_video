@@ -80,6 +80,7 @@ export const ui = reactive({
     | 'models'
     | 'perf'
     | 'logs'
+    | 'aiassistant'
     | 'settings'
     | 'compare'
     | 'imagesr'

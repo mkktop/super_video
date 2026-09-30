@@ -43,6 +43,7 @@ const PAGES: Record<string, Component> = {
   perf: page(() => import('./pages/Perf.vue')),
   logs: page(() => import('./pages/Logs.vue')),
   compare: page(() => import('./pages/Compare.vue')),
+  aiassistant: page(() => import('./pages/AiAssistant.vue')),
   settings: page(() => import('./pages/Settings.vue')),
 }
 const pageComp = computed(() => PAGES[ui.page] ?? PAGES.home)

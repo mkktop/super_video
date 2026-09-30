@@ -275,6 +275,16 @@ def cmd_selftest(args):
     return 0 if not bad else 1
 
 
+def cmd_mcp(args):
+    """MCP stdio bridge：把运行中 sidecar 的能力暴露给 AI 客户端（Claude Desktop 等）。
+
+    stdout 是 JSON-RPC 协议通道，本命令绝不向 stdout 打印任何东西（含启动横幅）。
+    """
+    from sv.mcp_server import main as mcp_main
+
+    return mcp_main()
+
+
 def main():
     # Windows 管道/重定向下 stdout 默认走系统 locale（GBK）：worker 中文事件行会以
     # GBK 字节到达 runner（PyInstaller frozen 无视 PYTHONIOENCODING，实测环境变量
@@ -337,6 +347,9 @@ def main():
 
     p = sub.add_parser("selftest", help="[内部] 打包自检：惰性导入的库是否都随包")
     p.set_defaults(func=cmd_selftest)
+
+    p = sub.add_parser("mcp", help="MCP stdio 服务（AI 客户端接入雨帧）")
+    p.set_defaults(func=cmd_mcp)
 
     args = ap.parse_args()
     if not getattr(args, "model_id", True) and args.cmd == "models" and args.action != "list":

@@ -1,7 +1,10 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('sv', {
-  backendInfo: () => ipcRenderer.invoke('backend:info') as Promise<{ baseUrl: string; token?: string }>,
+  backendInfo: () => ipcRenderer.invoke('backend:info') as Promise<{
+    baseUrl: string; token?: string
+    mcpCommand?: { command: string; args: string[] }
+  }>,
   appVersion: () => ipcRenderer.invoke('app:version') as Promise<string>,
   checkUpdate: (allowMirror?: boolean) => ipcRenderer.invoke('app:check-update', allowMirror) as Promise<{
     status: string

@@ -12,7 +12,7 @@ export const pageDir = ref<1 | -1>(1)
 export function navDirection(from: string, to: string): 1 | -1 {
   const ORDER = [
     'home', 'tasks', 'newtask', 'models', 'mcompare',
-    'trim', 'imagesr', 'mangasr', 'perf', 'logs', 'settings',
+    'trim', 'imagesr', 'mangasr', 'perf', 'logs', 'aiassistant', 'settings',
   ]
   const a = ORDER.indexOf(from)
   const b = ORDER.indexOf(to)

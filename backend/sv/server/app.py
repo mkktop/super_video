@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 
 from .. import __version__
 from ..paths import TEMP_DIR, migrate_legacy_data
-from . import compare, db, task_stills
+from . import compare, db, settings, task_stills
 from .routes import compare as compare_routes
 from .routes import models as models_routes
 from .routes import system as system_routes
@@ -68,6 +68,17 @@ async def _token_auth(request: Request, call_next):
         got = request.headers.get("x-sv-token") or request.query_params.get("token")
         if got not in toks:
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    # MCP 准入闸门：bridge 请求带 rainframe-mcp/* UA，settings.mcp_enabled 关闭
+    # 即拒之门外（403 文案自解释，bridge 原样转告）。/api/health 豁免——bridge
+    # 靠它发现 sidecar，才能把「去开闸」的原因报给 AI 与用户，而不是
+    # 表现为连不上。只在识别到 bridge UA 时才读设置文件，UI 常规流量零开销
+    ua = request.headers.get("user-agent", "")
+    if ua.startswith("rainframe-mcp/") and request.url.path != "/api/health":
+        if not settings.load().get("mcp_enabled", True):
+            return JSONResponse(
+                {"detail": "MCP 接入已被关闭：请在雨帧「MCP 服务」页面开启接入后重试"},
+                status_code=403,
+            )
     return await call_next(request)
 
 

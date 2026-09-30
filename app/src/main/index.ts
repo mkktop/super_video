@@ -836,7 +836,22 @@ app.on('before-quit', () => {
   killSidecar()
 })
 
-ipcMain.handle('backend:info', () => ({ baseUrl, token: apiToken }))
+ipcMain.handle('backend:info', () => {
+  // MCP 接入命令（「MCP 服务」页生成配置片段用）：安装版=sidecar.exe mcp，
+  // dev=仓库 venv python 跑 cli.py mcp——与拉起 sidecar 的路径解析同一套
+  const root = findRoot()
+  const isPackaged = app.isPackaged
+  return {
+    baseUrl,
+    token: apiToken,
+    mcpCommand: {
+      command: isPackaged
+        ? path.join(root, 'sidecar', 'sidecar.exe')
+        : path.join(root, '.venv', 'Scripts', 'python.exe'),
+      args: isPackaged ? ['mcp'] : [path.join(root, 'backend', 'cli.py'), 'mcp'],
+    },
+  }
+})
 
 ipcMain.handle('app:version', () => app.getVersion())
 
