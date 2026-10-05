@@ -53,6 +53,7 @@ export function useOutputSettings() {
     const r = await api.saveSettings({ output_name_template: v })
     savingNameTpl.value = false
     if (r.ok) {
+      store.settings = { ...store.settings, output_name_template: v }
       message.success(v ? '已保存，新任务按模板命名' : '已恢复默认命名（沿用原文件名）')
     } else {
       message.error(`保存失败: ${(await r.json()).detail ?? r.status}`)

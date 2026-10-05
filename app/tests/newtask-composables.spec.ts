@@ -30,6 +30,19 @@ describe('useModelOptions', () => {
     expect(hasScene(mkModel({ id: 'x', scenes: ['manga'] }), 'video')).toBe(false)
     expect(hasScene(mkModel({ id: 'y' }), 'video')).toBe(true)
   })
+  it('Real-CUGAN 降噪档位按倍率变化，x3/x4 不显示 1/2', () => {
+    store.models = [mkModel({ id: 'cugan', scale: [2, 3, 4],
+      denoise_levels: [0, 1, 2, 3],
+      denoise_levels_by_scale: { '2': [0, 1, 2, 3], '3': [0, 3], '4': [0, 3] },
+    })]
+    const scale = ref(2)
+    const { denoiseOptions } = useModelOptions(ref('cugan'), scale)
+    expect(denoiseOptions.value.map((x) => x.value)).toEqual([0, 1, 2, 3])
+    scale.value = 3
+    expect(denoiseOptions.value.map((x) => x.value)).toEqual([0, 3])
+    scale.value = 4
+    expect(denoiseOptions.value.map((x) => x.value)).toEqual([0, 3])
+  })
 })
 
 describe('useCustomResolution', () => {

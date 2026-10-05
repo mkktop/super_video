@@ -70,59 +70,31 @@ const outPlaceholder = computed(() =>
 // 批量任务不逐个填路径，由后端落到同一目录——界面上如实说明去向
 const batchDest = computed(() => globalOutDir.value || '源视频所在目录')
 
-function joinDefault(dir: string, name: string): string {
-  return `${dir.replace(/[\\/]+$/, '')}\\${name}`
-}
-
-/** 排队/运行中任务将写入的输出路径集合（小写归一）：预填命名避让用，
- *  与后端创建期的活动任务播种同口径（A 还没跑、B 预填同名会互相覆盖） */
-const activeOuts = computed(() =>
-  new Set(
-    store.tasks
-      .filter((t) => t.status === 'queued' || t.status === 'running')
-      .map((t) => t.output_path.toLowerCase()),
-  ),
-)
-
-/** 后端 _sr_output_name 的镜像：目录无同名 → 沿用原名；同名（含源文件本身与
- *  尚未开跑的活动任务）→ _倍率 后缀（也被占用再退 _2 序号）。异步查存在性，
- *  表单预填与实际创建保持一致。 */
-async function defaultOutputName(stem: string, fmt: string, srcPath: string): Promise<string> {
-  const suffix =
-    resMode.value === 'custom' ? `${effW.value}x${effH.value}` : `${targetScale.value}x`
-  const outDir = globalOutDir.value || srcPath.replace(/[\\/][^\\/]*$/, '')
-  const plain = joinDefault(outDir, `${stem}.${fmt}`)
-  // 与源同路径（同目录同扩展名）时"同名文件"就是源本身，必须保后缀
-  if (
-    plain.toLowerCase() !== srcPath.toLowerCase() &&
-    !activeOuts.value.has(plain.toLowerCase()) &&
-    !(await window.sv.fsExists(plain))
-  ) {
-    return plain
-  }
-  const suffixed = joinDefault(outDir, `${stem}_${suffix}.${fmt}`)
-  if (!activeOuts.value.has(suffixed.toLowerCase())) return suffixed
-  return joinDefault(outDir, `${stem}_${suffix}_2.${fmt}`)
-}
-
+let outputSeq = 0
 async function autoFillOutput() {
-  if (inputs.value.length !== 1 || outputTouched.value) return
-  const p = inputs.value[0]
-  const m = p.match(/^(.*?)(\.[^.]+)?$/)
-  const stem = (m?.[1] ?? p).split(/[\\/]/).pop() ?? p
-  if (isImage.value) {
-    output.value = joinDefault(
-      globalOutDir.value || p.replace(/[\\/][^\\/]*$/, ''),
-      `${stem}_${resMode.value === 'custom' ? `${effW.value}x${effH.value}` : targetScale.value}_frames`,
-    )
-    return
+  const seq = ++outputSeq
+  if (inputs.value.length !== 1 || outputTouched.value || !probeInfo.value?.ok) return
+  try {
+    const result = await api.suggestOutput({
+      input: inputs.value[0], model_id: modelId.value,
+      params: buildCreateBody(inputs.value[0], false).params,
+    })
+    if (seq === outputSeq && !outputTouched.value) output.value = result.output
+  } catch {
+    // 预览失败不阻断创建：提交时后端会重新计算默认路径。
+    if (seq === outputSeq && !outputTouched.value) output.value = ''
   }
-  output.value = await defaultOutputName(stem, container.value, p)
 }
 
 // ---- 模型选择（场景筛选/已装优先/倍率与降噪选项，见 composables/useModelOptions） ----
 const { scene, srModels, selectedModel, scaleOptions, interpOptions,
         denoiseOptions, hasDenoiseVariants, selectModel } = useModelOptions(modelId, targetScale)
+watch([denoiseOptions, denoise], ([options, value]) => {
+  if (value !== null && !options.some((option) => option.value === value)) {
+    denoise.value = null
+    message.info('当前模型或倍率不支持原降噪档位，已恢复默认配置')
+  }
+})
 
 // ---- 智能推荐（probe 附带；源分析失败时无此块，卡片整张不出现） ----
 const recommend = computed(() => probeInfo.value?.recommend ?? null)
@@ -175,6 +147,7 @@ const canSubmit = computed(
     (inputs.value.length > 1 || !!probeInfo.value?.ok) &&
     !!modelId.value &&
     !!selectedModel.value?.vram_ok &&
+    !submitting.value &&
     !(resMode.value === 'custom' && !customOk.value),
 )
 
@@ -184,8 +157,11 @@ const { dragDepth, onDragEnter, onDragLeave, onDropFiles } = useFileDrop((vids) 
 
 async function setInput(files: string[]) {
   const seq = ++probeSeq
+  ++outputSeq
+  probing.value = false
   inputs.value = files
   probeInfo.value = null
+  output.value = ''
   thumbBroken.value = false
   outputTouched.value = false // 新一轮选文件：恢复自动填充
   pushRecent(files)
@@ -196,21 +172,31 @@ async function setInput(files: string[]) {
   container.value = byExt[files[0].slice(files[0].lastIndexOf('.')).toLowerCase()] ?? 'mp4'
   if (files.length === 1) {
     probing.value = true
-    const r = await api.probe(files[0], true, true)
-    if (seq !== probeSeq) return // 已重选其他文件：丢弃过期响应
-    probing.value = false
-    if (r.ok) {
-      probeInfo.value = (await r.json()) as ProbeInfo
-      // 换文件后当前选的硬解可能不再支持（老编码/设备差异）：回落软解，避免带着无效值提交
-      const d = probeInfo.value.decoder
-      if (d && decoder.value !== 'sw' && !d[decoder.value]) decoder.value = 'sw'
-    } else {
-      const e = await r.json()
-      probeInfo.value = {
-        ok: false, error: e.detail ?? `HTTP ${r.status}`,
-        width: 0, height: 0, fps: 0, duration_s: 0, total_frames: 0,
-        codec: '', pix_fmt: '', has_audio: false, audio_tracks: [], subtitles: [],
+    try {
+      const r = await api.probe(files[0], true, true)
+      if (seq !== probeSeq) return // 已重选其他文件：丢弃过期响应
+      probing.value = false
+      if (r.ok) {
+        const info = (await r.json()) as ProbeInfo
+        if (seq !== probeSeq) return
+        probeInfo.value = info
+        // 换文件后当前选的硬解可能不再支持（老编码/设备差异）：回落软解，避免带着无效值提交
+        const d = probeInfo.value.decoder
+        if (d && decoder.value !== 'sw' && !d[decoder.value]) decoder.value = 'sw'
+      } else {
+        const e = await r.json()
+        if (seq !== probeSeq) return
+        probeInfo.value = {
+          ok: false, error: e.detail ?? `HTTP ${r.status}`,
+          width: 0, height: 0, fps: 0, duration_s: 0, total_frames: 0,
+          codec: '', pix_fmt: '', has_audio: false, audio_tracks: [], subtitles: [],
+        }
       }
+    } catch (e) {
+      if (seq !== probeSeq) return
+      message.error(`无法读取视频: ${e instanceof Error ? e.message : e}`)
+    } finally {
+      if (seq === probeSeq) probing.value = false
     }
     void autoFillOutput()
   }
@@ -222,34 +208,30 @@ async function pickInput() {
   await setInput(files)
 }
 
-// 剪切页"去超分"入口：跳到本页时预填输入
-watch(
-  () => ui.page,
-  async (p) => {
-    if (p === 'newtask' && ui.pendingInput) {
-      const path = ui.pendingInput
-      ui.pendingInput = null
-      await setInput([path])
-    }
-  },
-)
-
-// 模型对比页"用此模型"入口：预填输入后再预选模型与倍率
-// （pendingModel 先于 page 设置，故同时盯两个信号）
-watch([() => ui.page, () => ui.pendingModel], () => {
-  if (ui.page !== 'newtask' || !ui.pendingModel) return
-  const spec = store.models.find((m) => m.id === ui.pendingModel)
-  if (spec?.vram_ok) {
-    modelId.value = spec.id
-    const want = ui.pendingScale
-    targetScale.value =
-      want && spec.scale.includes(want) ? want : Math.min(...spec.scale)
-  }
+// 先消费跳转参数，再异步探测。挂载/激活与 watch 共用入口，首次直达也能预填。
+function consumePendingWizard() {
+  if (ui.page !== 'newtask') return
+  const path = ui.pendingInput
+  const mid = ui.pendingModel
+  const want = ui.pendingScale
+  ui.pendingInput = null
   ui.pendingModel = null
   ui.pendingScale = null
-})
+  if (mid) {
+    const spec = store.models.find((m) => m.id === mid)
+    if (spec?.vram_ok) {
+      modelId.value = spec.id
+      targetScale.value = want && spec.scale.includes(want) ? want : Math.min(...spec.scale)
+    }
+  }
+  if (path) void setInput([path])
+}
+onMounted(consumePendingWizard)
+onActivated(consumePendingWizard)
+watch([() => ui.page, () => ui.pendingInput, () => ui.pendingModel], consumePendingWizard)
 
-watch([targetScale, resMode, effW, effH, outKind, container], () => void autoFillOutput())
+watch([targetScale, resMode, effW, effH, outKind, container, modelId,
+       globalOutDir, () => store.settings.output_name_template], () => void autoFillOutput())
 
 // 任务页「改参数重试」入口：带原任务全部参数进本页，调完重新入队
 // （图片/漫画任务已分流到图片超分/漫画超分页，本页只接视频任务）。
@@ -397,7 +379,7 @@ async function deleteUserPreset(pid: string) {
 // ---- 提交 ----
 /** 组装单个输入的创建请求体（overwrite 用于撞名确认后的重交） */
 function buildCreateBody(input: string, overwrite: boolean) {
-  const out = inputs.value.length === 1 ? output.value || undefined : undefined
+  const out = inputs.value.length === 1 && outputTouched.value ? output.value || undefined : undefined
   const scaleToSend = resMode.value === 'custom' ? customScale.value! : targetScale.value
   return {
     input,
@@ -427,7 +409,7 @@ function buildCreateBody(input: string, overwrite: boolean) {
   }
 }
 
-/** 409（输出文件已存在/撞活动任务）→ 确认覆盖弹窗；resolve false=用户放弃保持表单 */
+/** 已有非活动文件的 409 → 确认覆盖弹窗；活动任务冲突只提示改路径。 */
 function confirmOverwrite(detail: string): Promise<boolean> {
   return new Promise((resolve) => {
     dialog.warning({
@@ -449,36 +431,48 @@ async function submit() {
     return
   }
   submitting.value = true
-  let ok = 0
+  const submitted = [...inputs.value]
+  const succeeded = new Set<string>()
   let lastErr = ''
-  for (const input of inputs.value) {
-    let r = await api.createTask(buildCreateBody(input, false))
-    if (r.status === 409) {
-      // 仅显式指定输出路径会 409（自动命名有后缀避让）：确认后带 overwrite 重交
-      const detail = (await r.json().catch(() => ({}))).detail ?? '输出路径冲突'
-      submitting.value = false
-      if (!(await confirmOverwrite(String(detail)))) return
-      submitting.value = true
-      r = await api.createTask(buildCreateBody(input, true))
+  try {
+    for (const input of submitted) {
+      let r = await api.createTask(buildCreateBody(input, false))
+      if (r.status === 409) {
+        const detail = String((await r.json().catch(() => ({}))).detail ?? '输出路径冲突')
+        if (detail.includes('已有排队/运行中的任务')) {
+          message.error(detail)
+          return
+        }
+        if (!(await confirmOverwrite(detail))) return
+        r = await api.createTask(buildCreateBody(input, true))
+      }
+      if (r.ok) succeeded.add(input)
+      else lastErr = `${(await r.json().catch(() => ({}))).detail ?? r.status}`
     }
-    if (r.ok) ok++
-    else lastErr = `${(await r.json()).detail ?? r.status}`
-  }
-  submitting.value = false
-  if (ok) {
-    message.success(
-      `已加入队列 ${ok} 个任务${selectedModel.value && !selectedModel.value.installed ? '（模型将自动下载）' : ''}${lastErr ? `；失败: ${lastErr}` : ''}`,
-    )
-    reset()
-    ui.page = 'tasks'
-    refreshTasks()
-  } else {
-    message.error(`创建失败: ${lastErr}`)
+    if (succeeded.size === submitted.length) {
+      message.success(`已加入队列 ${succeeded.size} 个任务${selectedModel.value && !selectedModel.value.installed ? '（模型将自动下载）' : ''}`)
+      reset()
+      ui.page = 'tasks'
+    } else {
+      message.error(`创建失败: ${lastErr}${succeeded.size ? `（已有 ${succeeded.size} 个任务成功入队）` : ''}`)
+    }
+  } catch (e) {
+    message.error(`创建失败: ${e instanceof Error ? e.message : e}${succeeded.size ? `（已有 ${succeeded.size} 个任务成功入队）` : ''}`)
+  } finally {
+    // 部分入队后仍保留失败项；再次提交不会重复创建已经成功的任务。
+    if (succeeded.size) {
+      inputs.value = inputs.value.filter((input) => !succeeded.has(input))
+      void refreshTasks()
+    }
+    submitting.value = false
   }
 }
 
 // 清空本轮选择；编码/画质等输出偏好保留上次取值，连续建任务不用重设
 function reset() {
+  ++probeSeq
+  ++outputSeq
+  probing.value = false
   inputs.value = []
   probeInfo.value = null
   modelId.value = ''

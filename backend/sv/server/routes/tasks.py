@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from ...models.registry import ModelNotFoundError, get_model, load_registry
+from ...models.registry import ModelNotFoundError, get_model, load_registry, validate_denoise
 from ...paths import SR_LOG_DIR, TEMP_DIR
 from ...pipeline.probe import (
     DECODERS,
@@ -29,6 +30,7 @@ from ..state import bus, cached_hardware, runner
 router = APIRouter(tags=["tasks"])
 
 log = logging.getLogger("sv.app")
+_task_create_lock = threading.Lock()  # 命名预检与入库一并串行，防并发创建占用同一路径
 
 
 class TaskCreate(BaseModel):
@@ -37,7 +39,7 @@ class TaskCreate(BaseModel):
     output: str | None = None
     model_id: str
     params: dict = Field(default_factory=dict)  # scale/codec/crf/preset/tile/interp/denoise 每任务独立
-    overwrite: bool = False  # 显式 output 撞已存在文件/活动任务时 409，确认覆盖后带 True 重交
+    overwrite: bool = False  # 只允许显式覆盖已有非活动文件；活动任务冲突始终拒绝
 
 
 class FolderScanIn(BaseModel):
@@ -110,23 +112,23 @@ def _sr_output_name(out_root: Path, stem: str, fmt: str, res_label: str,
 
     目标目录没有同名文件时沿用原文件名（干净）；同名已存在——可能是源文件
     本身（同目录同扩展名）、用户已有文件或上次产物——退回「_倍率」后缀，
-    不覆盖任何现有文件。后缀名也已被本批同伴占用时再加序号。
+    不覆盖任何现有文件。后缀名已有文件或被活动任务占用时继续加序号。
     """
     plain = out_root / f"{stem}.{fmt}"
-    pk = os.path.normcase(str(plain))
+    pk = os.path.normcase(os.path.abspath(plain))
     if not plain.exists() and pk not in used:
         used.add(pk)
         return str(plain)
     suffixed = out_root / f"{stem}_{res_label}.{fmt}"
-    sk = os.path.normcase(str(suffixed))
-    if sk not in used:  # 磁盘上已存在的后缀名=上次产物，可覆盖（重跑不增殖）
+    sk = os.path.normcase(os.path.abspath(suffixed))
+    if not suffixed.exists() and sk not in used:
         used.add(sk)
         return str(suffixed)
     n = 2
-    while True:  # 仅批量同伴撞名时升序号
+    while True:  # 磁盘文件与活动任务都避让
         cand = out_root / f"{stem}_{res_label}_{n}.{fmt}"
-        ck = os.path.normcase(str(cand))
-        if ck not in used:
+        ck = os.path.normcase(os.path.abspath(cand))
+        if not cand.exists() and ck not in used:
             used.add(ck)
             return str(cand)
         n += 1
@@ -141,22 +143,24 @@ def _active_output_keys() -> set[str]:
     自动命名的后缀避让必须把它算进去：A 刚建还没跑、磁盘上尚无产物时，
     B 再建同名任务 plain.exists() 探不到碰撞，会静默互相覆盖。显式路径
     则用于创建期 409 预检。"""
-    return {
-        os.path.normcase(t["output_path"])
-        for t in db.list_tasks()
-        if t["status"] in ("queued", "running") and t.get("output_path")
-    }
+    used = set()
+    for t in db.list_tasks():
+        if t["status"] not in ("queued", "running"):
+            continue
+        paths = [t.get("output_path")]
+        paths.extend(i.get("out") for i in t.get("params", {}).get("images", [])
+                     if isinstance(i, dict))
+        used.update(os.path.normcase(os.path.abspath(p)) for p in paths if p)
+    return used
 
 
 def _reject_output_conflict(out: str, active_outs: set[str], overwrite: bool) -> None:
     """用户显式指定输出路径的覆盖预检：目标文件已存在或已有活动任务将写入
-    同一路径时 409（前端弹确认，带 overwrite=True 重交）。"""
-    if overwrite:
-        return
-    if os.path.normcase(out) in active_outs:
+    同一路径时 409。overwrite 只允许覆盖非活动文件，不能覆盖活动任务。"""
+    if os.path.normcase(os.path.abspath(out)) in active_outs:
         raise HTTPException(
-            409, f"已有排队/运行中的任务将写入同一路径：{out}")
-    if Path(out).exists():
+            409, f"已有排队/运行中的任务将写入同一路径，请选择其他输出路径：{out}")
+    if Path(out).exists() and not overwrite:
         raise HTTPException(409, f"输出文件已存在：{out}")
 
 
@@ -179,6 +183,37 @@ def _render_output_stem(template: str, stem: str, model_id: str, res_label: str,
          .replace("{date}", time.strftime("%Y%m%d")))
     s = _TEMPLATE_ILLEGAL.sub("_", s).strip(" .")[:120]
     return s or stem
+
+
+def _default_task_output(input_path: Path, model_id: str, params: dict,
+                         width: int, height: int) -> str:
+    """默认路径的唯一命名入口：界面预览与实际创建共用；预览不预占路径。"""
+    target = params.get("target_scale") or params.get("scale") or 2
+    tw, th = params.get("target_w"), params.get("target_h")
+    res_label = f"{tw}x{th}" if tw and th else f"{target}x"
+    st = load_settings()
+    odir = str(st.get("output_dir") or "").strip()
+    root = Path(odir) if odir else input_path.parent
+    ow, oh = (tw, th) if tw and th else (width * target, height * target)
+    stem = _render_output_stem(str(st.get("output_name_template") or ""),
+                               input_path.stem, model_id, res_label, ow, oh)
+    if params.get("out_kind", "video") != "video":
+        return str(root / f"{stem}_{res_label}_frames")
+    return _sr_output_name(root, stem, params.get("container", "mp4"),
+                           res_label, _active_output_keys())
+
+
+@router.post("/api/tasks/output-path")
+def suggest_output_path(body: TaskCreate) -> dict:
+    input_path = Path(body.input)
+    if not input_path.is_file():
+        raise HTTPException(400, f"输入文件不存在: {body.input}")
+    try:
+        info = probe(input_path)
+    except UnsupportedMedia as e:
+        raise HTTPException(422, str(e)) from e
+    return {"output": _default_task_output(input_path, body.model_id, body.params,
+                                           info.width, info.height)}
 
 
 def _create_image_task(body: TaskCreate, spec) -> dict:
@@ -282,9 +317,15 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     fmt = str(params_in.get("format") or "png").lower()
     if fmt not in ("png", "jpg"):
         raise HTTPException(400, "图片输出格式仅支持 png / jpg")
-    denoise = params_in.get("denoise")
-    if denoise is not None and int(denoise) not in (0, 1, 2, 3):
-        raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
+    for key in ("png_fast", "async_save"):
+        if key in params_in and not isinstance(params_in[key], bool):
+            raise HTTPException(400, f"{key} 需为布尔值")
+    try:
+        denoise = validate_denoise(spec, scale, params_in.get("denoise"))
+        if color_spec is not None:
+            validate_denoise(color_spec, scale, denoise)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     merge_pdf = bool(params_in.get("merge_pdf"))  # 批量合并输出 PDF（无损封装）
 
     # 逐图可用性校验 + 尺寸读取：尺寸只读图片头部（PIL 懒解码，EXIF 方向
@@ -366,6 +407,8 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         "kind": kind, "format": fmt,
         "scale": scale, "target_scale": target,
         "tile": tile, "images": images_meta,
+        "png_fast": fmt == "png" and params_in.get("png_fast", False),
+        "async_save": params_in.get("async_save", False),
     }
     if folder_src:
         params["folder_src"] = folder_src  # 任务卡/续跑侧识别文件夹模式
@@ -395,6 +438,11 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
 
 @router.post("/api/tasks", status_code=201)
 def create_task(body: TaskCreate) -> dict:
+    with _task_create_lock:
+        return _create_task(body)
+
+
+def _create_task(body: TaskCreate) -> dict:
     from ..consts import _AUDIO_MODES, _CODECS, _CONTAINERS, _IMAGE_EXTS, _PRESETS_XCODE
 
     # 图片批量：inputs 列表 → 单任务循环处理（一次模型加载跑完全部）
@@ -499,9 +547,10 @@ def create_task(body: TaskCreate) -> dict:
             raise HTTPException(400, f"{k} 需为布尔值")
         params[k] = v
     if params.get("denoise") is not None:
-        if int(params["denoise"]) not in (0, 1, 2, 3):
-            raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
-        params["denoise"] = int(params["denoise"])
+        try:
+            params["denoise"] = validate_denoise(spec, scale, params["denoise"])
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
     crf = params.get("crf", 18)
     if not (0 <= int(crf) <= 51):
         raise HTTPException(400, "crf 范围 0-51")
@@ -517,27 +566,21 @@ def create_task(body: TaskCreate) -> dict:
                 raise HTTPException(400, f"{k} 需为 1~{hi} 的整数")
             params[k] = v
 
-    res_label = f"{tw}x{th}" if (tw is not None and th is not None) else f"{target}x"
-    # 未显式指定输出时：全局设置里的输出目录优先（目录懒创建），否则沿用源视频同目录
-    _st = load_settings()
-    odir = str(_st.get("output_dir") or "").strip()
-    _tmpl = str(_st.get("output_name_template") or "")
-    out_root = Path(odir) if odir else input_path.parent
-    ow, oh = (tw, th) if tw is not None else (info.width * target, info.height * target)
-    stem = _render_output_stem(_tmpl, input_path.stem, body.model_id, res_label, ow, oh)
     active_outs = _active_output_keys()
     if out_kind == "video":
         if body.output:
-            # 显式路径：静默覆盖不可接受，撞已存在文件/活动任务时 409 让前端确认
+            if Path(body.output).resolve() == input_path.resolve():
+                raise HTTPException(400, "输出路径不能与输入文件相同，请选择其他输出路径")
+            # 显式路径：已有文件需确认覆盖；活动任务冲突始终拒绝
             _reject_output_conflict(body.output, active_outs, body.overwrite)
             out = body.output
         else:
             # 目录无同名则沿用（模板渲染后的）名字，同名冲突（含源文件本身与
             # 尚未开跑的活动任务）退 _倍率 后缀——同规则见 _sr_output_name
-            out = _sr_output_name(out_root, stem, container, res_label, active_outs)
+            out = _default_task_output(input_path, body.model_id, params, info.width, info.height)
     else:
         # 图片序列：输出是文件夹，帧图按 000001.png 起逐帧编号
-        out = body.output or str(out_root / f"{stem}_{res_label}_frames")
+        out = body.output or _default_task_output(input_path, body.model_id, params, info.width, info.height)
         if Path(out).exists() and not Path(out).is_dir():
             raise HTTPException(400, "图片序列的输出路径需为文件夹")
     try:  # 目录不存在时自动创建（设置里指向新盘/新目录的场景）；失败给出可读错误

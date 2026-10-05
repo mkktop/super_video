@@ -207,7 +207,10 @@ class OnnxSrEngine(BaseEngine):
         """
         if not self.u8_wrap_enabled:
             return
-        if self.tile or self.fixed_hw is not None or self.batch > 1:
+        if self.fixed_hw is not None or self.batch > 1:
+            return
+        # 分块先仅开放已验证的 TRT 链，避免改变 DML 双会话的稳定性约束。
+        if self.tile and self.provider_used[:1] != ["TensorrtExecutionProvider"]:
             return
         if self.session is None or len(self.session.get_outputs()) != 1:
             return
@@ -235,7 +238,8 @@ class OnnxSrEngine(BaseEngine):
             wrap_u8(self.model_path, cache,
                     color=self.color, range_01=self.value_range == "0-1")
         provider = self.provider_used[0] if self.provider_used else "x"
-        marker = cache_dir / f"{self.model_path.stem}_u8.ok.{provider}"
+        mode = f".tile{self.tile}.v2" if self.tile else ""
+        marker = cache_dir / f"{self.model_path.stem}_u8{mode}.ok.{provider}"
         so = ort.SessionOptions()
         # BASIC：全量优化会重排被输出边界保护的 Cast/Clip 触发 DML 崩溃（u8_wrap.py 头注）
         so.graph_optimization_level = (
@@ -255,6 +259,8 @@ class OnnxSrEngine(BaseEngine):
             chosen = [p for p in _PROVIDER_ORDER if p in available] or ["CPUExecutionProvider"]
         sess = self._try_session(ort, so, chosen, model_path=cache)
         self._u8_sess_try = sess  # 先挂实例：校验失败也不能被 GC（见 _try_u8_wrap 兜底注释）
+        if self.tile and sess.get_providers()[:1] != ["TensorrtExecutionProvider"]:
+            raise ValueError("分块 GPU 前后处理需要 TensorRT，已回退标准分块路径")
         in_name = sess.get_inputs()[0].name
         if not marker.exists():  # 每模型×每后端一次 A/B 逐位校验，通过后落标记
             self._validate_u8(sess, in_name)
@@ -262,6 +268,10 @@ class OnnxSrEngine(BaseEngine):
         self._u8_sess = sess
         self._u8_in_name = in_name
         self.u8_wrapped = True
+        if self.tile and provider == "TensorrtExecutionProvider":
+            # A/B 校验结束后只保留实际执行的包装会话，避免原始 TRT 会话
+            # 的激活缓冲/工作区继续挤占显存。DML 的会话析构围栏不受影响。
+            self.session = None
         print(f"[engine] GPU 前后处理优化已启用: {cache.name}")
 
     def _validate_u8(self, sess, in_name: str) -> None:
@@ -271,10 +281,12 @@ class OnnxSrEngine(BaseEngine):
         小形状后，真实尺寸的执行路径被不可逆拖慢（v0.2.3 结论，实测 +50%）。
         未提供时（临时 session / CPU）退回小形状。
 
-        对照沿用主链 provider（同链双会话）：CUGAN 已由 manifest 禁包装、
-        不再进入本校验，其余模型同链对照历史稳定（数十模型×后端全过）。
+        对照沿用主链 provider（同链双会话）。CUGAN 禁 DML 包装；TRT 允许
+        整帧及分块包装。分块用实际块尺寸校验，避免预热整帧占用额外显存。
         """
         h, w = self.validate_hw if self.validate_hw else (96, 128)
+        if self.tile:
+            h, w = min(h, self.tile), min(w, self.tile)
         # 对齐尺寸时取 -1 变体，覆盖 pad 补边分支；已非对齐则本体即覆盖
         oh = h - 1 if h % self.pad == 0 and h > self.pad else h
         ow = w - 1 if w % self.pad == 0 and w > self.pad else w
@@ -288,7 +300,7 @@ class OnnxSrEngine(BaseEngine):
         for f in (np.zeros((h, w, 3), np.uint8),
                   rng.integers(0, 256, (h, w, 3), dtype=np.uint8),
                   rng.integers(0, 256, (oh, ow, 3), dtype=np.uint8)):
-            a = self._infer(f)
+            a = self._infer_plain(f)
             b = self._run_u8(sess, in_name, f)
             diff = int(np.abs(a.astype(np.int16) - b.astype(np.int16)).max())
             if a.shape != b.shape or diff > tol:
@@ -307,11 +319,6 @@ class OnnxSrEngine(BaseEngine):
         if ph or pw:
             y = np.ascontiguousarray(y[: h * self.scale, : w * self.scale])
         return y
-
-    def process(self, frame: np.ndarray) -> np.ndarray:
-        if self._u8_sess is not None:
-            return self._run_u8(self._u8_sess, self._u8_in_name, frame)
-        return super().process(frame)
 
     def _session_options(self):
         import onnxruntime as ort
@@ -347,6 +354,12 @@ class OnnxSrEngine(BaseEngine):
                 chosen = ["CPUExecutionProvider"]
 
     def _infer(self, frame: np.ndarray) -> np.ndarray:
+        # 统一由 BaseEngine 调度整帧/分块，每块都可走 GPU 前后处理。
+        if self._u8_sess is not None:
+            return self._run_u8(self._u8_sess, self._u8_in_name, frame)
+        return self._infer_plain(frame)
+
+    def _infer_plain(self, frame: np.ndarray) -> np.ndarray:
         if self.color == "y":
             return self._infer_y(frame)
         h, w = frame.shape[:2]
@@ -365,31 +378,39 @@ class OnnxSrEngine(BaseEngine):
             x = np.pad(x, ((0, ph), (0, pw), (0, 0)), mode="edge")
         if self.color == "bgr":
             x = x[..., ::-1]
-        x = np.ascontiguousarray(x.transpose(2, 0, 1)[None].astype(np.float32))
+        # 直接生成连续 NCHW，避免先转成保留 HWC 步幅的 float32 再复制一遍。
+        x = x.transpose(2, 0, 1)[None].astype(np.float32, order="C")
         if self.value_range == "0-1":
-            x = x / 255.0
+            x /= 255.0
         if self.affine:
             a, b = self.affine
-            x = x * a + b
+            x *= a
+            x += b
         if self._in_fp16:
             x = x.astype(np.float16)
 
         y = self.session.run(self._out_names, {self._in_name: x})[0]
-        y = np.squeeze(y, axis=0).transpose(1, 2, 0).astype(np.float32)  # CHW -> HWC
+        # 自有 float32 工作区：保留原来的舍入顺序，不修改 session 返回的张量。
+        y = np.squeeze(y, axis=0).astype(np.float32)
         if self.affine:
             a, b = self.affine
-            y = (y - b) / a
+            y -= b
+            y /= a
         if self.value_range == "0-1":
-            y = y * 255.0
+            y *= 255.0
         # 截断（非 round）是刻意的：与 u8 包装图内 Cast 的量化方式保持一致，
         # 两路径才能通过 ≤1/255 的逐位 A/B 校验。torch_engine 用 round 带来的
         # ≤1/255 系统性差异经 2026-08-26 审查拍板接受，不统一（不可感知）。
-        y = np.clip(y, 0, 255).astype(np.uint8)
+        np.clip(y, 0, 255, out=y)
+        y = y.transpose(1, 2, 0)
         if self.color == "bgr":
             y = y[..., ::-1]
         if ph or pw:
             y = y[: h * self.scale, : w * self.scale]
-        return np.ascontiguousarray(y)
+        # 将转置、裁剪后的浮点数据直接量化到连续 RGB，省掉中间 uint8 复制。
+        out = np.empty(y.shape, dtype=np.uint8)
+        np.copyto(out, y, casting="unsafe")
+        return out
 
     # ---- 单通道亮度 doubler（ArtCNN 系）：Y 过模型、色度插值放大 ----
 

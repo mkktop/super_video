@@ -22,6 +22,7 @@ import NewTask from './pages/NewTask.vue'
 import Trim from './pages/Trim.vue'
 import ImageSR from './pages/ImageSR.vue'
 import MangaSR from './pages/MangaSR.vue'
+import Watermark from './pages/Watermark.vue'
 import CompareModels from './pages/CompareModels.vue'
 
 /** 即挂即卸的页面异步加载：首屏不解析，首次切入才拉自己的 chunk */
@@ -37,6 +38,7 @@ const PAGES: Record<string, Component> = {
   trim: Trim,
   imagesr: ImageSR,
   mangasr: MangaSR,
+  watermark: Watermark,
   mcompare: CompareModels,
   tasks: page(() => import('./pages/Tasks.vue')),
   models: page(() => import('./pages/Models.vue')),
@@ -174,7 +176,7 @@ onUnmounted(() => offNavigate?.())
                  填一半切页草稿不丢、剪切/对比进行中切页回来结果还在；
                  其余页面照常即挂即卸。常驻页的全局监听须配 onActivated/onDeactivated 守卫 -->
             <Transition :name="pageName" mode="out-in">
-              <KeepAlive :include="['NewTask', 'Trim', 'ImageSR', 'MangaSR', 'CompareModels']">
+              <KeepAlive :include="['NewTask', 'Trim', 'ImageSR', 'MangaSR', 'Watermark', 'CompareModels']">
                 <component :is="pageComp" />
               </KeepAlive>
             </Transition>

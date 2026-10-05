@@ -85,6 +85,7 @@ export const ui = reactive({
     | 'compare'
     | 'imagesr'
     | 'mangasr'
+    | 'watermark'
     | 'mcompare',
   compareTaskId: null as string | null,
   pendingInput: null as string | null, // 跳转新建任务页时预填的输入（剪切→超分衔接）
@@ -321,6 +322,8 @@ function connectWs() {
   ws.onopen = () => {
     wsOk = true
     refreshTasks()
+    refreshStats()
+    refreshModels()
     refreshPerf()
     refreshTrt()
     // 断线间隙可能错过 model_download done 事件，进度条残留卡住：

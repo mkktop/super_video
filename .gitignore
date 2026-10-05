@@ -28,8 +28,11 @@ app/node_modules/
 app/out/
 app/dist/
 app/.vite/
-data/settings.json
 backend/dist/
 dist-app/
 backend/build/
+
+# 本地运行数据（sidecar 的 settings/db/sr_logs/基准产物）与工具记忆
+data/
 .zcode/
+.workbuddy/

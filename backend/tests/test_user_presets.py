@@ -48,7 +48,7 @@ def test_create_list_delete_roundtrip(client):
 
 def test_preset_persists_extra_fields(client):
     r = client.post("/api/presets", json=_body(
-        interp="rife2x", denoise=3, deinterlace=True, deband=True,
+        model_id="real-cugan", interp="rife2x", denoise=3, deinterlace=True, deband=True,
         container="mkv", audio_mode="copy", icon="🔧"))
     assert r.status_code == 201
     rec = r.json()

@@ -246,10 +246,10 @@ def test_validation_hw_gated_codec(clip):
 
 
 def test_validation_denoise_levels(clip):
-    t = _create_ok(clip, {"denoise": 2})
-    assert t["params"]["denoise"] == 2
+    # 降噪是 real-cugan 系专属变体，其余模型带 denoise 直接 400；
+    # 各倍率档位的正/反例见 test_cugan_denoise.py
     with pytest.raises(HTTPException):
-        _create(clip, {"denoise": 5})
+        _create(clip, {"denoise": 2})
 
 
 def test_registry_denoise_and_animejanai():

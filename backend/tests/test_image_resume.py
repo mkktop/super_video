@@ -110,7 +110,8 @@ def _mk_task(tmp_path, n, created_at=None):
 
 # ---- worker：断点续跑跳过语义 ----
 
-def test_run_image_job_skips_pages_done_after_creation(tmp_path, fake_engine):
+@pytest.mark.parametrize("async_save", [False, True])
+def test_run_image_job_skips_pages_done_after_creation(tmp_path, fake_engine, async_save):
     """中断前写出的产物（mtime ≥ 创建时间）跳过：引擎只推理剩余页，
     记账按全量算（ok/进度/PDF 页序都含跳过页）。"""
     task, images = _mk_task(tmp_path, 3)
@@ -124,7 +125,7 @@ def test_run_image_job_skips_pages_done_after_creation(tmp_path, fake_engine):
 
     rc = _run_image_job(task, {
         "kind": "manga", "format": "png", "scale": 2, "target_scale": 2,
-        "images": images,
+        "images": images, "async_save": async_save,
     }, SPEC)
     assert rc == 0, fake_engine.events
     assert fake_engine.eng.seen == 1, "只应推理未完成的第 3 页"

@@ -311,8 +311,9 @@ def test_image_job_pure_bw_skips_color_engine(tmp_path, dual_engine):
     assert dual_engine.color.seen == 0
 
 
+@pytest.mark.parametrize("async_save", [False, True])
 def test_image_job_split_pass_releases_between_lanes(
-        tmp_path, dual_engine, monkeypatch):
+        tmp_path, dual_engine, monkeypatch, async_save):
     """分趟：先黑白趟 → 释放主引擎 → 再建彩模彩色趟（先放再建，顺序不能反）；
     输出分派正确、进度单调走满、PDF 按原页序封装（处理序≠页序）。"""
     p1, p2, p3 = (tmp_path / f"p{i}.png" for i in (1, 2, 3))
@@ -343,6 +344,7 @@ def test_image_job_split_pass_releases_between_lanes(
         "kind": "manga", "format": "png", "scale": 2, "target_scale": 2,
         "images": images, "model_id_color": color_spec.id,
         "mix_pass": "split", "merge_pdf": True,
+        "async_save": async_save,
         "pdf_out": str(tmp_path / "book.pdf"),
     }, SPEC)
     assert rc == 0, dual_engine.events

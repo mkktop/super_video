@@ -77,6 +77,7 @@ export interface ModelInfo {
   vram_ok?: boolean
   vram_note?: string | null
   denoise_levels?: number[]
+  denoise_levels_by_scale?: Record<string, number[]>
 }
 
 export interface Preset {
@@ -295,7 +296,67 @@ export interface FolderScanResult {
   files: FolderScanFile[]
 }
 
+export interface WatermarkMask {
+  unit: 'px' | 'percent'
+  width: number
+  height: number
+  right: number
+  bottom: number
+}
+export interface WatermarkPreview {
+  width: number
+  height: number
+  box: [number, number, number, number] | null
+  original: string
+  processed: string
+  detected?: boolean | null
+  score?: number | null
+  reason?: string
+}
+export interface WatermarkSample { path: string; mask: WatermarkMask }
+export interface WatermarkDetection {
+  mode?: 'fixed' | 'smart'
+  sample?: WatermarkSample
+  threshold?: number
+}
+export interface WatermarkJob {
+  id: string
+  mode?: 'fixed' | 'smart'
+  status: 'running' | 'done' | 'cancelled'
+  total: number
+  completed: number
+  succeeded: number
+  failed: number
+  skipped?: number
+  elapsed_s: number
+  current: string
+  output_dir: string
+  errors: { path: string; error: string; kind?: 'skipped' }[]
+}
+async function watermarkPost<T>(path: string, body: unknown): Promise<T> {
+  const r = await _fetch(`${baseUrl}/api/watermark/${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const error = await r.json().catch(() => ({}))
+    throw new ApiError(typeof error.detail === 'string' ? error.detail : `HTTP ${r.status}`, r.status)
+  }
+  return r.json() as Promise<T>
+}
+
 export const api = {
+  watermarkPreview(path: string, mask: WatermarkMask, detection: WatermarkDetection = {}): Promise<WatermarkPreview> {
+    return watermarkPost('preview', { path, mask, ...detection })
+  },
+  startWatermark(body: { paths: string[]; folder?: string; output_dir?: string; mask: WatermarkMask } & WatermarkDetection): Promise<WatermarkJob> {
+    return watermarkPost('batch', body)
+  },
+  watermarkJob(id: string): Promise<WatermarkJob> {
+    return _get_json(`${baseUrl}/api/watermark/batch/${id}`)
+  },
+  cancelWatermark(id: string): Promise<WatermarkJob> {
+    return watermarkPost(`batch/${id}/cancel`, {})
+  },
   async models(): Promise<ModelInfo[]> {
     return _get_json(`${baseUrl}/api/models`)
   },
@@ -418,13 +479,26 @@ export const api = {
     }
     return r.json() as Promise<FolderScanResult>
   },
+  async suggestOutput(body: {
+    input: string
+    model_id: string
+    params: Record<string, unknown>
+  }): Promise<{ output: string }> {
+    const r = await _fetch(`${baseUrl}/api/tasks/output-path`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) throw new ApiError((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`, r.status)
+    return r.json()
+  },
   async createTask(body: {
     input?: string
     inputs?: string[]
     output?: string
     model_id: string
     params: Record<string, unknown>
-    /** 显式 output 撞已存在文件/活动任务时后端 409；用户确认覆盖后带 true 重交 */
+    /** 已有非活动文件需确认后带 true 重交；活动任务输出冲突不能覆盖 */
     overwrite?: boolean
   }): Promise<Response> {
     return _fetch(`${baseUrl}/api/tasks`, {

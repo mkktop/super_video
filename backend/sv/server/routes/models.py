@@ -16,6 +16,8 @@ from ...models.registry import (
     USER_REGISTRY_DIR,
     load_registry,
     model_dir,
+    denoise_levels,
+    validate_denoise,
 )
 from ...pipeline.probe import (
     UnsupportedMedia,
@@ -118,8 +120,10 @@ def create_preset(body: PresetCreate) -> dict:
         raise HTTPException(400, "subtitle_mode 仅支持 none / auto")
     if body.interp not in ("off", "rife2x"):
         raise HTTPException(400, "interp 仅支持 off / rife2x")
-    if body.denoise is not None and body.denoise not in (0, 1, 2, 3):
-        raise HTTPException(400, "denoise 仅支持 0 / 1 / 2 / 3")
+    try:
+        validate_denoise(specs[body.model_id], body.target_scale, body.denoise)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return user_presets.add(body.model_dump())
 
 
@@ -204,11 +208,7 @@ def get_models() -> list[dict]:
         size_mb = round(sum(f.get("size", 0) for f in spec.files) / 1e6, 1)
         vram_ok = gpu_vram is None or spec.vram_gb <= gpu_vram
         # denoise 档位：registry files 里 variant=denoiseN 的集合（real-cugan 专属概念）
-        denoise_levels = sorted({
-            int(f["variant"][7:]) for f in spec.files
-            if str(f.get("variant", "")).startswith("denoise")
-            and str(f["variant"])[7:].isdigit()
-        })
+        levels_by_scale = {str(sc): denoise_levels(spec, sc) for sc in spec.scale}
         out.append({
             "id": spec.id, "name": spec.name, "scale": spec.scale,
             "kind": spec.kind,
@@ -223,7 +223,8 @@ def get_models() -> list[dict]:
             "vram_note": None if vram_ok else (
                 f"需要约 {spec.vram_gb}GB 显存，本机 {gpu_vram}GB"
             ),
-            "denoise_levels": denoise_levels,
+            "denoise_levels": sorted({level for levels in levels_by_scale.values() for level in levels}),
+            "denoise_levels_by_scale": levels_by_scale,
             "engine": spec.engine,  # onnx | torch（torch 需独立 CUDA 环境，暂不参与模型对比）
         })
     return out

@@ -90,11 +90,12 @@ def local_files(spec: ModelSpec) -> list[Path]:
 
 
 def file_for_scale(spec: ModelSpec, scale: int, variant: str | None = None) -> dict:
-    """按倍率+变体选权重：先精确匹配（scale+variant），再 scale 无变体，再通用。"""
+    """显式变体必须精确匹配；未指定时按倍率取默认权重。"""
     if variant:
         for f in spec.files:
             if f.get("scale") == scale and f.get("variant") == variant:
                 return f
+        raise ModelNotFoundError(f"{spec.id} 缺少 x{scale} 的 {variant} 权重")
     for f in spec.files:
         if f.get("scale") == scale and "variant" not in f:
             return f
@@ -105,6 +106,29 @@ def file_for_scale(spec: ModelSpec, scale: int, variant: str | None = None) -> d
         if "scale" not in f:
             return f
     raise ModelNotFoundError(f"{spec.id} 缺少 x{scale} 权重")
+
+
+def denoise_levels(spec: ModelSpec, scale: int) -> list[int]:
+    return sorted({int(f["variant"][7:]) for f in spec.files
+                   if f.get("scale") == scale
+                   and str(f.get("variant", "")).startswith("denoise")
+                   and str(f["variant"])[7:].isdigit()})
+
+
+def validate_denoise(spec: ModelSpec, scale: int, value) -> int | None:
+    if value is None:
+        return None
+    try:
+        level = int(value)
+        if isinstance(value, bool) or (isinstance(value, float) and value != level):
+            raise ValueError()
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("denoise 需为整数降噪档位") from None
+    levels = denoise_levels(spec, scale)
+    if level not in levels:
+        raise ValueError(f"模型 {spec.id} 的 x{scale} 不支持降噪 {level}，"
+                         f"可选 {levels or '无（请清空降噪参数）'}")
+    return level
 
 
 def auto_variant(spec: ModelSpec, scale: int, src_h: int | None) -> str | None:

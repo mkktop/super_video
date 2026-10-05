@@ -33,13 +33,16 @@ export function useModelOptions(modelId: Ref<string>, targetScale: Ref<number>) 
     { label: '关闭', value: 'off' },
     { label: 'RIFE 2×（帧率翻倍，需下载 23MB 模型）', value: 'rife2x' },
   ])
-  // 降噪档位随模型注册表动态出（real-cugan 专属；缺省回退保守/3 两档）
+  // 降噪档位按当前模型和倍率读取，旧后端兼容全局列表。
   const denoiseOptions = computed(() => {
-    const levels = selectedModel.value?.denoise_levels ?? [0, 3]
+    const model = selectedModel.value
+    const levels = model?.denoise_levels_by_scale
+      ? model.denoise_levels_by_scale[String(targetScale.value)] ?? []
+      : model?.denoise_levels ?? []
     return levels.map((n) => ({ label: denoiseLabel[n] ?? `denoise ${n}`, value: n }))
   })
   const hasDenoiseVariants = computed(
-    () => (selectedModel.value?.denoise_levels?.length ?? 0) > 0,
+    () => denoiseOptions.value.length > 0,
   )
 
   /** 选模型：新模型支持当前倍率则保留，否则回落到最小倍率 */

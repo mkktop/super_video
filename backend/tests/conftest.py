@@ -41,9 +41,14 @@ def _no_local_sidecar_token():
     from sv.server import app as _app
 
     orig = _app._expected_tokens
+    orig_migration = _app.migrate_legacy_data
     _app._expected_tokens = lambda: []
+    # 设置 SV_DATA 的测试会被生产迁移逻辑误当作升级，搬走真实仓库数据。
+    # 数据迁移单测直接调用 paths.migrate_legacy_data，不受这里的装配入口隔离影响。
+    _app.migrate_legacy_data = lambda: []
     yield
     _app._expected_tokens = orig
+    _app.migrate_legacy_data = orig_migration
 
 
 def dml_available() -> bool:

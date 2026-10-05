@@ -167,7 +167,7 @@ def test_validate_u8_uses_real_frame_shape(tmp_path):
         seen.append(f.shape[:2])
         return np.zeros((f.shape[0] * 2, f.shape[1] * 2, 3), np.uint8)
 
-    eng._infer = fake_infer
+    eng._infer_plain = fake_infer
     eng._run_u8 = fake_run_u8
     eng._validate_u8(None, "x")  # 不抛=逐位一致（假引擎输出恒等）
     assert (120, 160) in seen and (119, 159) in seen, (

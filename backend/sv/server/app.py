@@ -23,6 +23,7 @@ from .routes import models as models_routes
 from .routes import system as system_routes
 from .routes import tasks as tasks_routes
 from .routes import trim as trim_routes
+from .routes import watermark as watermark_routes
 from .routes.tasks import gc_sr_logs, sweep_orphan_workdirs  # lifespan 用
 from .state import bus, perf, runner
 
@@ -111,6 +112,7 @@ app.include_router(system_routes.router)
 app.include_router(models_routes.router)
 app.include_router(tasks_routes.router)
 app.include_router(trim_routes.router)
+app.include_router(watermark_routes.router)
 app.include_router(compare_routes.router)
 
 
@@ -136,6 +138,9 @@ async def ws_endpoint(ws: WebSocket):
             if send_task not in done:
                 continue
             event = send_task.result()
+            if event.get("type") == "_bus_overflow":
+                await ws.close(code=1013, reason="event backlog; reconnect for snapshot")
+                break
             await ws.send_text(json.dumps(event, ensure_ascii=False))
     except Exception:  # 断开时 send 抛异常，走统一清理
         pass

@@ -145,7 +145,9 @@ def test_output_conflict_existing_file_requires_overwrite(client, tiny):
     client.delete(f"/api/tasks/{tid}")
 
 
-def test_conflict_with_active_task_and_auto_name_avoidance(client, tiny):
+def test_conflict_with_active_task_and_auto_name_avoidance(client, tiny, monkeypatch):
+    from sv.server import db
+    monkeypatch.setattr(db, "next_queued", lambda: None)
     # 把全局输出目录指到独立目录：否则自动命名落在源同目录时 plain 恒等于源文件
     # 本身（永远退后缀），测不到「活动任务占用」这一分支
     orig = client.get("/api/settings").json().get("output_dir", "")
@@ -170,13 +172,12 @@ def test_conflict_with_active_task_and_auto_name_avoidance(client, tiny):
             "params": {"scale": 2, "target_scale": 2}})
         assert r.status_code == 409, r.text
 
-        # C：带 overwrite 重交 → 放行
+        # C：覆盖确认也不能与活动任务共用输出路径
         r = client.post("/api/tasks", json={
             "input": str(tiny), "output": str(plain), "overwrite": True,
             "model_id": "realesr-animevideov3",
             "params": {"scale": 2, "target_scale": 2}})
-        assert r.status_code == 201, r.text
-        c_id = r.json()["id"]
+        assert r.status_code == 409, r.text
 
         # D：同输入不指定输出 → 自动命名避让活动任务占用的 plain，退 _2x 后缀
         r = client.post("/api/tasks", json={
@@ -187,8 +188,8 @@ def test_conflict_with_active_task_and_auto_name_avoidance(client, tiny):
         d_out = client.get(f"/api/tasks/{d_id}").json()["output_path"]
         assert Path(d_out).name == "sb_tiny_2x.mp4"
 
-        for tid in (a_id, c_id, d_id):
-            wait_status(client, tid, ("done", "failed"))
+        for tid in (a_id, d_id):
+            client.post(f"/api/tasks/{tid}/cancel")
             client.delete(f"/api/tasks/{tid}")
     finally:
         client.put("/api/settings", json={"output_dir": orig})

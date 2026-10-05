@@ -57,6 +57,8 @@ function consumeRetryParams() {
     format.value = 'png'
   }
   if (typeof p.tile === 'number') tileChoice.value = p.tile
+  pngFast.value = p.png_fast === true
+  asyncSave.value = p.async_save === true
   mergePdf.value = p.merge_pdf === true
 }
 onMounted(consumeRetryParams)
@@ -69,6 +71,8 @@ const modelId = ref('')
 const targetScale = ref(2)
 const format = ref<'png' | 'jpg'>('png')
 const jpgQuality = ref(92)
+const pngFast = ref(false)
+const asyncSave = ref(false)
 const tileChoice = useTileDefault('image') // 默认 256，localStorage 记忆上次选择
 const mergePdf = ref(false) // 批量 ≥2 张可勾选：另出一份无损封装的 PDF
 const submitting = ref(false)
@@ -167,33 +171,40 @@ function onThumbErr(f: string) {
 async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
-  // 批量合并为一个任务：后端一次模型加载循环处理全部图片
-  const list = files.value
-  const n = list.length
-  const wantPdf = mergePdf.value && n >= 2
-  const r = await api.createTask({
-    inputs: list,
-    model_id: modelId.value,
-    params: {
-      kind: 'image',
-      scale: targetScale.value,
-      target_scale: targetScale.value,
-      format: format.value,
-      ...(format.value === 'jpg' ? { jpg_quality: jpgQuality.value } : {}),
-      ...(tileChoice.value ? { tile: tileChoice.value } : {}),
-      ...(wantPdf ? { merge_pdf: true } : {}),
-    },
-  })
-  submitting.value = false
-  if (r.ok) {
-    message.success(
-      `已加入队列（${n} 张图片合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`,
-    )
-    files.value = []
-    ui.page = 'tasks'
-    refreshTasks()
-  } else {
-    message.error(`创建失败: ${(await r.json()).detail ?? r.status}`)
+  try {
+    // 批量合并为一个任务：后端一次模型加载循环处理全部图片
+    const list = files.value
+    const n = list.length
+    const wantPdf = mergePdf.value && n >= 2
+    const r = await api.createTask({
+      inputs: list,
+      model_id: modelId.value,
+      params: {
+        kind: 'image',
+        scale: targetScale.value,
+        target_scale: targetScale.value,
+        format: format.value,
+        png_fast: format.value === 'png' && pngFast.value,
+        async_save: asyncSave.value,
+        ...(format.value === 'jpg' ? { jpg_quality: jpgQuality.value } : {}),
+        ...(tileChoice.value ? { tile: tileChoice.value } : {}),
+        ...(wantPdf ? { merge_pdf: true } : {}),
+      },
+    })
+    if (r.ok) {
+      message.success(
+        `已加入队列（${n} 张图片合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}${wantPdf ? '，另将无损合并输出一份 PDF' : ''}）`,
+      )
+      files.value = []
+      ui.page = 'tasks'
+      refreshTasks()
+    } else {
+      message.error(`创建失败: ${(await r.json().catch(() => ({}))).detail ?? r.status}`)
+    }
+  } catch (e) {
+    message.error(`创建失败: ${e instanceof Error ? e.message : e}`)
+  } finally {
+    submitting.value = false
   }
 }
 </script>
@@ -302,6 +313,14 @@ export default { name: 'ImageSR' }
             <span class="q-label">质量 {{ jpgQuality }}</span>
             <NSlider v-model:value="jpgQuality" :min="60" :max="100" :step="1" style="width: 180px" />
           </template>
+        </div>
+        <div v-if="format === 'png'" class="row inline">
+          <span class="lbl">PNG 保存</span>
+          <NCheckbox v-model:checked="pngFast">快速无损保存（降低压缩等级，文件更大，画质不变）</NCheckbox>
+        </div>
+        <div class="row inline">
+          <span class="lbl">保存方式</span>
+          <NCheckbox v-model:checked="asyncSave">后台保存（保存上一张时处理下一张，会增加内存占用）</NCheckbox>
         </div>
         <div v-if="batchN >= 2" class="row inline">
           <span class="lbl">批量合并</span>

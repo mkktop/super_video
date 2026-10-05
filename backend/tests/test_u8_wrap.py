@@ -180,7 +180,116 @@ def test_batch_engine_not_wrapped(tmp_path):
     _assert_close(plain.process_batch(frames), wrapped.process_batch(frames))
 
 
+@pytest.mark.parametrize("color,range_", [("rgb", "0-1"), ("bgr", "0-1"),
+                                         ("rgb", "0-255"), ("bgr", "0-255")])
+def test_wrapped_tiles_preserve_dispatch_and_output(tmp_path, color, range_):
+    """CPU 上验证分块图接线：奇尺寸、通道/值域、输出拼接均与标准路径一致。"""
+    import onnxruntime as ort
+
+    tiny = tmp_path / "tile_model.onnx"
+    wrapped_path = tmp_path / "tile_model_u8.onnx"
+    _build_tiny_model(tiny)
+    wrap_u8(tiny, wrapped_path, color=color, range_01=range_ == "0-1")
+    io = {"color": color, "range": range_}
+    plain = OnnxSrEngine(tiny, 2, io=io, device="cpu", tile=40, u8_wrap=False)
+    plain.load()
+    wrapped = OnnxSrEngine(tiny, 2, io=io, device="cpu", tile=40, u8_wrap=False)
+    wrapped.load()
+    # 产品只对 TRT 开放；此处使用真实 CPU 包装图验证通用调度与数值语义。
+    sess = ort.InferenceSession(str(wrapped_path), providers=["CPUExecutionProvider"])
+    wrapped._u8_sess = sess
+    wrapped._u8_in_name = sess.get_inputs()[0].name
+    shapes = []
+    original_run = sess.run
+
+    def record(*args, **kwargs):
+        shapes.append(next(iter(args[1].values())).shape)
+        return original_run(*args, **kwargs)
+
+    sess.run = record
+    for frame in _frames() + [np.zeros((17, 19, 3), np.uint8)]:
+        _assert_close(plain.process(frame), wrapped.process(frame), tol=1)
+    assert len(shapes) > 4, "大帧必须分块，不能绕过 tile 调度"
+    assert all(h <= 40 and w <= 40 for _, h, w, _ in shapes)
+
+
+@pytest.mark.parametrize("provider,expected", [("TensorrtExecutionProvider", True),
+                                              ("DmlExecutionProvider", False),
+                                              ("CPUExecutionProvider", False)])
+def test_tile_wrap_only_enabled_for_trt(monkeypatch, provider, expected):
+    from types import SimpleNamespace
+
+    engine = OnnxSrEngine("unused.onnx", 2, tile=512)
+    engine.provider_used = [provider]
+    engine.session = SimpleNamespace(get_outputs=lambda: ["output"])
+    called = []
+    monkeypatch.setattr(engine, "_setup_u8", lambda: called.append(True))
+    engine._try_u8_wrap()
+    assert bool(called) is expected
+
+
+def test_tile_wrap_validation_uses_tile_size(monkeypatch):
+    engine = OnnxSrEngine("unused.onnx", 2, tile=512, validate_hw=(1080, 1920))
+    sizes = []
+
+    def reference(frame):
+        sizes.append(frame.shape[:2])
+        return np.repeat(np.repeat(frame, 2, axis=0), 2, axis=1)
+
+    monkeypatch.setattr(engine, "_infer_plain", reference)
+    monkeypatch.setattr(engine, "_run_u8", lambda sess, name, frame:
+                        np.repeat(np.repeat(frame, 2, axis=0), 2, axis=1))
+    engine._validate_u8(None, "unused")
+    assert sizes == [(512, 512), (512, 512), (511, 511)]
+
+
+def test_trt_tile_releases_reference_session_after_validation(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import sv.paths as paths
+
+    monkeypatch.setattr(paths, "TEMP_DIR", tmp_path)
+    model = tmp_path / "test.onnx"
+    model.write_bytes(b"source")
+    cache = tmp_path / "u8_wrap"
+    cache.mkdir()
+    (cache / "test_u8.onnx").write_bytes(b"cached")
+    engine = OnnxSrEngine(model, 2, device="trt", tile=512)
+    original = object()
+    engine.session = original
+    engine.provider_used = ["TensorrtExecutionProvider"]
+    wrapped = SimpleNamespace(get_providers=lambda: ["TensorrtExecutionProvider"],
+                              get_inputs=lambda: [SimpleNamespace(name="input")])
+    monkeypatch.setattr(engine, "_try_session", lambda *args, **kwargs: wrapped)
+    validated = []
+
+    def validate(*args):
+        assert engine.session is original, "数值校验必须仍可访问原始会话"
+        validated.append(True)
+
+    monkeypatch.setattr(engine, "_validate_u8", validate)
+    engine._setup_u8()
+    assert validated and engine.u8_wrapped
+    assert engine._u8_sess is wrapped and engine.session is None
+
+
+def test_tile_wrap_failure_keeps_reference_session(monkeypatch):
+    from types import SimpleNamespace
+
+    engine = OnnxSrEngine("unused.onnx", 2, device="trt", tile=512)
+    original = SimpleNamespace(get_outputs=lambda: ["output"])
+    engine.session = original
+    engine.provider_used = ["TensorrtExecutionProvider"]
+
+    def fail():
+        raise ValueError("output mismatch")
+
+    monkeypatch.setattr(engine, "_setup_u8", fail)
+    engine._try_u8_wrap()
+    assert engine.session is original and not engine.u8_wrapped
+    assert engine._u8_sess is None
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _bench_tmp():
-    TEMP_DIR.mkdir(exist_ok=True)
+    TEMP_DIR.mkdir(parents=True, exist_ok=True)
     yield

@@ -325,6 +325,40 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
           : list,
       ))
     }
+    if (method === 'POST' && path === '/api/tasks/output-path') {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      const stem = String(body.input ?? '').replace(/\.[^.\\/]+$/, '')
+      const params = body.params ?? {}
+      return Promise.resolve(json({ output: params.out_kind && params.out_kind !== 'video'
+        ? `${stem}_${params.target_scale ?? 2}x_frames`
+        : `${stem}_${params.target_scale ?? 2}x.${params.container ?? 'mp4'}` }))
+    }
+    if (method === 'POST' && path === '/api/watermark/preview') {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      const m = body.mask
+      const sx = m.unit === 'percent' ? 11 : 1
+      const sy = m.unit === 'percent' ? 16.45 : 1
+      const right = 1100 - Math.round(m.right * sx), bottom = 1645 - Math.round(m.bottom * sy)
+      const x = right - Math.ceil(m.width * sx - 1e-9), y = bottom - Math.ceil(m.height * sy - 1e-9)
+      if (x < 0 || y < 0) return Promise.resolve(json({ detail: '填白区域超出图片范围（1100 × 1645）' }, 400))
+      const svg = (fill: boolean) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1645" viewBox="0 0 1100 1645"><rect width="1100" height="1645" fill="white"/><g fill="#eee" stroke="#222" stroke-width="5"><rect x="60" y="100" width="470" height="550"/><rect x="550" y="100" width="470" height="550"/><rect x="60" y="670" width="960" height="420"/><rect x="60" y="1110" width="960" height="440"/></g><g font-family="sans-serif" text-anchor="middle" fill="#555" font-size="36"><text x="295" y="380">漫画页预览示例</text><text x="785" y="380">保持画框与线条</text><text x="550" y="890">在左图拖动框选填白区域</text></g><text x="945" y="1618" fill="#aaa" font-size="30">示例水印</text>${fill ? `<rect x="${x}" y="${y}" width="${right - x}" height="${bottom - y}" fill="white"/>` : ''}</svg>`,
+      )
+      return Promise.resolve(json({ width: 1100, height: 1645, box: [x, y, right, bottom], original: svg(false), processed: svg(true),
+        detected: body.mode === 'smart' && body.sample ? true : null,
+        score: body.mode === 'smart' && body.sample ? .99 : null, reason: '' }))
+    }
+    if (method === 'POST' && path === '/api/watermark/batch') {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      return Promise.resolve(json({ id: 'watermark-demo', status: 'done', total: body.paths.length,
+        completed: body.paths.length, succeeded: body.paths.length, failed: 0, elapsed_s: 1.2,
+        skipped: 0, mode: body.mode ?? 'fixed', current: '', output_dir: 'D:\\output\\图片_去水印', errors: [] }))
+    }
+    if (path.startsWith('/api/watermark/batch/')) {
+      return Promise.resolve(json({ id: 'watermark-demo', status: 'done', total: 3,
+        completed: 3, succeeded: 3, failed: 0, elapsed_s: 1.2,
+        current: '', output_dir: 'D:\\output\\图片_去水印', errors: [] }))
+    }
     if (method === 'POST' && path === '/api/tasks') return Promise.resolve(json({ id: `t-${Date.now()}` }, 201))
     if (method === 'POST' && path === '/api/images/scan') {
       // 图片超分·文件夹模式：假漫画目录树（封面 + 两话子目录）

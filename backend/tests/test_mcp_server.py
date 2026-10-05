@@ -479,7 +479,7 @@ def api_client():
         yield c
 
 
-_BRIDGE_UA = {"User-Agent": "rainframe-mcp/0.7.0"}
+_BRIDGE_UA = {"User-Agent": "rainframe-mcp/0.8.0"}
 
 
 def test_gate_blocks_bridge_when_disabled(api_client, monkeypatch):

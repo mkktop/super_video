@@ -32,7 +32,11 @@ class EventBus:
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
-                dead.append(q)  # 消费太慢，丢弃该订阅者积压
+                # 明确通知 WS 关闭，客户端才能重连并补快照；不能留下活连接死订阅。
+                while not q.empty():
+                    q.get_nowait()
+                q.put_nowait({"type": "_bus_overflow"})
+                dead.append(q)
         for q in dead:
             self.unsubscribe(q)
 

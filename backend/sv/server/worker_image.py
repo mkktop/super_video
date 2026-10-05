@@ -4,6 +4,7 @@ from __future__ import annotations
 import gc
 import os
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 from sv.models import manager
@@ -57,6 +58,10 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
     逐页覆盖，不能跳）。取消靠 runner 杀进程兜底，已完成的输出文件保留
     （runner._cleanup_partial 对图片任务豁免）。
 
+    可选 png_fast 使用 compress_level=1（像素不变、文件更大）；async_save
+    以一个保存线程保存上一页，同时主线程推理下一页。保存队列最多一页，
+    落盘完成后才更新进度；合并 PDF / 返回前等待全部保存完成。
+
     混装双模型执行模式（params.mix_pass，仅 model_id_color 存在时有意义）：
     coexist=缺省并存——两引擎同时驻留，分派只换对象（无会话重建风险）；
     split=分趟省显存——先按原页序跑完黑白趟，释放主引擎后再建彩模跑
@@ -73,6 +78,8 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         return 1
     jpg_quality = int(params.get("jpg_quality", 92))
     jpg_quality = min(100, max(60, jpg_quality))
+    png_fast = params.get("png_fast") is True and fmt == "png"
+    async_save = params.get("async_save") is True
 
     images = params.get("images") or [
         {"in": task["input_path"], "out": task["output_path"]}]
@@ -238,7 +245,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         weight = model_file(spec_, scale, precision, variant_)
         return _load_onnx_engine(
             weight, spec_, scale, variant_, precision, tile,
-            warm_hw, batch=1, log=emit, slot=slot)
+            (warm_hw[1], warm_hw[0]), batch=1, log=emit, slot=slot)
 
     engines: dict[str, object] = {}
     precisions: dict[str, str] = {}
@@ -285,9 +292,66 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
             return False
         return st.st_size > 0 and st.st_mtime >= _created
 
+    # 单保存线程、最多一页待保存；下一页推理可与上一页保存重叠。
+    # 状态/进度只由主线程更新，且落盘之后才认定该页完成。
+    saver = ThreadPoolExecutor(max_workers=1, thread_name_prefix="image-save") if async_save else None
+    pending_save: tuple[Future, int, dict, np.ndarray, np.ndarray] | None = None
+
+    def _progress() -> None:
+        nonlocal done_count
+        done_count += 1
+        el = time.perf_counter() - t0
+        emit({"type": "progress", "frames": done_count, "total": n,
+              "fps": round(done_count / el, 2) if el > 0 else 0,
+              "eta_sec": int((n - done_count) * el / done_count) if done_count else 0})
+
+    def _write_page(meta: dict, out: np.ndarray) -> tuple[float, int]:
+        started = time.perf_counter()
+        dst = Path(meta["out"])
+        tmp = dst.with_name(dst.name + f".{os.getpid()}.part")
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            result = Image.fromarray(out)
+            if fmt == "jpg":
+                result.save(str(tmp), "JPEG", quality=jpg_quality)
+            elif png_fast:
+                result.save(str(tmp), "PNG", compress_level=1)
+            else:
+                result.save(str(tmp), "PNG")
+            os.replace(tmp, dst)
+            return time.perf_counter() - started, dst.stat().st_size
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+
+    def _finish_save(k: int, meta: dict, frame: np.ndarray, out: np.ndarray,
+                     future: Future | None = None) -> None:
+        nonlocal ok, out_bytes_total, t_sav, first_pair, first_pair_k
+        try:
+            elapsed, size = future.result() if future is not None else _write_page(meta, out)
+        except Exception as e:  # noqa: BLE001 — 后台写入失败同样逐页跳过
+            name = Path(meta["in"]).name
+            emit({"type": "log", "line": f"跳过 {name}（写入失败: {e}）"})
+            failed_names.append(name)
+        else:
+            t_sav += elapsed
+            ok += 1
+            written_idx[k] = Path(meta["out"])
+            out_bytes_total += size
+            if k < first_pair_k:
+                first_pair_k = k
+                first_pair = (frame, out)
+        _progress()
+
+    def _drain_save() -> None:
+        nonlocal pending_save
+        if pending_save is not None:
+            future, k, meta, frame, out = pending_save
+            pending_save = None
+            _finish_save(k, meta, frame, out, future)
+
     def _process_page(k: int, meta: dict, engine) -> None:
-        nonlocal ok, done_count, out_bytes_total, t_dec, t_inf, t_sav
-        nonlocal first_pair, first_pair_k
+        nonlocal t_dec, t_inf, pending_save
         src_p = Path(meta["in"])
         name = src_p.name
         _t = time.perf_counter()
@@ -296,8 +360,10 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                 img = ImageOps.exif_transpose(im)  # 手机竖拍按 EXIF 转正
                 frame = np.asarray(img.convert("RGB"), dtype=np.uint8)
         except Exception as e:  # noqa: BLE001
+            _drain_save()
             emit({"type": "log", "line": f"跳过 {name}（无法读取: {e}）"})
             failed_names.append(name)
+            _progress()
         else:
             t_dec += time.perf_counter() - _t
             _t = time.perf_counter()
@@ -307,44 +373,24 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                     out = np.asarray(
                         Image.fromarray(out).resize(target_size, Image.LANCZOS).convert("RGB"))
             except Exception as e:  # noqa: BLE001
+                _drain_save()
                 emit({"type": "log", "line": f"跳过 {name}（推理失败: {type(e).__name__}: {e}）"})
                 failed_names.append(name)
+                _progress()
             else:
                 t_inf += time.perf_counter() - _t
-                _t = time.perf_counter()
-                dst = Path(meta["out"])
-                tmp = dst.with_name(dst.name + f".{os.getpid()}.part")
-                try:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    result = Image.fromarray(out)
-                    if fmt == "jpg":
-                        result.save(str(tmp), "JPEG", quality=jpg_quality)
-                    else:
-                        result.save(str(tmp), "PNG")
-                    os.replace(tmp, dst)  # 原子：取消/中断不留半个文件
-                except Exception as e:  # noqa: BLE001
-                    tmp.unlink(missing_ok=True)
-                    emit({"type": "log", "line": f"跳过 {name}（写入失败: {e}）"})
-                    failed_names.append(name)
+                _drain_save()
+                if saver is not None:
+                    pending_save = (saver.submit(_write_page, meta, out), k, meta, frame, out)
                 else:
-                    t_sav += time.perf_counter() - _t
-                    ok += 1
-                    written_idx[k] = dst
-                    out_bytes_total += dst.stat().st_size
-                    if k < first_pair_k:
-                        first_pair_k = k
-                        first_pair = (frame, out)
-        done_count += 1  # 进度按处理位数计（含失败），保证走满 total
-        el = time.perf_counter() - t0
-        emit({"type": "progress", "frames": done_count, "total": n,
-              "fps": round(done_count / el, 2) if el > 0 else 0,
-              "eta_sec": int((n - done_count) * el / done_count) if done_count else 0})
+                    _finish_save(k, meta, frame, out)
 
     def _skip_page(k: int, meta: dict) -> None:
         """断点续跑：沿用已有产物的页，只记账不推理。跳页节奏远快于推理
         （每秒上万页），进度事件按 1/512 限频——runner 每个事件都落一次
         DB，全量发会把续跑开头变成十万次 UPDATE。"""
         nonlocal ok, done_count, out_bytes_total, skipped
+        _drain_save()
         dst = Path(meta["out"])
         if skipped == 0:
             emit({"type": "log", "line":
@@ -366,6 +412,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                 _skip_page(k, images[k])
                 continue
             _process_page(k, images[k], _engine_for(lane))
+        _drain_save()
 
     try:
         if split:
@@ -407,6 +454,12 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
                  if split and done_count else "引擎加载失败")
         emit_failed(stage, e)
         return 1
+    finally:
+        try:
+            _drain_save()  # 完成最后一页后才能合并 PDF、生成预览、发 done
+        finally:
+            if saver is not None:
+                saver.shutdown(wait=True)
     used_prec = precisions.get("bw", used_prec)
     load_s = load_s_total
     written = [written_idx[k] for k in sorted(written_idx)]
@@ -465,6 +518,7 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
             f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} 图片超分任务 ====",
             f"{model_line} · 推理后端 {backend_line}"
             f" · 精度 {prec_line} · tile={tile} · {n}张 → {fmt.upper()}",
+            f"PNG 快速保存 {'开' if png_fast else '关'} · 后台保存 {'开（推理与保存耗时有重叠）' if async_save else '关'}",
             f"引擎加载 {load_s:.1f}s · 解码合计 {t_dec:.2f}s · 推理合计 {t_inf:.2f}s"
             f" · 编码落盘合计 {t_sav:.2f}s",
             f"成功 {ok}/{n} 张（其中断点沿用 {skipped} 张）"

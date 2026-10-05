@@ -106,7 +106,23 @@ def test_image_job_exif_orientation_transposed(tmp_path, fake_engine):
     assert fake_engine.seen_hw == (30, 10), "EXIF 方向应已转正后送入引擎"
 
 
-def test_image_job_jpg_format(tmp_path, fake_engine):
+def test_image_engine_warmup_uses_height_width(tmp_path, fake_engine, monkeypatch):
+    import sv.server.worker_image as worker
+
+    src = tmp_path / "portrait.png"
+    _make_png(src, 10, 30)
+    warmups = []
+    def load(weight, spec, scale, variant, precision, tile, warmup_hw, **kwargs):
+        warmups.append(warmup_hw)
+        return fake_engine, "fp32"
+    monkeypatch.setattr(worker, "_load_onnx_engine", load)
+    task = {"id": "warmup-hw", "input_path": str(src), "output_path": str(tmp_path / "out.png")}
+    assert worker._run_image_job(task, {"scale": 2}, SPEC) == 0
+    assert warmups == [(30, 10)]
+
+
+@pytest.mark.parametrize("async_save", [False, True])
+def test_image_job_jpg_format(tmp_path, fake_engine, async_save):
     src = tmp_path / "p.png"
     _make_png(src, 8, 8)
     out = tmp_path / "p_2x.jpg"
@@ -115,6 +131,7 @@ def test_image_job_jpg_format(tmp_path, fake_engine):
 
     rc = _run_image_job(task, {
         "kind": "image", "format": "jpg", "jpg_quality": 200,
+        "async_save": async_save,
         "scale": 2, "target_scale": 2,
     }, SPEC)
     assert rc == 0
@@ -560,3 +577,132 @@ def test_create_task_rejects_unknown_image_kind(client, model_x2, tmp_path):
     })
     assert r.status_code == 400
     assert "任务类型" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("kind", ["image", "manga"])
+@pytest.mark.parametrize("fmt", ["png", "jpg"])
+def test_create_image_save_options(client, model_x2, tmp_path, kind, fmt):
+    src = tmp_path / "save-options.png"
+    _make_png(src, 10, 14)
+    r = client.post("/api/tasks", json={
+        "input": str(src), "model_id": model_x2,
+        "params": {"kind": kind, "scale": 2, "format": fmt,
+                   "png_fast": True, "async_save": True},
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["params"]["png_fast"] is (fmt == "png")
+    assert r.json()["params"]["async_save"] is True
+
+
+@pytest.mark.parametrize("key", ["png_fast", "async_save"])
+def test_create_image_save_options_reject_strings(client, model_x2, tmp_path, key):
+    src = tmp_path / "invalid-option.png"
+    _make_png(src, 10, 14)
+    r = client.post("/api/tasks", json={
+        "input": str(src), "model_id": model_x2,
+        "params": {"kind": "image", "scale": 2, key: "false"},
+    })
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize("async_save", [False, True])
+def test_fast_png_keeps_pixels_and_pdf_waits_for_saves(tmp_path, fake_engine, monkeypatch, async_save):
+    import sv.pdfmerge as pdfmerge
+    from sv.server.worker_image import _run_image_job
+
+    images = []
+    for i in range(3):
+        src = tmp_path / f"src{i}.png"
+        _make_png(src, 10 + i, 12)
+        images.append({"in": str(src), "out": str(tmp_path / f"out{i}.png")})
+    original_save = Image.Image.save
+    compression = []
+    def capture_save(im, path, *args, **kwargs):
+        if str(path).endswith('.part'):
+            compression.append(kwargs.get("compress_level"))
+        return original_save(im, path, *args, **kwargs)
+    monkeypatch.setattr(Image.Image, "save", capture_save)
+    pdf = tmp_path / "pages.pdf"
+    def merge(paths, output):
+        assert list(paths) == [Path(m["out"]) for m in images]
+        assert all(p.exists() for p in paths)
+        Path(output).write_bytes(b"pdf-test")
+        return {"pages": len(paths)}
+    monkeypatch.setattr(pdfmerge, "write_pdf", merge)
+    task = {"id": "save-options", "input_path": images[0]["in"], "output_path": images[0]["out"]}
+    assert _run_image_job(task, {
+        "scale": 2, "images": images, "format": "png", "png_fast": True,
+        "async_save": async_save, "merge_pdf": True, "pdf_out": str(pdf),
+    }, SPEC) == 0
+    assert compression == [1, 1, 1]
+    for m in images:
+        expected = np.repeat(np.repeat(np.asarray(Image.open(m["in"])), 2, axis=0), 2, axis=1)
+        np.testing.assert_array_equal(np.asarray(Image.open(m["out"])), expected)
+    done = next(e for e in fake_engine.events if e["type"] == "done")
+    assert done["frames"] == 3
+    assert done["out_bytes"] == sum(Path(m["out"]).stat().st_size for m in images) + pdf.stat().st_size
+    assert not list(tmp_path.glob("*.part"))
+
+
+def test_background_save_overlaps_next_inference_and_progress_waits(tmp_path, fake_engine, monkeypatch):
+    from threading import Event, get_ident
+    from sv.server.worker_image import _run_image_job
+
+    save_started, next_inference = Event(), Event()
+    main_thread = get_ident()
+    original_save = Image.Image.save
+    images = []
+    for i in range(3):
+        src = tmp_path / f"p{i}.png"
+        _make_png(src, 12, 10)
+        images.append({"in": str(src), "out": str(tmp_path / f"out{i}.png")})
+    def save(im, path, *args, **kwargs):
+        if str(path).endswith('.part'):
+            assert get_ident() != main_thread
+            if Path(path).name.startswith("out0"):
+                save_started.set()
+                assert next_inference.wait(3), "保存未与下一页推理重叠"
+        return original_save(im, path, *args, **kwargs)
+    monkeypatch.setattr(Image.Image, "save", save)
+    original_process = fake_engine.process
+    seen = 0
+    def process(frame):
+        nonlocal seen
+        seen += 1
+        assert get_ident() == main_thread  # GPU 仍由原线程使用
+        if seen == 2:
+            assert save_started.wait(3)
+            assert not any(e["type"] == "progress" for e in fake_engine.events)
+            next_inference.set()
+        if seen == 3:
+            assert Path(images[0]["out"]).exists()  # 不会无限积累待保存页
+        return original_process(frame)
+    monkeypatch.setattr(fake_engine, "process", process)
+    task = {"id": "overlap", "input_path": images[0]["in"], "output_path": images[0]["out"]}
+    assert _run_image_job(task, {"scale": 2, "images": images, "async_save": True}, SPEC) == 0
+    assert [e["frames"] for e in fake_engine.events if e["type"] == "progress"] == [1, 2, 3]
+    assert all(Path(m["out"]).exists() for m in images)
+
+
+@pytest.mark.parametrize("failed_index", [0, 2])
+def test_background_save_failure_skips_page_and_drains_last(tmp_path, fake_engine, monkeypatch, failed_index):
+    from sv.server.worker_image import _run_image_job
+
+    images = []
+    for i in range(3):
+        src = tmp_path / f"p{i}.png"
+        _make_png(src, 12, 10)
+        images.append({"in": str(src), "out": str(tmp_path / f"out{i}.png")})
+    original_save = Image.Image.save
+    def save(im, path, *args, **kwargs):
+        if str(path).endswith('.part') and Path(path).name.startswith(f"out{failed_index}."):
+            Path(path).write_bytes(b"partial")
+            raise OSError("test disk full")
+        return original_save(im, path, *args, **kwargs)
+    monkeypatch.setattr(Image.Image, "save", save)
+    task = {"id": "save-failure", "input_path": images[0]["in"], "output_path": images[0]["out"]}
+    assert _run_image_job(task, {"scale": 2, "images": images, "async_save": True}, SPEC) == 0
+    assert next(e for e in fake_engine.events if e["type"] == "done")["frames"] == 2
+    assert not Path(images[failed_index]["out"]).exists()
+    assert not list(tmp_path.glob("*.part"))
+    assert [e["frames"] for e in fake_engine.events if e["type"] == "progress"] == [1, 2, 3]

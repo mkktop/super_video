@@ -269,6 +269,18 @@ function adoptReuseToken(): void {
 }
 
 async function startOrReuseSidecar(): Promise<string> {
+  // Development can target a separately started source sidecar while an installed
+  // copy is running. Never honor this override in a packaged application.
+  const devBackend = !app.isPackaged && process.env.SV_DEV_BACKEND_URL
+  if (devBackend) {
+    const url = new URL(devBackend)
+    if (url.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(url.hostname)) {
+      throw new Error('SV_DEV_BACKEND_URL must point to a local HTTP sidecar')
+    }
+    adoptReuseToken()
+    baseUrl = url.origin
+    return baseUrl
+  }
   // 1) 复用已有 sidecar（UI 重启场景，任务继续跑）——版本不一致的旧实例不复用：
   //    空闲则结束换新；正跑任务则暂用并在日志里提示（跑完重启应用完成切换）
   for (let p = 8730; p < 8740; p++) {
