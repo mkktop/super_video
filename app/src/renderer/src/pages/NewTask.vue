@@ -299,7 +299,7 @@ async function consumeRetryParams() {
   deinterlace.value = p.deinterlace === true
   deband.value = p.deband === true
   tileChoice.value = typeof p.tile === 'number' ? p.tile : 0
-  message.info('已带入原任务参数，调整后点「加入队列」')
+  message.info('已带入原任务参数，调整后点「加入处理队列」')
 }
 onMounted(consumeRetryParams)
 onActivated(consumeRetryParams)
@@ -474,7 +474,7 @@ async function submit() {
       else lastErr = `${(await r.json().catch(() => ({}))).detail ?? r.status}`
     }
     if (succeeded.size === submitted.length) {
-      message.success(`已加入队列 ${succeeded.size} 个任务${selectedModel.value && !selectedModel.value.installed ? '（未安装的模型将在任务开始时下载）' : ''}`)
+      message.success(`已加入处理队列 ${succeeded.size} 个任务${selectedModel.value && !selectedModel.value.installed ? '（未安装的模型将在任务开始时下载）' : ''}`)
       reset()
       ui.page = 'tasks'
     } else {
@@ -504,7 +504,7 @@ function reset() {
   outputTouched.value = false
 }
 
-// ---- 先试跑 20 秒（复用模型对比基建：片头 20s + 当前模型跑一版，看效果再决定入队） ----
+// ---- 效果预览（复用模型对比基建：片头 20s + 当前模型跑一版，看效果再决定入队） ----
 const canTryRun = computed(
   () =>
     inputs.value.length === 1 &&
@@ -515,18 +515,24 @@ const canTryRun = computed(
     (!!selectedModel.value?.installed || !!selectedModel.value?.bundled),
 )
 const tryRunHint = computed(() => {
-  if (inputs.value.length !== 1 || !probeInfo.value?.ok || !selectedModel.value) return ''
-  return `先用「${selectedModel.value.name}」试跑片头 20 秒，检查效果与速度。确认效果后再处理全片`
+  if (!inputs.value.length) return ''
+  if (inputs.value.length > 1) return '效果预览仅支持单个视频；批量任务将统一使用当前参数处理'
+  if (!probeInfo.value?.ok) return '读取视频信息后，可生成片头 20 秒效果预览'
+  if (!selectedModel.value) return '选择模型后，可生成片头 20 秒效果预览'
+  if (!selectedModel.value.installed && !selectedModel.value.bundled) {
+    return '当前模型尚未下载；下载后可预览效果，加入队列时也会自动下载'
+  }
+  return `使用「${selectedModel.value.name}」生成片头 20 秒效果预览，检查画质与速度`
 })
 const tryRunTitle = computed(() => {
   if (!inputs.value.length) return ''
-  if (inputs.value.length > 1) return '批量文件不支持试跑'
+  if (inputs.value.length > 1) return '批量文件不支持效果预览'
   if (!probeInfo.value?.ok) return '等待视频信息读取完成'
-  if (probeInfo.value.duration_s <= 1) return '视频过短，直接入队即可'
+  if (probeInfo.value.duration_s <= 1) return '视频过短，无需预览，可直接加入队列'
   if (!modelId.value || !selectedModel.value) return '请先选择模型'
   if (!selectedModel.value.vram_ok) return '当前模型超出显存，不可用'
-  if (!selectedModel.value.installed && !selectedModel.value.bundled) return '模型未下载：先下载（入队也会自动下载）'
-  return '用当前模型对片头 20 秒快速跑一版，可拖动分割线对比原片'
+  if (!selectedModel.value.installed && !selectedModel.value.bundled) return '模型未下载：下载后可预览（加入队列也会自动下载）'
+  return '生成片头 20 秒效果预览，可拖动分割线对比原片'
 })
 function tryRun() {
   if (!canTryRun.value || !probeInfo.value || !modelId.value) return
@@ -757,6 +763,21 @@ export default { name: 'NewTask' }
           <div v-if="m.vram_note" class="m-warn">{{ m.vram_note }}</div>
         </div>
       </div>
+      <div v-if="inputs.length" class="model-preview-row">
+        <div class="model-preview-copy">
+          <strong>预览当前模型效果</strong>
+          <span>{{ tryRunHint }}</span>
+        </div>
+        <NButton
+          type="primary"
+          secondary
+          :disabled="!canTryRun"
+          :title="tryRunTitle"
+          @click="tryRun"
+        >
+          预览效果
+        </NButton>
+      </div>
       </template>
     </section>
 
@@ -899,27 +920,27 @@ export default { name: 'NewTask' }
       </NForm>
     </section>
 
-    <!-- 吸底操作条 -->
+    <!-- 吸底操作条：弱化清空，只保留一个主要提交动作 -->
     <div class="footer-bar sv-card">
-      <span class="hint-inline tryrun-hint">
-        {{ tryRunHint }}
-      </span>
-      <span class="footer-spacer" />
-      <NButton :disabled="submitting" @click="reset">清空</NButton>
-      <NButton
-        :disabled="!canTryRun"
-        :title="tryRunTitle"
-        @click="tryRun"
+      <button
+        type="button"
+        class="clear-action"
+        :disabled="submitting || !inputs.length"
+        @click="reset"
       >
-        ▶ 先试跑 20 秒
-      </NButton>
+        清空当前选择
+      </button>
+      <span class="footer-spacer" />
+      <span v-if="inputs.length" class="footer-summary">
+        {{ inputs.length === 1 ? '1 个视频已就绪' : `${inputs.length} 个视频将使用相同参数` }}
+      </span>
       <NButton
         type="primary"
         :loading="submitting"
         :disabled="!canSubmit"
         @click="submit"
       >
-        加入队列（{{ inputs.length || 0 }} 个）
+        加入处理队列
       </NButton>
     </div>
   </div>
@@ -1191,6 +1212,24 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
 .model-intro strong { font-size: 14px; font-weight: 500; }
 .model-intro p, .model-hint { color: var(--sv-text-dim); font-size: 13px; line-height: 1.65; margin-top: 6px; }
 .m-recommended { display: inline-block; margin-bottom: 10px; font-size: 12.5px; color: var(--sv-accent-strong); }
+.model-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--sv-border-soft);
+  border-radius: 10px;
+  background: var(--sv-well);
+}
+.model-preview-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.model-preview-copy strong { font-size: 13px; font-weight: 600; color: var(--sv-text); }
+.model-preview-copy span { font-size: 12px; line-height: 1.5; color: var(--sv-text-dim); }
 
 /* 输出设置两列；窄窗口（内容宽 <752px）自动退化单列 */
 .out-cols {
@@ -1232,6 +1271,19 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
   z-index: 5;
   flex-wrap: wrap;
 }
-.tryrun-hint { font-size: 12px; color: var(--sv-accent-strong); }
+.clear-action {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--sv-text-dim);
+  padding: 6px 2px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.clear-action:hover:not(:disabled) { color: var(--sv-text); }
+.clear-action:disabled { opacity: 0.38; cursor: default; }
+.footer-summary { font-size: 12px; color: var(--sv-text-dim); }
 .footer-spacer { flex: 1; }
 </style>
