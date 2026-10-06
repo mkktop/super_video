@@ -16,6 +16,8 @@ os.environ.setdefault("SV_DB", str(TEMP_DIR / "test_fp16.db"))
 def _tmp_settings(tmp_path, monkeypatch):
     """precision 写盘测试指向临时文件，不碰开发机真实设置。"""
     monkeypatch.setattr(settings, "SETTINGS_PATH", tmp_path / "settings.json")
+    from sv import paths
+    monkeypatch.setattr(paths, "TEMP_DIR", tmp_path / "cache")
 
 
 def _toy_fp32_onnx(path: Path, ch: int = 64) -> Path:
@@ -174,3 +176,39 @@ def test_convert_good_graph_lands(tmp_path):
     import onnxruntime as ort
 
     ort.InferenceSession(str(out), providers=["CPUExecutionProvider"])
+
+
+def test_failed_conversion_cached_until_model_or_dependencies_change(tmp_path,monkeypatch):
+    from sv.models import fp16 as module
+    from sv import paths
+    monkeypatch.setattr(paths,'TEMP_DIR',tmp_path/'cache')
+    source=tmp_path/'source.onnx';source.write_bytes(b'original model')
+    calls=[]
+    def broken(src,dst):
+        calls.append(src)
+        raise ValueError('Incompatible graph types')
+    monkeypatch.setattr(module,'convert_file',broken)
+    assert ensure_fp16_file(source)==source
+    assert ensure_fp16_file(source)==source
+    assert len(calls)==1
+    source.write_bytes(b'updated model')
+    assert ensure_fp16_file(source)==source
+    assert len(calls)==2
+    monkeypatch.setattr(module,'version',lambda name:'new-version')
+    assert ensure_fp16_file(source)==source
+    assert len(calls)==3
+
+
+def test_transient_conversion_failure_is_retried(tmp_path,monkeypatch):
+    from sv.models import fp16 as module
+    from sv import paths
+    monkeypatch.setattr(paths,'TEMP_DIR',tmp_path/'cache')
+    source=tmp_path/'source.onnx';source.write_bytes(b'model')
+    calls=[]
+    def no_space(src,dst):
+        calls.append(src)
+        raise OSError('No space left')
+    monkeypatch.setattr(module,'convert_file',no_space)
+    assert ensure_fp16_file(source)==source
+    assert ensure_fp16_file(source)==source
+    assert len(calls)==2

@@ -165,7 +165,7 @@ function startPolling(id: string) {
       if (++pollFailures >= 10) {
         stopPolling()
         running.value = false
-        message.error('对比状态查询失败（后端可能已退出）')
+        message.error('无法更新对比进度，请检查本地服务连接后重试')
         return
       }
     }
@@ -303,7 +303,7 @@ function useModel(mid: string) {
     <div class="page-head">
       <div>
         <h1>模型对比</h1>
-        <p class="sub">同一段素材并排跑多个模型——看画质差异、比处理速度，选出适合的那一个</p>
+        <p class="sub">用同一视频片段或图片，比较不同模型的效果与处理速度</p>
       </div>
     </div>
 
@@ -336,7 +336,7 @@ function useModel(mid: string) {
                     <span class="lbl">时长 {{ fmtT(segDur) }}</span>
                     <NSlider v-model:value="segDur" :min="1" :max="maxDur" :step="0.5" :format-tooltip="(v: number) => fmtT(v)" />
                   </div>
-                  <p class="hint">对比片段最长 {{ MAX_SEG_S }} 秒——足够看出画质与速度差异，又不必等太久</p>
+                  <p class="hint">片段最长 {{ MAX_SEG_S }} 秒。建议选择包含运动、纹理或暗部细节的片段</p>
                 </template>
               </div>
             </div>
@@ -388,13 +388,13 @@ function useModel(mid: string) {
         <NRadioGroup v-if="commonScales.length" v-model:value="scale" size="small">
           <NRadioButton v-for="s in commonScales" :key="s" :value="s">x{{ s }}</NRadioButton>
         </NRadioGroup>
-        <p v-else class="hint">所选模型没有共同支持的倍率，请调整模型组合（或选倍率集合有交集的模型）</p>
+        <p v-else class="hint">所选模型没有共同支持的倍率，请更换其中一个模型</p>
       </section>
 
       <div class="footer-bar sv-card">
         <span class="hint-inline">
           {{ mode === 'video'
-            ? `将用 ${selected.size || 0} 个模型依次处理 ${fmtT(segDur)} 的片段（每个模型加载一次引擎）`
+            ? `将用 ${selected.size || 0} 个模型依次处理 ${fmtT(segDur)} 的片段（逐个加载模型）`
             : `将用 ${selected.size || 0} 个模型依次处理这张图片` }}
         </span>
         <NButton type="primary" :loading="running" :disabled="!canRun" @click="run">

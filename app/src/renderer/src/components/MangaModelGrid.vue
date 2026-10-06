@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelCategoryLabel } from '../composables/modelCategories'
 import { NTag } from 'naive-ui'
 import type { ModelInfo } from '../api'
 
@@ -9,7 +10,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'select', id: string): void }>()
 
-const contentLabel = { anime: '动漫', comic: '漫画', general: '真人/通用', real: '真人/通用' } as Record<string, string>
 
 function onClick(m: ModelInfo) {
   if (!m.vram_ok) return
@@ -40,7 +40,7 @@ function onClick(m: ModelInfo) {
       <div class="m-tags">
         <span>x{{ m.scale.join('/x') }}</span>
         <span>{{ m.vram_gb }}GB 显存</span>
-        <span v-for="c in m.content" :key="c" class="m-content">{{ contentLabel[c] ?? c }}</span>
+        <span class="m-content">{{ modelCategoryLabel(m) }}</span>
       </div>
     </div>
   </div>

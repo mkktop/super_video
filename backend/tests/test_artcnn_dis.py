@@ -26,7 +26,7 @@ def test_registry_loads_artcnn_dis():
 
 def test_artcnn_entries_semantics():
     """单通道亮度 doubler 家族：color=y、免对齐 pad=1、单帧 batch、MIT。"""
-    tiers = {"artcnn-c4f16": "fast", "artcnn-c4f16-dn": "fast",
+    tiers = {"artcnn-c4f16": "balanced", "artcnn-c4f16-dn": "balanced",
              "artcnn-r8f64": "balanced"}
     specs = load_registry()
     for mid, speed in tiers.items():

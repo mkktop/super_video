@@ -133,13 +133,12 @@ class ChunkedPipeline:
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise TaskCanceled()
                 img = np.asarray(Image.open(src_dir / f"f{i+1:06d}.png").convert("RGB"))
-                frame = img[..., ::-1].copy()  # RGB -> BGR
-                out = tx.process(frame)
+                out = tx.process(img)  # 引擎接口统一 RGB，与图片/流式管线一致
                 if s == 0 and i == 0 and self.preview_path is not None:
-                    Image.fromarray(out[..., ::-1]).save(self.preview_path, quality=90)
+                    Image.fromarray(out).save(self.preview_path, quality=90)
                 if s == 0 and i == 0 and self.src_preview_path is not None:
                     Image.fromarray(img).save(self.src_preview_path, quality=90)
-                Image.fromarray(out[..., ::-1]).save(out_dir / f"f{i+1:06d}.png")
+                Image.fromarray(out).save(out_dir / f"f{i+1:06d}.png")
                 frames_done += 1
                 if frames_done % 8 == 0:
                     report()

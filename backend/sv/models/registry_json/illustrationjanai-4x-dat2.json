@@ -1,6 +1,6 @@
 {
   "id": "illustrationjanai-4x-dat2",
-  "name": "IllustrationJaNai 4x DAT2（彩色插画 · 画质）",
+  "name": "IllustrationJaNai V1 4x DAT2（彩漫插画 · 画质优先）",
   "vendor": "the-database",
   "license": "CC-BY-NC-4.0",
   "engine": "onnx",
@@ -22,7 +22,7 @@
     "pad": 1,
     "trt_fp16": false
   },
-  "description": "彩色插画 4x 画质档（DAT2 transformer，256 定长分块）：细节与线条还原上限更高，速度慢于 ESRGAN 档",
+  "description": "IllustrationJaNai V1 DAT2：彩漫、封面与数字插画的 4x 画质优先候选（256 定长分块），处理较慢。用于清理退化并重建线条与纹理；严重压缩素材可能重绘眼睛或衣服细节，也可能削弱原有网点，建议先预览。",
   "files": [
     {
       "name": "4x_IllustrationJaNai_V1_DAT2.onnx",
@@ -38,5 +38,7 @@
   "scenes": [
     "manga",
     "image"
-  ]
+  ],
+  "category": "illustration",
+  "version": "V1 DAT2"
 }

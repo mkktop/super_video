@@ -22,7 +22,7 @@
     "pad": 1,
     "batch_hint": 1
   },
-  "description": "真人/通用内容的 2x 极速档（原生 fp16）：体积与算量都极小，长视频快速过一遍的首选；画质弱于 Balanced 档",
+  "description": "DIS 2x Fast：速度优先的轻量通用放大。本条目为 Pretrain 权重，适合先试较干净素材，重度退化需与修复模型对比。",
   "files": [
     {
       "name": "2x-DIS_Fast_Pretrain_fp16.onnx",
@@ -38,5 +38,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "general_upscale"
 }

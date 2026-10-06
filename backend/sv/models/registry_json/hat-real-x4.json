@@ -1,6 +1,6 @@
 {
   "id": "hat-real-x4",
-  "name": "HAT-L Real GAN（真人 4x 画质旗舰）",
+  "name": "HAT Real GAN（真人 4x 画质优先）",
   "vendor": "XPixelGroup",
   "license": "Apache-2.0",
   "engine": "onnx",
@@ -21,7 +21,7 @@
     "range": "0-1",
     "pad": 1
   },
-  "description": "真人照片 4x 画质旗舰（HAT-L，256 定长分块）：比 x4plus 细节更稳、伪影更少；慢速但图片任务无所谓速度",
+  "description": "真人照片 4x 画质优先候选：HAT Real GAN 标准权重（256 定长分块）。适合与 SwinIR、x4plus 对比；可能重建出非原始纹理，计算成本较高。",
   "files": [
     {
       "name": "Real_HAT_GAN_SRx4.onnx",
@@ -36,5 +36,6 @@
   "u8_wrap": false,
   "scenes": [
     "image"
-  ]
+  ],
+  "category": "photo_restore"
 }

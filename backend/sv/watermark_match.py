@@ -1,4 +1,4 @@
-"""Conservative, multiscale template matching for white-margin watermarks.
+"""Conservative, multiscale template matching for margin watermarks.
 
 Uses the existing NumPy/Pillow dependencies. NCC is computed by FFT plus summed
 area tables, with bounded-resolution search and full-resolution refinement.
@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 class MatchSkipped(ValueError):
@@ -19,6 +19,7 @@ class MatchSkipped(ValueError):
 class WatermarkTemplate:
     pixels: Image.Image
     source_size: tuple[int, int]
+    background: int = 255
 
 
 @dataclass
@@ -38,21 +39,29 @@ def gray(im: Image.Image) -> Image.Image:
     return im.convert("L")
 
 
-def make_template(im: Image.Image, box: tuple[int, int, int, int]) -> WatermarkTemplate:
+def make_template(im: Image.Image, box: tuple[int, int, int, int], *, allow_dark: bool = False,
+                  trim: bool = True) -> WatermarkTemplate:
     crop = gray(im).crop(box)
     a = np.asarray(crop)
     if a.size > 250000 or min(crop.size) < 5:
         raise ValueError("样本区域过大或过小，请只框选水印及少量白边")
+    edge = np.concatenate((a[0], a[-1], a[:, 0], a[:, -1]))
+    background = 0 if allow_dark and float((edge < 25).mean()) > .90 else 255
+    if background == 0:
+        crop = ImageOps.invert(crop)
+        a = np.asarray(crop)
     ink = a < 245
     if np.count_nonzero(ink) < 20 or float(a.std()) < 2:
         raise ValueError("样本中没有足够的水印特征，请重新框选")
-    if float((a < 110).mean()) > .005 or float((a > 248).mean()) < .20:
-        raise ValueError("样本可能包含漫画内容；智能定位仅适用于白色页边水印，请缩小框选范围")
+    if (background == 255 and float((a < 110).mean()) > .005) or float((a > 248).mean()) < .20:
+        raise ValueError("样本可能包含漫画内容；请从纯色页边框选水印及少量空白")
+    if not trim:
+        return WatermarkTemplate(crop, im.size, background)
     ys, xs = np.where(ink)
     # Include JPEG fringe and white context, without retaining a large blank box.
     left, top = max(0, int(xs.min()) - 4), max(0, int(ys.min()) - 4)
     right, bottom = min(crop.width, int(xs.max()) + 5), min(crop.height, int(ys.max()) + 5)
-    return WatermarkTemplate(crop.crop((left, top, right, bottom)), im.size)
+    return WatermarkTemplate(crop.crop((left, top, right, bottom)), im.size, background)
 
 
 def _sums(a: np.ndarray, h: int, w: int) -> np.ndarray:
@@ -86,7 +95,31 @@ def _overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> floa
     return area / max(1, min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1])))
 
 
-def locate(im: Image.Image, template: WatermarkTemplate, threshold: float = .88) -> Match:
+def locate(im: Image.Image, template: WatermarkTemplate, threshold: float = .88,
+           *, allow_dark: bool = False, allow_artwork: bool = False) -> Match:
+    """Match normalized light/dark logos; artwork repair must be explicitly selected."""
+    page = gray(im)
+    candidates = []
+    reasons = []
+    polarities = [template.background]
+    if allow_dark:
+        polarities = [255, 0]
+    for background in polarities:
+        normalized = ImageOps.invert(page) if background == 0 else page
+        try:
+            candidates.append(_locate(normalized, template, threshold, allow_artwork=allow_artwork))
+        except MatchSkipped as error:
+            reasons.append(str(error))
+    if not candidates:
+        raise MatchSkipped(reasons[0])
+    candidates.sort(key=lambda item: item.score, reverse=True)
+    if len(candidates) > 1 and _overlap(candidates[0].box, candidates[1].box) < .35 and candidates[1].score >= candidates[0].score - .04:
+        raise MatchSkipped("存在多个相近匹配，无法确定水印位置，请人工检查")
+    return candidates[0]
+
+
+def _locate(im: Image.Image, template: WatermarkTemplate, threshold: float,
+            *, allow_artwork: bool = False) -> Match:
     page = gray(im)
     w, h = im.size
     ox, oy = int(w * .55), int(h * .70)
@@ -146,6 +179,8 @@ def locate(im: Image.Image, template: WatermarkTemplate, threshold: float = .88)
     best = max(refined, key=lambda item: item.score)
     if best.score < threshold:
         raise MatchSkipped(f"匹配度不足（{best.score:.1%}，要求 {threshold:.0%}），请人工检查")
+    if allow_artwork:
+        return best
     crop = np.asarray(page.crop(best.box))
     expected = np.asarray(template.pixels.resize((crop.shape[1], crop.shape[0]), Image.Resampling.LANCZOS))
     white = expected > 250

@@ -7,8 +7,7 @@ StreamPipeline——ffmpeg 解码管道 → engine.process 逐帧 → ffmpeg lib
 
 口径：samples/动漫测试1.mp4 无损剪出 6 秒片段（一次性预裁），预热后整段跑完；
 每格附带 stage_stats（read/infer/write 各阶段秒数）。RIFE 是成对帧补帧引擎、
-不走单流超分管线，不在本表；torch 引擎入列但注意其颜色契约与 RGB 管线不
-一致（BGR 直喂），仅吞吐数据有效。
+不走单流超分管线，不在本表；torch 引擎与产品管线统一 RGB 输入输出。
 
 用法：
   .venv/Scripts/python.exe      scripts/bench_e2e_models.py --device auto --json out.jsonl

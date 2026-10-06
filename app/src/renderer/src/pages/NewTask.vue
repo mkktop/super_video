@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { modelCategoryLabel } from '../composables/modelCategories'
+import { recommendationChoice } from '../composables/recommendationChoice'
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import {
   NButton,
@@ -24,6 +26,7 @@ import {
 import { api, mediaSrc, type ModelInfo, type ProbeInfo } from '../api'
 import { refreshTasks, store, ui } from '../store'
 import { useFileDrop, useRecentVideos } from '../composables/videoPicks'
+import { DEFAULT_ANIME_MODEL } from '../composables/modelDefaults'
 import { useModelOptions } from '../composables/useModelOptions'
 import { useEncoderOptions } from '../composables/useEncoderOptions'
 import { tileOptions, useCustomResolution } from '../composables/useCustomResolution'
@@ -38,7 +41,7 @@ const probeInfo = ref<ProbeInfo | null>(null)
 const probing = ref(false)
 let probeSeq = 0 // 快速连续重选文件时丢弃迟到的旧 probe 响应（旧数据覆盖新文件）
 const thumbBroken = ref(false) // 首帧缩略图：浏览器解不了的编码（AVI/WMV/HEVC）时隐藏，参数条不受影响
-const modelId = ref('')
+const modelId = ref(DEFAULT_ANIME_MODEL)
 const targetScale = ref(2)
 const resMode = ref<'scale' | 'custom'>('scale')
 const targetW = ref(0)
@@ -98,6 +101,26 @@ watch([denoiseOptions, denoise], ([options, value]) => {
 
 // ---- 智能推荐（probe 附带；源分析失败时无此块，卡片整张不出现） ----
 const recommend = computed(() => probeInfo.value?.recommend ?? null)
+const recommendationState = computed(() => recommendationChoice(recommend.value, store.models))
+// 仅控制模型列表的呈现；推荐配置仍由用户显式应用。
+const showAllModels = ref(false)
+const featuredModels = computed(() => {
+  const candidates = store.models.filter((m) => m.kind !== 'interp' && hasScene(m, 'video'))
+  const priority = [recommend.value?.model_id, modelId.value]
+  candidates.sort((a, b) => {
+    const rank = (m: ModelInfo) => {
+      const index = priority.indexOf(m.id)
+      return index < 0 ? priority.length : index
+    }
+    return rank(a) - rank(b) || Number(b.vram_ok) - Number(a.vram_ok)
+      || Number(!!(b.installed || b.bundled)) - Number(!!(a.installed || a.bundled))
+  })
+  // 保留通过预设选中的跨场景模型，让当前选择始终可见。
+  const current = selectedModel.value
+  if (current && !candidates.some((m) => m.id === current.id)) candidates.unshift(current)
+  return candidates.slice(0, 3)
+})
+const visibleModels = computed(() => showAllModels.value ? srModels.value : featuredModels.value)
 const recommendFlags = computed(() => {
   const r = recommend.value
   if (!r) return []
@@ -109,15 +132,17 @@ const recommendFlags = computed(() => {
 function applyRecommendation() {
   const r = recommend.value
   if (!r) return
-  if (r.model_id) selectModel(r.model_id)
-  const spec = r.model_id ? store.models.find((m) => m.id === r.model_id) : null
-  if (r.target_scale && (!spec || spec.scale.includes(r.target_scale))) {
-    targetScale.value = r.target_scale
+  const { model, error } = recommendationState.value
+  if (!model || error || r.target_scale === null) {
+    message.warning(error)
+    return
   }
+  if (!selectModel(model.id)) return
+  targetScale.value = r.target_scale
   deinterlace.value = r.deinterlace
   deband.value = r.deband
   resMode.value = 'scale'
-  message.success(`已应用推荐配置：${r.model_name || '模型'} · x${r.target_scale}`)
+  message.success(`已应用推荐配置：${model.name} · x${targetScale.value}`)
   modelSec.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 // ---- 编码/解码/音轨/字幕选项（设备能力与探测实测，见 composables/useEncoderOptions） ----
@@ -125,8 +150,7 @@ const { codecOptions, containerOptions, decoderOptions, audioOptions,
         srcSubs, subHint, audioHint, mediaFlags } = useEncoderOptions(
   probeInfo, container, audioMode, outKind)
 
-const speedLabel = { fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
-const contentLabel = { anime: '动漫', comic: '漫画', general: '真人/通用', real: '真人/通用' } as Record<string, string>
+const speedLabel = { fastest: '⚡', fast: '⚡', balanced: '⚖', slow: '🐢' } as Record<string, string>
 
 const isImage = computed(() => outKind.value !== 'video')
 const imgFrameHint = computed(() => {
@@ -450,7 +474,7 @@ async function submit() {
       else lastErr = `${(await r.json().catch(() => ({}))).detail ?? r.status}`
     }
     if (succeeded.size === submitted.length) {
-      message.success(`已加入队列 ${succeeded.size} 个任务${selectedModel.value && !selectedModel.value.installed ? '（模型将自动下载）' : ''}`)
+      message.success(`已加入队列 ${succeeded.size} 个任务${selectedModel.value && !selectedModel.value.installed ? '（未安装的模型将在任务开始时下载）' : ''}`)
       reset()
       ui.page = 'tasks'
     } else {
@@ -475,7 +499,7 @@ function reset() {
   probing.value = false
   inputs.value = []
   probeInfo.value = null
-  modelId.value = ''
+  modelId.value = DEFAULT_ANIME_MODEL
   output.value = ''
   outputTouched.value = false
 }
@@ -492,7 +516,7 @@ const canTryRun = computed(
 )
 const tryRunHint = computed(() => {
   if (inputs.value.length !== 1 || !probeInfo.value?.ok || !selectedModel.value) return ''
-  return `先用「${selectedModel.value.name}」跑片头 20 秒看效果与速度？满意再入队全片`
+  return `先用「${selectedModel.value.name}」试跑片头 20 秒，检查效果与速度。确认效果后再处理全片`
 })
 const tryRunTitle = computed(() => {
   if (!inputs.value.length) return ''
@@ -534,12 +558,12 @@ export default { name: 'NewTask' }
     @drop.prevent="onDropFiles"
   >
     <div v-if="dragDepth" class="drop-mask">
-      <div class="drop-tip">松开即可选入视频文件</div>
+      <div class="drop-tip">松开鼠标即可导入视频</div>
     </div>
     <div class="page-head">
       <div>
         <h1>新建超分任务</h1>
-        <p class="sub">选择视频与模型 → 配置输出 → 加入队列串行处理</p>
+        <p class="sub">导入视频，选择模型和输出方式，然后加入处理队列</p>
       </div>
     </div>
 
@@ -587,11 +611,16 @@ export default { name: 'NewTask' }
     </div>
 
     <!-- ① 选择视频 -->
-    <section class="sec sv-card">
+    <section class="sec sv-card input-sec" :class="{ 'input-empty': !inputs.length }">
       <h2 class="sec-title"><span class="sec-num">1</span>选择视频</h2>
-      <NButton dashed block size="large" @click="pickInput">
-        {{ inputs.length ? `已选 ${inputs.length} 个文件（点击重选）` : '点击选择视频文件（可多选批量入队，也可直接拖进窗口）' }}
-      </NButton>
+      <button class="input-drop" @click="pickInput">
+        <svg v-if="!inputs.length" aria-hidden="true" width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <rect x="4" y="5" width="24" height="22" rx="5" stroke="currentColor" stroke-width="1.5" />
+          <path d="m13 11 8 5-8 5V11Z" fill="currentColor" />
+        </svg>
+        <strong>{{ inputs.length ? `已选 ${inputs.length} 个视频 · 点击重选` : '点击导入视频，或拖放到这里' }}</strong>
+        <span v-if="!inputs.length">支持多选批量处理 · 导入后可查看素材信息与推荐配置</span>
+      </button>
       <div v-if="!inputs.length && recents.length" class="recents">
         <span class="recents-label">最近：</span>
         <button
@@ -631,24 +660,26 @@ export default { name: 'NewTask' }
       <!-- 智能推荐：源内容分析（动画/真人、隔行、老编码）→ 一键配好参数 -->
       <NCard v-if="recommend && probeInfo?.ok" size="small" class="rec-card" :bordered="true">
         <div class="rec-flex">
-          <span class="rec-badge">智能推荐</span>
+          <span class="rec-badge">素材推荐</span>
           <div class="rec-main">
             <div class="rec-title">
               <template v-if="recommend.animated !== null">
-                {{ recommend.animated ? '检测到动画内容' : '检测到真人/实拍内容' }} ·
+                {{ recommend.animated ? '素材倾向：动画' : '素材倾向：真人 / 实拍' }} ·
               </template>
-              {{ recommend.model_name || '无可用推荐模型' }} x{{ recommend.target_scale }}
+              {{ recommend.model_name || '无可用推荐模型' }}<template v-if="recommend.model_id"> · ×{{ recommend.target_scale }}</template>
               <template v-if="recommendFlags.length">
                 · 建议开启 {{ recommendFlags.join(' + ') }}
               </template>
             </div>
             <div class="rec-reasons">{{ recommend.reasons.join('；') }}</div>
+            <div v-if="recommendationState.error" class="rec-unavailable" role="status">{{ recommendationState.error }}</div>
           </div>
           <NButton
             size="small"
             type="primary"
             secondary
-            :disabled="!recommend.model_id"
+            :disabled="!!recommendationState.error"
+            :title="recommendationState.error || undefined"
             @click="applyRecommendation"
           >
             一键应用
@@ -673,7 +704,18 @@ export default { name: 'NewTask' }
           {{ selectedModel ? `已选 ${selectedModel.name} · x${targetScale}` : '点击卡片选择' }}
         </span>
       </h2>
-      <div class="scene-bar">
+      <div v-if="!inputs.length && !showAllModels" class="model-intro">
+        <div><strong>先导入素材，再选择适合的模型</strong><p>导入后优先展示视频模型；单个视频分析完成后，可参考推荐配置。</p></div>
+        <NButton size="small" @click="showAllModels = true">浏览全部模型</NButton>
+      </div>
+      <template v-else>
+      <div class="model-toolbar">
+        <p class="model-hint">{{ showAllModels ? '按场景筛选，点击卡片选择模型' : '优先展示视频模型与当前选择，可随时查看全部' }}</p>
+        <NButton size="small" :aria-expanded="showAllModels" @click="showAllModels = !showAllModels">
+          {{ showAllModels ? '收起全部模型' : '查看全部模型' }}
+        </NButton>
+      </div>
+      <div v-if="showAllModels" class="scene-bar">
         <span class="scene-lbl">场景</span>
         <NButton v-for="s in ['all', ...SCENES]" :key="s" size="tiny" secondary
                  :type="scene === s ? 'primary' : 'default'" @click="scene = s as 'all'">
@@ -682,11 +724,17 @@ export default { name: 'NewTask' }
       </div>
       <div class="model-grid">
         <div
-          v-for="m in srModels"
+          v-for="m in visibleModels"
           :key="m.id"
           class="model-card"
           :class="{ selected: modelId === m.id, disabled: !m.vram_ok }"
+          role="button"
+          :tabindex="m.vram_ok ? 0 : -1"
+          :aria-pressed="modelId === m.id"
+          :aria-disabled="!m.vram_ok"
           @click="selectModel(m.id)"
+          @keydown.enter="selectModel(m.id)"
+          @keydown.space.prevent="selectModel(m.id)"
         >
           <span v-if="modelId === m.id" class="m-check">✓</span>
           <div class="m-head">
@@ -699,19 +747,21 @@ export default { name: 'NewTask' }
             </span>
           </div>
           <div class="m-desc">{{ m.description }}</div>
+          <span v-if="recommend?.model_id === m.id" class="m-recommended">素材分析推荐</span>
           <div class="m-tags">
             <span>{{ speedLabel[m.speed] ?? '⚖' }}</span>
             <span>x{{ m.scale.join('/x') }}</span>
             <span>{{ m.vram_gb }}GB 显存</span>
-            <span v-for="c in m.content" :key="c" class="m-content">{{ contentLabel[c] ?? c }}</span>
+            <span class="m-content">{{ modelCategoryLabel(m) }}</span>
           </div>
           <div v-if="m.vram_note" class="m-warn">{{ m.vram_note }}</div>
         </div>
       </div>
+      </template>
     </section>
 
     <!-- ③ 输出设置 -->
-    <section class="sec sv-card">
+    <section v-if="inputs.length || showAllModels" class="sec sv-card">
       <h2 class="sec-title"><span class="sec-num">3</span>输出设置</h2>
       <NForm label-placement="left" label-width="92">
         <div class="out-cols">
@@ -756,19 +806,19 @@ export default { name: 'NewTask' }
               </span>
               <span v-else-if="aspectNote" class="res-warn">{{ aspectNote }}</span>
               <span v-else class="res-ok">
-                先以 x{{ customScale }} 原生超分，再 lanczos 缩放至 {{ effW }}x{{ effH }}（宽高自动取偶数）
+                先按模型原生倍率 ×{{ customScale }} 放大，再缩放至 {{ effW }}x{{ effH }}（宽高自动取偶数）
               </span>
             </div>
             <NFormItem label="解码器">
               <div class="sub-col">
                 <NSelect v-model:value="decoder" :options="decoderOptions" style="width: 300px" />
-                <span class="sub-hint">硬解可加快解码速度；按所选视频实测支持情况开放，运行时不可用自动回退软件解码</span>
+                <span class="sub-hint">硬件解码可减轻 CPU 负担。仅显示该视频可用的选项；运行时不可用会自动切回软件解码</span>
               </div>
             </NFormItem>
             <NFormItem v-if="outKind === 'video'" label="编码器">
               <NSelect v-model:value="codec" :options="codecOptions" style="width: 300px" />
             </NFormItem>
-            <NFormItem v-if="outKind === 'video'" label="封装容器">
+            <NFormItem v-if="outKind === 'video'" label="视频格式">
               <NSelect v-model:value="container" :options="containerOptions" style="width: 300px" />
             </NFormItem>
             <NFormItem v-if="outKind === 'video'" label="音轨">
@@ -786,7 +836,7 @@ export default { name: 'NewTask' }
           </div>
           <div class="out-col">
             <NFormItem v-if="outKind === 'video'" label="画质 (CRF)">
-              <NSlider v-model:value="crf" :min="12" :max="30" :step="1" :marks="{ 14: '近无损', 18: '推荐', 24: '小体积' }" />
+              <NSlider v-model:value="crf" :min="12" :max="30" :step="1" :marks="{ 14: '高画质', 18: '均衡', 24: '小体积' }" />
             </NFormItem>
             <NFormItem label="补帧">
               <NSelect v-model:value="interp" :options="interpOptions" style="width: 320px" />
@@ -800,7 +850,7 @@ export default { name: 'NewTask' }
                 :options="denoiseOptions"
                 style="width: 320px"
                 clearable
-                placeholder="默认保守模式（点此可选档位，可清空恢复默认）"
+                placeholder="使用默认降噪，可选择其他强度"
               />
             </NFormItem>
             <NFormItem label="预处理">
@@ -808,12 +858,12 @@ export default { name: 'NewTask' }
                 <div class="sub-row">
                   <NSwitch v-model:value="deinterlace" size="small" />
                   <span class="pre-label">反交错</span>
-                  <span class="sub-hint">老 DVD / 1080i 隔行片源——交错纹路不先去掉会被超分放大成锯齿</span>
+                  <span class="sub-hint">适用于老 DVD、1080i 等隔行视频，减少运动边缘的梳齿纹</span>
                 </div>
                 <div class="sub-row">
                   <NSwitch v-model:value="deband" size="small" />
                   <span class="pre-label">去色带</span>
-                  <span class="sub-hint">修复夜空/暗部渐变里的色彩断层（动画源常见）</span>
+                  <span class="sub-hint">减轻天空、暗部等渐变区域的色彩断层；可能损失细小纹理</span>
                 </div>
               </div>
             </NFormItem>
@@ -823,7 +873,7 @@ export default { name: 'NewTask' }
                   <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
                 </NFormItem>
                 <div class="adv-note">
-                  自动=按模型默认。显存不足或大分辨率卡顿时调小分块；分块越小越省显存但速度越慢。
+                  自动使用模型默认分块。显存不足时可调小；较小的分块通常更省显存，但处理更慢。
                 </div>
               </NCollapseItem>
             </NCollapse>
@@ -840,7 +890,7 @@ export default { name: 'NewTask' }
             </NFormItem>
             <NFormItem v-else-if="inputs.length > 1" label="批量说明">
               <span class="batch-note">
-                {{ inputs.length }} 个文件将使用以上相同参数依次入队（串行处理），
+                {{ inputs.length }} 个视频将使用相同参数，按队列顺序处理，
                 输出到「{{ batchDest }}」；可在 设置 → 输出位置 修改默认目录
               </span>
             </NFormItem>
@@ -948,6 +998,7 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
   font-weight: 600;
 }
 .rec-main { flex: 1; min-width: 0; }
+.rec-unavailable { color: var(--sv-warning); font-size: 13px; margin-top: 6px; }
 .rec-title { font-size: 13.5px; font-weight: 600; color: var(--sv-text); }
 .rec-reasons {
   margin-top: 4px;
@@ -993,7 +1044,6 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.3);
 }
 
 .probe-card { background: var(--sv-well); }
@@ -1101,10 +1151,9 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
 .model-card:hover { border-color: var(--sv-border-strong); transform: translateY(-2px); }
 .model-card.selected {
   border-color: var(--sv-accent);
-  background: linear-gradient(180deg, rgba(var(--sv-accent-rgb), 0.1), rgba(var(--sv-accent2-rgb), 0.05));
-  box-shadow: 0 0 0 1px rgba(var(--sv-accent-rgb), 0.45), 0 6px 18px rgba(var(--sv-accent-rgb), 0.16);
+  background: var(--sv-accent-bg);
 }
-.model-card.disabled { opacity: 0.45; cursor: not-allowed; }
+.model-card.disabled { opacity: 0.75; cursor: not-allowed; }
 .m-check {
   position: absolute;
   top: 10px;
@@ -1118,19 +1167,30 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.5);
 }
-.m-head { display: flex; align-items: center; gap: 8px; }
+.m-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-right: 18px; }
 .m-scenes { margin-left: auto; display: inline-flex; gap: 4px; }
 .scene-bar { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
 .scene-lbl { font-size: 12px; color: var(--sv-text-dim); }
 .m-name { font-weight: 650; font-size: 14px; }
-.m-desc { color: var(--sv-text-dim); font-size: 12px; margin: 6px 0; }
-.m-tags { display: flex; gap: 10px; font-size: 12px; color: var(--sv-text-faint); flex-wrap: wrap; }
+.m-desc { color: var(--sv-text-dim); font-size: 13px; line-height: 1.65; margin: 8px 0 12px; }
+.m-tags { display: flex; gap: 10px; font-size: 12.5px; color: var(--sv-text-dim); flex-wrap: wrap; }
 .m-content {
   color: var(--sv-text-dim);
 }
-.m-warn { margin-top: 6px; font-size: 11.5px; color: var(--sv-danger); }
+.m-warn { margin-top: 6px; font-size: 12.5px; color: var(--sv-danger); }
+.model-card:focus-visible { outline: 2px solid var(--sv-accent); outline-offset: 3px; }
+.input-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 20px; border: 1px dashed var(--sv-border-strong); border-radius: var(--sv-radius-md); background: var(--sv-fill-1); color: var(--sv-text); cursor: pointer; font: inherit; transition: border-color 160ms, background 160ms; }
+.input-empty .input-drop { min-height: 175px; }
+.input-drop svg { color: var(--sv-accent-strong); margin-bottom: 4px; }
+.input-drop strong { font-size: 16px; font-weight: 600; }
+.input-drop span { color: var(--sv-text-dim); font-size: 13px; }
+.input-drop:hover { border-color: var(--sv-accent); background: var(--sv-accent-bg); }
+.model-intro, .model-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.model-intro { padding: 10px 0; }
+.model-intro strong { font-size: 14px; font-weight: 500; }
+.model-intro p, .model-hint { color: var(--sv-text-dim); font-size: 13px; line-height: 1.65; margin-top: 6px; }
+.m-recommended { display: inline-block; margin-bottom: 10px; font-size: 12.5px; color: var(--sv-accent-strong); }
 
 /* 输出设置两列；窄窗口（内容宽 <752px）自动退化单列 */
 .out-cols {

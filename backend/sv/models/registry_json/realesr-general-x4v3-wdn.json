@@ -36,5 +36,6 @@
   "u8_wrap": true,
   "scenes": [
     "image"
-  ]
+  ],
+  "category": "photo_restore"
 }

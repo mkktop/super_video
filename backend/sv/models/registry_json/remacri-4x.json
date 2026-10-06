@@ -21,7 +21,7 @@
     "range": "0-1",
     "pad": 4
   },
-  "description": "社区口碑款，风格介于 x4plus 与 UltraSharp 之间：细节增强更温和、不易过锐",
+  "description": "通用照片 4x 放大候选，适合与 UltraSharp、x4plus 比较细节和风格；不承诺所有素材上更自然或伪影更少。",
   "files": [
     {
       "name": "4x-Remacri.onnx",
@@ -36,5 +36,6 @@
   "u8_wrap": true,
   "scenes": [
     "image"
-  ]
+  ],
+  "category": "photo_restore"
 }

@@ -8,6 +8,7 @@ import { refreshStats, refreshTasks, store, ui } from '../store'
 
 const message = useMessage()
 const dialog = useDialog()
+const compactDone = ref(true)
 
 // ---- 队列完成动作倒计时横幅（关机/休眠宽限期，可撤销） ----
 // 秒级 tick 只在横幅存在时运行：无倒计时的日常会话不再每秒强制整页重渲染
@@ -43,7 +44,7 @@ async function cancelQueueAction() {
     await api.cancelQueueAction()
     store.queueAction = null // 乐观清横幅；WS 取消事件随迟到不重复伤害
   } catch {
-    message.error('取消失败（本地服务未连接？）')
+    message.error('取消失败，请检查本地服务连接后重试')
   } finally {
     cancelingAction.value = false
   }
@@ -64,7 +65,7 @@ const filterTabs: Array<{ key: Filter; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'active', label: '进行中' },
   { key: 'done', label: '已完成' },
-  { key: 'failed', label: '失败/取消' },
+  { key: 'failed', label: '失败 / 已取消' },
 ]
 
 // ---- 类型筛选（本地按 params.kind，不动后端搜索）----
@@ -120,7 +121,7 @@ async function runSearch() {
   try {
     searchList.value = await api.tasks(kw)
   } catch {
-    message.error('搜索失败（本地服务未连接？）')
+    message.error('搜索失败，请检查本地服务连接后重试')
   } finally {
     searching.value = false
   }
@@ -140,7 +141,7 @@ watch(
   },
 )
 
-// ---- 批量选择 ----
+// ---- 批量操作 ----
 const selectMode = ref(false)
 const selected = ref<Set<string>>(new Set())
 function enterSelect() {
@@ -196,7 +197,7 @@ async function batchRun(action: 'cancel' | 'delete' | 'resume') {
     if (r.done.length) {
       if (action === 'delete') message.success(`已删除 ${r.done.length} 条记录`)
       else if (action === 'cancel') message.success(`已取消 ${r.done.length} 个任务`)
-      else message.success(`已将 ${r.done.length} 个任务重新入队`)
+      else message.success(`已将 ${r.done.length} 个任务重新加入队列`)
     }
     if (failN) {
       const first = Object.values(r.failed)[0]
@@ -338,7 +339,7 @@ async function retryWithParams(t: Task) {
       <div>
         <h1>任务队列</h1>
         <p class="sub">
-          严格串行执行 · 拖拽排队任务调整顺序（拖到运行中的任务上=插到队首）· 悬停卡片可用箭头微调
+          任务按顺序处理。拖动排队任务可调整顺序；移到当前任务上方可优先处理
         </p>
       </div>
       <NSpace :size="8">
@@ -347,11 +348,11 @@ async function retryWithParams(t: Task) {
           @positive-click="clearDone"
         >
           <template #trigger>
-            <NButton size="small" :loading="cleaning">清理已完成（{{ doneCount }}）</NButton>
+            <NButton size="small" :loading="cleaning">清理完成记录（{{ doneCount }}）</NButton>
           </template>
           删除全部 {{ doneCount }} 条已完成任务的记录（输出文件不受影响）？
         </NPopconfirm>
-        <NButton size="small" v-if="!selectMode" @click="enterSelect">批量选择</NButton>
+        <NButton size="small" v-if="!selectMode" @click="enterSelect">批量操作</NButton>
         <NButton type="primary" @click="ui.page = 'newtask'">＋ 新建任务</NButton>
       </NSpace>
     </div>
@@ -369,7 +370,7 @@ async function retryWithParams(t: Task) {
       <NButton size="small" :loading="cancelingAction" @click="cancelQueueAction">取消{{ bannerText }}</NButton>
     </div>
 
-    <!-- 批量选择操作条 -->
+    <!-- 批量操作操作条 -->
     <div v-if="selectMode" class="batch-bar">
       <NButton size="small" @click="exitSelect">退出选择</NButton>
       <span class="bb-count">已选 {{ selCount }} 项</span>
@@ -409,6 +410,9 @@ async function retryWithParams(t: Task) {
         </button>
       </div>
       <span class="fb-spacer" />
+      <NButton size="small" :aria-pressed="!compactDone" @click="compactDone = !compactDone">
+        {{ compactDone ? '展开已完成' : '收起已完成' }}
+      </NButton>
       <NInput
         v-model:value="q"
         size="small"
@@ -425,13 +429,13 @@ async function retryWithParams(t: Task) {
     <EmptyState
       v-if="store.ready && filtered.length === 0"
       variant="film"
-      :title="searchList ? '没有匹配的任务' : store.tasks.length ? '该筛选下没有任务' : '队列为空'"
+      :title="searchList ? '没有匹配的任务' : store.tasks.length ? '没有符合筛选条件的任务' : '队列为空'"
       :desc="
         searchList
           ? '换个关键词试试'
           : store.tasks.length
             ? '切换上方的筛选条件看看'
-            : '把视频拖进来，或点新建任务开始第一次超分'
+            : '点击「新建任务」导入视频，也可从图片或漫画超分页创建任务'
       "
     >
       <NButton v-if="!store.tasks.length" type="primary" @click="ui.page = 'newtask'">＋ 新建任务</NButton>
@@ -451,6 +455,7 @@ async function retryWithParams(t: Task) {
         v-for="t in filtered"
         :key="t.id"
         :task="t"
+        :compact="compactDone"
         :draggable="t.status === 'queued' && !selectMode"
         :can-up="t.status === 'queued' && queuedIds.indexOf(t.id) > 0"
         :can-down="t.status === 'queued' && queuedIds.indexOf(t.id) < queuedIds.length - 1"
@@ -480,7 +485,7 @@ async function retryWithParams(t: Task) {
 }
 h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
 .sub { font-size: 12.5px; color: var(--sv-text-dim); margin-top: 4px; }
-.filter-bar { display: flex; gap: 6px; align-items: center; }
+.filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .fb-spacer { flex: 1; }
 /* 分段式筛选：凹槽容器 + 浮起选中片 */
 .seg {

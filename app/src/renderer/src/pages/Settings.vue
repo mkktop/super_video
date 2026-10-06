@@ -409,7 +409,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
           <section class="card sv-card">
             <header class="card-head" :class="{ flash: flashGroup === 'general' }" @animationend="flashGroup = ''">
               <div class="card-title">外观</div>
-              <div class="card-sub">界面主题（偏好保存在本机，不进设置文件）</div>
+              <div class="card-sub">选择深色、浅色或跟随系统；偏好保存在本机</div>
             </header>
             <div class="card-body">
               <div class="row switch-row">
@@ -446,7 +446,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
               <div class="row switch-row bordered-top">
                 <span class="row-text">
                   队列全部完成后
-                  <small>最后一个任务收尾后的自动动作；关机/休眠前有 60 秒反悔窗口（任务页横幅可取消），期间新入队任务会自动撤销。需保持应用运行，配合「关闭到托盘」可后台等完</small>
+                  <small>队列完成后执行所选动作。关机或休眠前有 60 秒倒计时，可在任务队列取消；加入新任务也会取消倒计时。等待期间请保持雨帧运行</small>
                 </span>
                 <NSelect
                   v-model:value="queueDoneAction"
@@ -469,7 +469,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
           <section class="card sv-card">
             <header class="card-head" :class="{ flash: flashGroup === 'processing' }" @animationend="flashGroup = ''">
               <div class="card-title">处理引擎</div>
-              <div class="card-sub">推理后端与计算精度，影响画质细节的还原方式；保存后从下一个任务起生效</div>
+              <div class="card-sub">选择处理引擎和计算精度。保存后对下一个任务生效</div>
             </header>
             <div class="card-body">
               <div class="row switch-row">
@@ -514,7 +514,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
                   <NRadioButton value="fp32">FP32</NRadioButton>
                 </NRadioGroup>
               </div>
-              <p class="hint">FP16 处理速度约提升 1.4~1.7 倍，画质无可感知差异；FP32 供个别模型出现数值异常时使用。</p>
+              <p class="hint">FP16 通常更快、更省显存，效果因模型而异。出现画面异常时可尝试 FP32。</p>
               <div class="row switch-row bordered-top">
                 <span class="row-text">
                   双路并行
@@ -533,7 +533,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
           <section v-if="store.trt" class="card sv-card">
             <header class="card-head">
               <div class="card-title">TensorRT 加速组件</div>
-              <div class="card-sub">可选 · NVIDIA 显卡推理加速（1080p→4K 最高约 2.5 倍）</div>
+              <div class="card-sub">可选的 NVIDIA 显卡加速组件；提速效果取决于模型与硬件</div>
             </header>
             <div class="card-body">
               <!-- 安装中：进度 -->
@@ -594,11 +594,11 @@ const proxyDirty = computed(() => settingsLoaded.value && (
           <section class="card sv-card">
             <header class="card-head">
               <div class="card-title">处理时机</div>
-              <div class="card-sub">队列什么时候开始处理下一个任务——白天不抢机器，夜间/空闲自动跑</div>
+              <div class="card-sub">选择何时开始下一个任务，可按时段或电脑空闲状态安排</div>
             </header>
             <div class="card-body">
               <div class="row stack">
-                <span class="row-label">领取时机</span>
+                <span class="row-label">开始处理</span>
                 <NRadioGroup v-model:value="queueSchedule" size="small">
                   <NRadioButton value="always">立即处理</NRadioButton>
                   <NRadioButton value="window">指定时段</NRadioButton>
@@ -618,8 +618,8 @@ const proxyDirty = computed(() => settingsLoaded.value && (
                 <span class="row-text">分钟后开始</span>
               </div>
               <p class="hint">
-                只拦截「开始下一个任务」，不会打断进行中的任务（跑完当前任务即停，断点续跑安全）；
-                挂起期间任务页会显示等待原因。设置立即生效，无需重启。
+                只控制新任务的开始时间，当前任务会继续处理至完成。
+                等待期间可在任务队列查看原因。保存后立即生效，无需重启。
               </p>
               <div class="save-row">
                 <span v-if="schedDirty" class="dirty"><i class="dirty-dot" aria-hidden="true"></i>有未保存的修改</span>
@@ -632,7 +632,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
           <section class="card sv-card">
             <header class="card-head">
               <div class="card-title">性能监控</div>
-              <div class="card-sub">「性能」页仪表盘与趋势图的数据来源；超分性能日志从下一个任务起记录</div>
+              <div class="card-sub">「性能监控」页仪表盘与趋势图的数据来源；开启性能日志后，从下一个任务开始记录</div>
             </header>
             <div class="card-body">
               <div class="row switch-row">
@@ -645,7 +645,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
               <div class="row switch-row bordered-top">
                 <span class="row-text">
                   超分性能日志
-                  <small>记录每个任务各阶段的耗时明细（引擎加载 / 解码 / 推理 / 编码 / 等待）与所用配置；开启后完成的任务卡上出现「性能日志」按钮，可用来定位速度瓶颈。不影响任务本身速度</small>
+                  <small>记录每个任务各阶段的耗时明细（引擎加载 / 解码 / 推理 / 编码 / 等待）与所用配置；开启后完成的任务卡上出现「性能日志」按钮，可用来定位速度瓶颈。用于排查处理耗时</small>
                 </span>
                 <NSwitch v-model:value="srProfiling" size="small" @update:value="saveSrProfiling" />
               </div>
@@ -745,7 +745,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
           <section class="card sv-card">
             <header class="card-head" :class="{ flash: flashGroup === 'compare' }" @animationend="flashGroup = ''">
               <div class="card-title">对比</div>
-              <div class="card-sub">静帧样本数设置，以及模型对比切片/成片与任务对比静帧产物的缓存管理（保留在本地且不会自动清理）</div>
+              <div class="card-sub">设置对比样本数量，管理保存在本地的视频片段和静帧缓存</div>
             </header>
             <div class="card-body">
               <div class="row switch-row">
@@ -900,7 +900,7 @@ const proxyDirty = computed(() => settingsLoaded.value && (
           <section class="card sv-card">
             <header class="card-head" :class="{ flash: flashGroup === 'about' }" @animationend="flashGroup = ''">
               <div class="card-title">关于</div>
-              <div class="card-sub">当前版本与硬件规格——决定可选的处理规格与硬件编码能力</div>
+              <div class="card-sub">查看应用版本、硬件信息及可用的编解码方式</div>
             </header>
             <div class="card-body">
               <div class="about-body">

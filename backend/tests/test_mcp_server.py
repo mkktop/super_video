@@ -76,11 +76,14 @@ def test_initialize_falls_back_on_unknown_version():
 def test_tools_list_shape():
     tools = rpc("tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
-    assert len(tools) == 10 and len(set(names)) == 10
+    assert len(tools) == 23 and len(set(names)) == 23
     assert all(n.startswith("rf_") for n in names)
     assert {"rf_status", "rf_probe", "rf_models", "rf_model_download",
             "rf_task_create", "rf_tasks", "rf_task", "rf_task_cancel",
-            "rf_task_resume", "rf_scan_folder"} == set(names)
+            "rf_task_resume", "rf_scan_folder", "rf_watermark_preview", "rf_watermark_batch",
+            "rf_watermark_job", "rf_watermark_cancel", "rf_diagnostics", "rf_task_preview",
+            "rf_compare_create", "rf_compare_job", "rf_compare_cancel", "rf_compare_preview",
+            "rf_trim_create", "rf_trim_job", "rf_trim_cancel"} == set(names)
     for t in tools:
         assert t["description"]
         assert t["inputSchema"]["type"] == "object"
@@ -221,6 +224,7 @@ def test_task_create_input_folder_scans_and_expands(monkeypatch):
                 ("POST", "/api/tasks"): task_row})
     body = fb.calls[1][2]
     assert body["inputs"] == ["D:/manga/1.png", "D:/manga/2.png"]
+    assert body["params"]["folder_src"] == 'D:/manga'
     out = ok_text(resp)
     assert out["images_count"] == 2  # 批量清单不回传，只报数量
 
@@ -294,6 +298,131 @@ def test_scan_folder_truncation(monkeypatch):
 
 
 # ---------------------------------------------------------------- 连接器
+
+
+def test_watermark_preview_returns_native_images_and_forwards_all_options(monkeypatch):
+    options = {'mode':'smart','removal':'repair','mask':{'width':80,'height':30},
+               'sample':{'path':'D:/sample.png','mask':{'width':80,'height':30}},'threshold':.92}
+    result = {'width':300,'height':420,'box':[210,380,290,410],'detected':True,
+              'method':'inpaint','score':.98,'reason':'',
+              'original':'data:image/png;base64,YmVmb3Jl','processed':'data:image/png;base64,YWZ0ZXI='}
+    fb,resp=call_tool(monkeypatch,'rf_watermark_preview',{'path':'D:/page.png',**options},
+                      {('POST','/api/watermark/preview'):result})
+    assert fb.calls == [('POST','/api/watermark/preview',{'path':'D:/page.png',**options})]
+    metadata=ok_text(resp)
+    assert metadata['method']=='inpaint' and 'original' not in metadata and 'processed' not in metadata
+    images=[c for c in resp['result']['content'] if c['type']=='image']
+    assert images == [{'type':'image','mimeType':'image/png','data':'YmVmb3Jl'},
+                      {'type':'image','mimeType':'image/png','data':'YWZ0ZXI='}]
+    fb,resp=call_tool(monkeypatch,'rf_watermark_preview',{'path':'D:/page.png','include_images':False},
+                      {('POST','/api/watermark/preview'):{**result,'detected':False,'box':None,'reason':'未匹配'}})
+    assert len(resp['result']['content'])==1
+    assert '未处理' in ok_text(resp)['hint']
+    assert fb.calls[0][2]=={'path':'D:/page.png','mode':'fixed','removal':'auto'}
+
+
+def test_watermark_batch_scans_folder_without_returning_full_manifest(monkeypatch):
+    paths=[f'D:/manga/{i}.png' for i in range(25)]
+    options={'mode':'fixed','removal':'repair','mask':{'unit':'percent','width':10,'height':3},
+             'sample':{'path':'D:/sample.png','mask':{'width':80,'height':30}},'threshold':.9}
+    fb,resp=call_tool(monkeypatch,'rf_watermark_batch',{'folder':'D:/manga','output_dir':'D:/out',**options},
+                      {('POST','/api/images/scan'):{'folder':'D:/manga','files':[{'path':p} for p in paths]},
+                       ('POST','/api/watermark/batch'):{'id':'wm','status':'running','total':25,'errors':[]}})
+    assert fb.calls[1] == ('POST','/api/watermark/batch',{'folder':'D:/manga','output_dir':'D:/out','paths':paths,**options})
+    out=ok_text(resp)
+    assert out['total']==25 and 'paths' not in out and 'rf_watermark_job' in out['hint']
+
+
+def test_watermark_explicit_paths_do_not_scan_and_empty_folder_is_error(monkeypatch):
+    fb,resp=call_tool(monkeypatch,'rf_watermark_batch',{'paths':['D:/m/a.png'],'folder':'D:/m'},
+                      {('POST','/api/watermark/batch'):{'id':'wm','errors':[]}})
+    assert len(fb.calls)==1 and fb.calls[0][2]['paths']==['D:/m/a.png']
+    assert ok_text(resp)['id']=='wm'
+    fb,resp=call_tool(monkeypatch,'rf_watermark_batch',{'folder':'D:/empty'},
+                      {('POST','/api/images/scan'):{'files':[]}})
+    assert resp['result']['isError'] is True and len(fb.calls)==1
+    assert '没有图片' in resp['result']['content'][0]['text']
+    fb,resp=call_tool(monkeypatch,'rf_watermark_batch',{})
+    assert resp['error']['code'] == -32602 and not fb.calls
+
+
+def test_watermark_job_and_cancel_encode_id_and_limit_errors(monkeypatch):
+    job={'id':'a/b','status':'running','errors':[{'path':str(i),'error':'bad'} for i in range(100)]}
+    fb,resp=call_tool(monkeypatch,'rf_watermark_job',{'job_id':'a/b'},
+                      {('GET','/api/watermark/batch/a%2Fb'):job})
+    out=ok_text(resp)
+    assert out['error_count']==100 and out['errors_truncated'] and len(out['errors'])==20
+    fb,resp=call_tool(monkeypatch,'rf_watermark_cancel',{'job_id':'a/b'},
+                      {('POST','/api/watermark/batch/a%2Fb/cancel'):{'id':'a/b','status':'running','errors':[]}})
+    assert fb.calls == [('POST','/api/watermark/batch/a%2Fb/cancel',None)]
+    assert 'cancelled' in ok_text(resp)['hint']
+
+
+@pytest.mark.parametrize('name,args,path',[
+    ('rf_watermark_preview',{'path':'D:/a.png'},'/api/watermark/preview'),
+    ('rf_watermark_batch',{'paths':['D:/a.png']},'/api/watermark/batch'),
+    ('rf_watermark_cancel',{'job_id':'wm'},'/api/watermark/batch/wm/cancel'),
+])
+def test_watermark_api_errors_are_mcp_tool_errors(monkeypatch,name,args,path):
+    _,resp=call_tool(monkeypatch,name,args,{('POST',path):ms.ApiError(409,'作业正在进行')})
+    assert resp['result']['isError'] is True and '409' in resp['result']['content'][0]['text']
+
+
+def test_watermark_mcp_routes_use_real_backend_for_preview_batch_progress_and_cancel(monkeypatch,tmp_path):
+    import base64
+    import io
+    import threading
+    import time
+    from fastapi.testclient import TestClient
+    from PIL import Image,ImageDraw
+    import numpy as np
+    from sv.server.app import app
+    from sv.server.routes import watermark as wm
+    from sv.server import settings
+
+    monkeypatch.setattr(settings,'load',lambda:{'mcp_enabled':True})
+    client=TestClient(app)
+    class ApiBridge:
+        def call(self,method,path,body=None):
+            result=client.request(method,path,json=body,headers=_BRIDGE_UA)
+            if result.status_code>=400:
+                raise ms.ApiError(result.status_code,str(result.json().get('detail')))
+            return result.json()
+    monkeypatch.setattr(ms,'_BRIDGE',ApiBridge())
+    folder=tmp_path/'manga';(folder/'chapter').mkdir(parents=True)
+    source=folder/'chapter'/'001.png'
+    page=Image.new('RGB',(80,60),(80,110,140));ImageDraw.Draw(page).rectangle((50,35,60,44),fill='white');page.save(source)
+    params={'mask':{'width':11,'height':10,'right':19,'bottom':15},'removal':'repair'}
+    def tool(name,args):return rpc('tools/call',{'name':name,'arguments':args})
+    preview=tool('rf_watermark_preview',{'path':str(source),**params})
+    assert ok_text(preview)['method']=='inpaint'
+    images=[c for c in preview['result']['content'] if c['type']=='image']
+    expected=np.array(Image.open(io.BytesIO(base64.b64decode(images[1]['data']))))
+    batch=ok_text(tool('rf_watermark_batch',{'folder':str(folder),'output_dir':str(tmp_path),**params}))
+    def wait(job_id):
+        for _ in range(300):
+            job=ok_text(tool('rf_watermark_job',{'job_id':job_id}))
+            if job['status']!='running':return job
+            time.sleep(.01)
+        pytest.fail('watermark job timed out')
+    job=wait(batch['id'])
+    assert job['succeeded']==1 and job['failed']==0
+    with Image.open(Path(job['output_dir'])/'chapter'/'001.png') as actual:
+        np.testing.assert_array_equal(np.array(actual),expected)
+    with Image.open(source) as original:np.testing.assert_array_equal(np.array(original),np.array(page))
+    entered,release=threading.Event(),threading.Event()
+    original_load=wm.load_image
+    def slow_load(path):
+        entered.set();assert release.wait(5)
+        return original_load(path)
+    monkeypatch.setattr(wm,'load_image',slow_load)
+    second=ok_text(tool('rf_watermark_batch',{'paths':[str(source)],**params}))
+    try:
+        assert entered.wait(2)
+        canceled=ok_text(tool('rf_watermark_cancel',{'job_id':second['id']}))
+        assert canceled['id']==second['id']
+    finally:release.set()
+    assert wait(second['id'])['status']=='cancelled'
 
 
 class _FakeOpener:

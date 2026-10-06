@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { categoryLabels, modelCategories, modelCategory, modelCategoryLabel, speedLabels, type ModelCategory } from '../composables/modelCategories'
+import { DEFAULT_ANIME_MODEL, DEFAULT_COLOR_MODEL } from '../composables/modelDefaults'
 import { computed, ref, watch } from 'vue'
 import {
   NButton,
@@ -21,16 +23,12 @@ import { refreshModels, store } from '../store'
 import EmptyState from '../components/EmptyState.vue'
 
 const message = useMessage()
-const tab = ref<'all' | 'installed' | 'anime' | 'comic' | 'general'>('all')
+const tab = ref<'all' | 'installed' | ModelCategory>('all')
 // 场景标签筛选（与上方状态/内容 tab 取交集）：一个模型可属多个场景
 const scene = ref<'all' | 'video' | 'manga' | 'image'>('all')
 const sceneLabel: Record<string, string> = { video: '视频', manga: '漫画', image: '图片' }
 const SCENES = ['video', 'manga', 'image'] as const
 const hasScene = (m: ModelInfo, s: string) => (m.scenes ?? ['video', 'image']).includes(s)
-
-const speedLabel = { fast: '⚡ 快速', balanced: '⚖ 均衡', slow: '🐢 高质量慢速' }
-// 'real' 与 'general' 是注册表两代写入口径，展示与筛选统一按「真人/通用」
-const contentLabel = { anime: '动漫', comic: '漫画', general: '真人/通用', real: '真人/通用' }
 
 /** 家族分节（纯展示层，按 id 前缀派生）：模型上量后一个家族十几张变体卡平铺
  *  难扫，按家族分节、家族顺序手工定推荐位；注册表新增未匹配的家族落「其他」，
@@ -38,17 +36,17 @@ const contentLabel = { anime: '动漫', comic: '漫画', general: '真人/通用
 const FAMILIES: Array<{ key: string; name: string; note?: string; ids?: string[] }> = [
   { key: 'animejanai-v31', name: 'AnimeJaNai V3.1 HD', note: '新一代 SPAN 架构 · 当前推荐' },
   { key: 'animejanai-v3', name: 'AnimeJaNai V3 HD', note: '上一代架构' },
-  { key: 'real-cugan', name: 'Real-CUGAN', note: '动漫高画质' },
-  { key: 'artcnn', name: 'ArtCNN', note: '动漫 · 轻量高速（亮度通道超分）' },
+  { key: 'real-cugan', name: 'Real-CUGAN', note: '动漫重建 / 降噪 · 按素材选择强度' },
+  { key: 'artcnn', name: 'ArtCNN', note: '动漫亮度重建 · DN 降噪柔化' },
   { key: 'ani4k-v2', name: 'Ani4K v2' },
   { key: 'mangajanai', name: 'MangaJaNai', note: '漫画专模 · 黑白页按源高度自适应' },
   { key: 'illustrationjanai', name: 'IllustrationJaNai', note: '彩色漫画页 / 插画' },
-  { key: 'realesrgan', name: 'Real-ESRGAN', note: '真人/通用' },
-  { key: 'hat', name: 'HAT-L Real GAN', note: '真人图片 4x 画质旗舰' },
+  { key: 'realesrgan', name: 'Real-ESRGAN', note: '通用修复与动漫插画 · 按具体权重区分' },
+  { key: 'hat', name: 'HAT Real GAN', note: '照片 4x · 画质优先候选' },
   { key: 'swinir', name: 'SwinIR', note: '真人图片 4x · transformer' },
-  { key: 'dis', name: 'DIS', note: '真人/通用 · 2x 轻量修复' },
+  { key: 'dis', name: 'DIS', note: '2x 轻量通用放大 · Pretrain 权重' },
   { key: 'seemore', name: 'SeemoRe', note: '通用 · 轻量多倍率' },
-  { key: 'community', name: '社区精选', note: 'OpenModelDB 口碑款 · CC BY-NC-SA', ids: ['ultrasharp-4x', 'animesharp-4x', 'remacri-4x'] },
+  { key: 'community', name: '社区精选', note: '照片与插画 · 按素材与风格选择', ids: ['ultrasharp-4x', 'animesharp-4x', 'remacri-4x'] },
   { key: 'realesr-animevideov3', name: 'AnimeVideo', note: '动漫 · 随软件内置' },
   { key: 'animejanai-v2', name: 'AnimeJaNai V2', note: '旧代' },
   { key: 'rife', name: 'RIFE 补帧', note: '插帧（帧率翻倍），功能不同于超分' },
@@ -61,13 +59,15 @@ const groups = computed<Array<{ key: string; name: string; note?: string; models
     .filter((m) => {
       if (tab.value === 'all') return true
       if (tab.value === 'installed') return m.installed || m.bundled
-      if (tab.value === 'anime') return m.content.includes('anime')
-      if (tab.value === 'comic') return m.content.includes('comic')
-      return m.content.includes('general') || m.content.includes('real')
+      return modelCategory(m) === tab.value
     })
     .filter((m) => scene.value === 'all' || hasScene(m, scene.value))
     // 组内已下载在前（稳定排序保持注册表顺序），扫一眼就知道哪些已就绪
-    .sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled))
+    .sort((a, b) => {
+      const recommended = (id: string) => Number(id === DEFAULT_ANIME_MODEL || id === DEFAULT_COLOR_MODEL)
+      return recommended(b.id) - recommended(a.id)
+        || Number(!!(b.installed || b.bundled)) - Number(!!(a.installed || a.bundled))
+    })
   const out = FAMILIES.map((f) => ({
     key: f.key, name: f.name, note: f.note,
     models: list.filter((m) => inFamily(m.id, f)),
@@ -133,7 +133,7 @@ watch(
 async function onDelete(id: string) {
   const r = await api.deleteModel(id)
   if (r.ok) {
-    message.success('已删除已下载的权重（内置模型仍可继续使用）')
+    message.success('已移除下载文件；内置模型仍可使用')
     refreshModels()
   } else {
     message.error(`删除失败: ${r.status}`)
@@ -188,16 +188,15 @@ async function doImport() {
   <div class="models-page">
     <div class="page-head">
       <div>
-        <h1>模型市场</h1>
-        <p class="sub">按需下载 · sha256 校验 · 未安装的模型在任务启动时也会自动下载</p>
+        <h1>模型库</h1>
+        <p class="sub">按素材类型选择模型。可提前下载，也可在任务开始时自动下载</p>
       </div>
       <NSpace>
         <NButton size="small" @click="showImport = true">导入自定义模型</NButton>
         <NButton size="small" :type="tab === 'all' ? 'primary' : 'default'" @click="tab = 'all'">全部</NButton>
         <NButton size="small" :type="tab === 'installed' ? 'primary' : 'default'" @click="tab = 'installed'">已下载</NButton>
-        <NButton size="small" :type="tab === 'anime' ? 'primary' : 'default'" @click="tab = 'anime'">动漫</NButton>
-        <NButton size="small" :type="tab === 'comic' ? 'primary' : 'default'" @click="tab = 'comic'">漫画</NButton>
-        <NButton size="small" :type="tab === 'general' ? 'primary' : 'default'" @click="tab = 'general'">真人/通用</NButton>
+        <NButton v-for="c in modelCategories" :key="c" size="small"
+          :type="tab === c ? 'primary' : 'default'" @click="tab = c">{{ categoryLabels[c] }}</NButton>
       </NSpace>
     </div>
     <div class="scene-bar">
@@ -246,10 +245,11 @@ async function doImport() {
           </div>
           <div class="desc">{{ m.description }}</div>
           <div class="tags">
-            <NTag size="small" :bordered="false">{{ speedLabel[m.speed as 'fast'] }}</NTag>
-            <NTag size="small" :bordered="false" v-for="c in m.content" :key="c">
-              {{ contentLabel[c as 'anime'] ?? c }}
-            </NTag>
+            <NTag size="small" :bordered="false">{{ speedLabels[m.speed] ?? m.speed }}</NTag>
+            <NTag size="small" :bordered="false">{{ modelCategoryLabel(m) }}</NTag>
+            <NTag v-if="m.version" size="small" :bordered="false">{{ m.version }}</NTag>
+            <NTag v-if="m.kind === 'sr' && m.scenes?.includes('video') && m.temporal === false"
+              size="small" :bordered="false">逐帧超分</NTag>
             <NTag size="small" :bordered="false">原生 x{{ m.scale.join(' / x') }}</NTag>
             <NTag size="small" :bordered="false">≈{{ m.vram_gb }}GB 显存</NTag>
             <NTag size="small" :bordered="false">{{ m.size_mb }}MB</NTag>

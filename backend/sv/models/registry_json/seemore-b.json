@@ -14,7 +14,7 @@
     "general"
   ],
   "temporal": false,
-  "speed": "fast",
+  "speed": "slow",
   "vram_gb": 1,
   "tile_hint": 256,
   "fp16": true,
@@ -23,7 +23,7 @@
     "range": "0-1",
     "pad": 1
   },
-  "description": "ICML'24 效率档（MoE，权重仅 2.4MB，256 定长分块）：补通用 3x 空档，2x/3x/4x 一卡三倍率",
+  "description": "SeemoRe B：提供 2x/3x/4x 通用单图重建（256 定长分块）。模型参数较少，但算子与分块较多，当前 DirectML 处理较慢。主要用于传统低分辨率重建，不作为重度噪声、JPEG 或模糊修复的默认模型。",
   "files": [
     {
       "name": "SeemoRe_B_X2.onnx",
@@ -59,5 +59,6 @@
   "u8_wrap": false,
   "scenes": [
     "image"
-  ]
+  ],
+  "category": "general_upscale"
 }

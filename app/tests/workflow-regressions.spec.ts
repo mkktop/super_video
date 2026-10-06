@@ -54,6 +54,32 @@ afterEach(() => {
 })
 
 describe('新建视频任务跨页预填', () => {
+  it.each(['removed', 'vram', 'scale'])('无效推荐（%s）不修改配置或误报成功', (reason) => {
+    store.models = [model, { ...model, id: 'recommended', scale: reason === 'scale' ? [2] : [4],
+      vram_ok: reason !== 'vram' }].filter((m) => reason !== 'removed' || m.id !== 'recommended')
+    const state = mount(NewTask)
+    state.modelId = 'model'; state.targetScale = 2
+    state.probeInfo = { ...probe, recommend: { model_id: 'recommended', model_name: 'Recommended',
+      target_scale: 4, deinterlace: true, deband: true, interp: 'off', animated: true, reasons: [] } }
+    state.applyRecommendation()
+    expect(state.modelId).toBe('model')
+    expect(state.targetScale).toBe(2)
+    expect(state.deinterlace).toBe(false)
+    expect(state.deband).toBe(false)
+    expect(feedback.success).not.toHaveBeenCalled()
+    expect(feedback.warning).toHaveBeenCalled()
+  })
+  it('有效推荐应用真实模型、倍率和预处理，成功提示使用当前名称', () => {
+    const state = mount(NewTask)
+    state.probeInfo = { ...probe, recommend: { model_id: 'model', model_name: '过时名称',
+      target_scale: 4, deinterlace: true, deband: true, interp: 'off', animated: true, reasons: [] } }
+    state.applyRecommendation()
+    expect(state.modelId).toBe('model')
+    expect(state.targetScale).toBe(4)
+    expect(state.deinterlace).toBe(true)
+    expect(state.deband).toBe(true)
+    expect(feedback.success).toHaveBeenCalledWith('已应用推荐配置：Model · x4')
+  })
   it('切换倍率或模型时清除不支持的旧降噪选择', async () => {
     store.models = [{ ...model, denoise_levels: [0, 1, 2, 3],
       denoise_levels_by_scale: { '2': [0, 1, 2, 3], '4': [0, 3] } }]

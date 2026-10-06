@@ -143,7 +143,7 @@ function seekTo(t: number) {
   if (videoEl.value) videoEl.value.currentTime = t
 }
 
-/** 剪切目的地：仅保存 / 剪完带产物去超分 / 剪完带产物去模型对比 */
+/** 剪切目的地：仅保存 / 剪完带产物继续超分 / 剪完带产物去模型对比 */
 async function startCut(dest: 'save' | 'sr' | 'cmp') {
   if (!input.value || selDur.value <= 0.05) {
     message.error('请先选择视频并设置有效的入点/出点')
@@ -177,7 +177,7 @@ async function startCut(dest: 'save' | 'sr' | 'cmp') {
           if (j.state === 'done') {
             message.success(`剪切完成: ${j.duration_s?.toFixed(1) ?? '?'}s`)
             // 自动跳转只在用户还停在剪切页时执行；已切去别的页就不拽人，
-            // 结果卡上的「去超分 / 去对比模型」按钮随时可手动续接
+            // 结果卡上的「继续超分 / 去对比模型」按钮随时可手动续接
             if (ui.page === 'trim') {
               if (dest === 'sr') openWizardWith(j.output)
               else if (dest === 'cmp') toCompareWith(j.output)
@@ -305,7 +305,7 @@ export default { name: 'Trim' }
         </svg>
       </div>
       <div class="dz-title">把视频拖进这里，或点击选择</div>
-      <div class="dz-sub">帧精确剪切 · 剪完可直接送去超分或模型对比</div>
+      <div class="dz-sub">按时间范围截取片段，保存后可继续超分或对比模型</div>
       <div class="dz-formats">MP4 · MKV · MOV · WebM · TS · AVI</div>
       <div v-if="recents.length" class="dz-recents">
         <button
@@ -388,14 +388,14 @@ export default { name: 'Trim' }
 
       <div class="actions">
         <NButton :disabled="busy || selDur <= 0.05" :loading="busy" @click="startCut('save')">
-          剪切保存
+          保存片段
         </NButton>
         <NButton type="primary" :disabled="busy || selDur <= 0.05" @click="startCut('sr')">
-          剪切并去超分 →
+          截取后超分 →
         </NButton>
         <!-- 先落盘剪切，完成后自动带着剪切文件进模型对比页（选模型并排跑） -->
         <NButton type="primary" ghost :disabled="busy || selDur <= 0.05" @click="startCut('cmp')">
-          剪切并去对比模型 →
+          截取后对比模型 →
         </NButton>
         <NButton v-if="busy" quaternary type="warning" @click="cancelCut">取消</NButton>
       </div>
@@ -413,9 +413,9 @@ export default { name: 'Trim' }
           <div v-for="n in job.notices ?? []" :key="n" class="res-detail warn">{{ n }}</div>
           <div class="res-btns">
             <NButton size="small" @click="openFolder">打开所在文件夹</NButton>
-            <NButton size="small" type="primary" @click="toSr">去超分</NButton>
+            <NButton size="small" type="primary" @click="toSr">继续超分</NButton>
             <NButton size="small" type="primary" ghost @click="toCompareWith(job.output)">
-              去对比模型 →
+              对比模型 →
             </NButton>
           </div>
         </template>

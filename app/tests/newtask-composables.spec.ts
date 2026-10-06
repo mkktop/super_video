@@ -4,6 +4,31 @@ import type { ModelInfo, ProbeInfo } from '@src/api'
 import { useCustomResolution } from '@src/composables/useCustomResolution'
 import { hasScene, useModelOptions } from '@src/composables/useModelOptions'
 import { store } from '@src/store'
+import { recommendationChoice } from '@src/composables/recommendationChoice'
+import type { RecommendInfo } from '@src/api'
+
+describe('推荐应用校验', () => {
+  const rec = { model_id: 'm', target_scale: 2 } as RecommendInfo
+  it('拒绝已移除模型、显存不足和不支持的倍率', () => {
+    expect(recommendationChoice(rec, []).error).toBeTruthy()
+    expect(recommendationChoice(rec, [mkModel({ vram_ok: false })]).error).toBeTruthy()
+    expect(recommendationChoice(rec, [mkModel({ vram_ok: true, scale: [4] })]).error).toBeTruthy()
+    expect(recommendationChoice(null, []).error).toBeTruthy()
+  })
+  it('只接受当前目录中可用且支持该倍率的模型', () => {
+    const model = mkModel({ vram_ok: true })
+    expect(recommendationChoice(rec, [model])).toEqual({ model, error: '' })
+    expect(recommendationChoice(rec, [mkModel({ vram_ok: true, kind: 'interp' })]).error).toBeTruthy()
+  })
+  it('拒绝选择时保留原模型和倍率', () => {
+    store.models = [mkModel({ id: 'blocked', vram_ok: false, scale: [4] })]
+    const id = ref('original'), scale = ref(2)
+    const { selectModel } = useModelOptions(id, scale)
+    expect(selectModel('blocked')).toBe(false)
+    expect(id.value).toBe('original')
+    expect(scale.value).toBe(2)
+  })
+})
 
 function mkModel(over: Partial<ModelInfo>): ModelInfo {
   return {
@@ -14,6 +39,12 @@ function mkModel(over: Partial<ModelInfo>): ModelInfo {
 }
 
 describe('useModelOptions', () => {
+  it('动漫首推 Balanced Sharp，即使其他模型已安装', () => {
+    store.models = [mkModel({ id: 'other', installed: true }),
+      mkModel({ id: 'animejanai-v31-hd-balanced-sharp', installed: false })]
+    const { srModels } = useModelOptions(ref(''), ref(2))
+    expect(srModels.value[0].id).toBe('animejanai-v31-hd-balanced-sharp')
+  })
   it('已安装模型排最前（组内保持注册表顺序）', () => {
     store.models = [
       mkModel({ id: 'a', installed: false }),

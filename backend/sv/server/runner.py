@@ -522,7 +522,10 @@ class Runner:
         task_id = task["id"]
         assert self.proc.stdout is not None
         async for raw in self.proc.stdout:
-            line = raw.decode("utf-8", "replace").strip()
+            # Native ORT stderr uses UTF-16 on Windows. Its trailing newline NUL
+            # can prefix the next UTF-8 JSON event after stdout/stderr are merged.
+            # JSON escapes embedded NULs, so removing literal padding preserves payloads.
+            line = raw.decode("utf-8", "replace").replace("\x00", "").strip()
             try:
                 ev = json.loads(line)
             except json.JSONDecodeError:

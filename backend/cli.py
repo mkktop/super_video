@@ -264,7 +264,7 @@ def cmd_selftest(args):
     """
     import json as _json
 
-    mods = ["py7zr", "onnx", "onnxconverter_common", "numpy", "psutil"]
+    mods = ["py7zr", "onnx", "onnxconverter_common", "numpy", "psutil", "cv2"]
     bad = []
     for m in mods:
         try:

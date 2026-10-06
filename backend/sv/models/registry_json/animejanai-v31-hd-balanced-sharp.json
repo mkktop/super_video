@@ -21,7 +21,7 @@
     "range": "0-1",
     "batch_hint": 1
   },
-  "description": "均衡档的锐利风格变体（同架构独立训练权重，非后处理）：画质档级的观感加锐利线条；速度与标准版完全相同",
+  "description": "动漫 HD 2x 默认推荐：V3.1 Balanced 的 Sharp 独立权重，偏锐利线条；与标准版是风格选择，可能强化噪声或轮廓，建议看片段对比。",
   "files": [
     {
       "name": "2x_AnimeJaNai_HD_V3.1Sharp1_Balanced_SPANF3_b8f64_unshuffle_fp16.onnx",
@@ -37,5 +37,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "anime_video"
 }

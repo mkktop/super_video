@@ -94,7 +94,7 @@ const gpuEver = computed(
     </div>
 
     <div v-if="!samplingOn" class="card off-tip sv-card">
-      后台性能采样已关闭,仪表与趋势不再更新 —— 可在「设置 · 性能监控」中重新开启。
+      性能采样已关闭，图表暂停更新。可在「设置 → 处理 → 性能监控」中重新开启。
     </div>
 
     <!-- 仪表环 -->

@@ -65,6 +65,9 @@ export interface ModelInfo {
   scale: number[]
   kind?: 'sr' | 'interp'
   content: string[]
+  category?: string
+  version?: string
+  temporal?: boolean
   speed: string
   scenes?: string[]
   vram_gb: number
@@ -312,15 +315,18 @@ export interface WatermarkPreview {
   detected?: boolean | null
   score?: number | null
   reason?: string
+  method?: 'white' | 'black' | 'inpaint' | null
 }
 export interface WatermarkSample { path: string; mask: WatermarkMask }
 export interface WatermarkDetection {
+  removal?: 'white' | 'auto' | 'repair'
   mode?: 'fixed' | 'smart'
   sample?: WatermarkSample
   threshold?: number
 }
 export interface WatermarkJob {
   id: string
+  removal?: 'white' | 'auto' | 'repair'
   mode?: 'fixed' | 'smart'
   status: 'running' | 'done' | 'cancelled'
   total: number

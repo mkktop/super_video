@@ -13,6 +13,7 @@ import {
 import { api, mediaSrc } from '../api'
 import type { FolderScanResult } from '../api'
 import { refreshTasks, store, ui } from '../store'
+import { DEFAULT_MANGA_MODEL, DEFAULT_COLOR_MODEL } from '../composables/modelDefaults'
 import { hasScene } from '../composables/useModelOptions'
 import { useTileDefault } from '../composables/useTileDefault'
 import MangaModelGrid from '../components/MangaModelGrid.vue'
@@ -98,7 +99,7 @@ watch([() => ui.page, () => ui.pendingTaskParams], () => void consumeRetryParams
 const folder = ref<FolderScanResult | null>(null)
 const scanning = ref(false)
 const files = ref<string[]>([])
-const modelId = ref('')
+const modelId = ref(DEFAULT_MANGA_MODEL)
 const targetScale = ref(2)
 const format = ref<'png' | 'jpg'>('png')
 const jpgQuality = ref(92)
@@ -120,6 +121,8 @@ const srModels = computed(() => {
     const ma = Number(hasScene(a, 'manga'))
     const mb = Number(hasScene(b, 'manga'))
     if (ma !== mb) return mb - ma
+    const rank = (id: string) => id === DEFAULT_MANGA_MODEL ? 2 : id === DEFAULT_COLOR_MODEL ? 1 : 0
+    if (rank(a.id) !== rank(b.id)) return rank(b.id) - rank(a.id)
     return Number(!!(b.installed || b.bundled)) - Number(!!(a.installed || a.bundled))
   })
 })
@@ -127,7 +130,7 @@ const selectedModel = computed(() => store.models.find((m) => m.id === modelId.v
 
 // ---- 混装双模型：黑白页走主模型、彩页走彩色模型（后端逐页识别分派） ----
 const mixMode = ref(false)
-const colorModelId = ref('')
+const colorModelId = ref(DEFAULT_COLOR_MODEL)
 const mixSplit = ref(false) // 分趟：先黑白趟末释放引擎再建彩模（显存峰值≈单个模型）
 const colorSelected = computed(() => store.models.find((m) => m.id === colorModelId.value))
 // 倍率须两模型同时支持：混装时取交集（交集空=不可提交）
@@ -164,7 +167,11 @@ watch(mixMode, (on) => {
   const ok = colorSelected.value && colorSelected.value.vram_ok
     && (colorModelId.value !== modelId.value)
     && (selectedModel.value ? colorSelected.value!.scale.some((s) => selectedModel.value!.scale.includes(s)) : true)
-  if (ok) return
+  if (ok) {
+    const scales = commonScales.value
+    if (scales?.length && !scales.includes(targetScale.value)) targetScale.value = Math.min(...scales)
+    return
+  }
   const cand = srModels.value.find(
     (m) => m.vram_ok && m.id !== modelId.value && m.scale.includes(targetScale.value),
   ) ?? srModels.value.find((m) => m.vram_ok && m.id !== modelId.value)
@@ -304,11 +311,11 @@ async function submit() {
     if (r.ok) {
       const mixNote = mixMode.value && colorSelected.value
         ? `，彩色页走 ${colorSelected.value.name}、黑白页走 ${selectedModel.value?.name ?? ''}`
-          + (mixSplit.value ? '，分趟处理（显存峰值≈单个模型）' : '')
+          + (mixSplit.value ? '，分批处理（降低显存占用）' : '')
         : ''
       message.success(
         isFolder
-          ? `已加入队列（${baseName(folder.value!.folder)} 整本 ${n} 页合并为 1 个漫画任务，输出将镜像目录结构${wantPdf ? '，另将无损合并输出一份 PDF' : ''}${mixNote}）`
+          ? `已加入队列（${baseName(folder.value!.folder)} 整本 ${n} 页合并为 1 个漫画任务，输出保留原目录结构${wantPdf ? '，另将无损合并输出一份 PDF' : ''}${mixNote}）`
           : `已加入队列（${n} 页漫画合并为 1 个批量任务${selectedModel.value && !selectedModel.value.installed && !selectedModel.value.bundled ? '，模型将自动下载' : ''}${wantPdf ? '，另将无损合并输出一份 PDF' : ''}${mixNote}）`,
       )
       files.value = []
@@ -345,7 +352,7 @@ export default { name: 'MangaSR' }
     <div class="page-head">
       <div>
         <h1>漫画超分</h1>
-        <p class="sub">整本漫画文件夹（卷/话子目录原样镜像）→ 漫画专用模型放大 → PNG / JPG / PDF</p>
+        <p class="sub">批量放大整本漫画，保留卷、话目录结构，可同时生成 PDF</p>
       </div>
     </div>
 
@@ -354,10 +361,10 @@ export default { name: 'MangaSR' }
       <h2 class="sec-title"><span class="sec-num">1</span>选择漫画</h2>
       <div class="pick-row">
         <NButton dashed size="large" class="grow main" :loading="scanning" @click="pickFolder">
-          {{ folder ? `已选 ${baseName(folder.folder)}（点击换一本）` : '选择漫画文件夹（含子目录，整本）' }}
+          {{ folder ? `已选 ${baseName(folder.folder)}（点击更换文件夹）` : '选择整本漫画文件夹' }}
         </NButton>
         <NButton dashed size="large" class="grow" @click="pick">
-          {{ files.length ? `已补选 ${files.length} 页（点击继续追加）` : '补选散页（可多选）' }}
+          {{ files.length ? `已补选 ${files.length} 页（点击添加更多）` : '添加单页图片' }}
         </NButton>
       </div>
       <div v-if="dragHint" class="drop-hint">也可以直接把漫画页拖进窗口</div>
@@ -374,7 +381,7 @@ export default { name: 'MangaSR' }
           <div class="f-name" :title="folder.folder">{{ baseName(folder.folder) }}</div>
           <div class="f-meta">
             共 {{ folder.total }} 页<template v-if="folder.dirs"> · 含 {{ folder.dirs }} 个子目录</template>
-            · 输出将镜像目录结构
+            · 输出保留原目录结构
           </div>
         </div>
         <button class="rm" title="移除文件夹" @click="folder = null">✕</button>
@@ -402,7 +409,7 @@ export default { name: 'MangaSR' }
             alt=""
             @error="onThumbErr(f)"
           />
-          <div v-else class="thumb thumb-broken" title="此图片无法预览（不影响处理）">无法预览</div>
+          <div v-else class="thumb thumb-broken" title="无法显示缩略图，请确认源图片可正常打开">无法预览</div>
           <button class="rm" title="移除" @click="removeAt(i)">✕</button>
           <span class="fname" :title="f">{{ baseName(f) }}</span>
         </div>
@@ -415,7 +422,7 @@ export default { name: 'MangaSR' }
         <span class="sec-num">2</span>模型与输出
         <span class="sel-chip" :class="{ on: !!selectedModel }">
           <template v-if="mixMode && selectedModel && colorSelected">
-            {{ selectedModel.name }}（黑白）＋ {{ colorSelected.name }}（彩色） · x{{ targetScale }}{{ mixSplit ? ' · 分趟' : '' }}
+            {{ selectedModel.name }}（黑白）＋ {{ colorSelected.name }}（彩色） · x{{ targetScale }}{{ mixSplit ? ' · 分批' : '' }}
           </template>
           <template v-else>
             {{ selectedModel ? `已选 ${selectedModel.name} · x${targetScale}` : '点击卡片选择' }}
@@ -425,17 +432,23 @@ export default { name: 'MangaSR' }
           显示全部模型
         </NCheckbox>
       </h2>
+      <div v-if="!mixMode" class="mix-row">
+        <NButton size="small" :type="modelId === DEFAULT_MANGA_MODEL ? 'primary' : 'default'"
+          @click="selectModel(DEFAULT_MANGA_MODEL)">黑白漫画推荐 · MangaJaNai</NButton>
+        <NButton size="small" :type="modelId === DEFAULT_COLOR_MODEL ? 'primary' : 'default'"
+          @click="selectModel(DEFAULT_COLOR_MODEL)">彩漫推荐 · IllustrationJaNai DAT2</NButton>
+      </div>
       <div class="mix-row">
         <NCheckbox v-model:checked="mixMode">
-          彩色 / 黑白混装（逐页自动识别分派）
+          彩色与黑白页使用不同模型
         </NCheckbox>
         <span class="mix-hint">
-          整本里既有彩页又有黑白页时开启：创建时逐页识别，彩页走彩色模型、黑白页走主模型；
-          两个模型会{{ mixSplit ? '分趟加载（先黑白后彩色，显存峰值≈单个模型）' : '同时驻留显存（约为两者之和）' }}
+          自动识别彩色与黑白页，并使用对应模型。
+          {{ mixSplit ? '先处理黑白页，再处理彩色页，显存占用更低。' : '两个模型同时加载，会占用更多显存。' }}
         </span>
       </div>
       <div v-if="mixMode && commonScales && commonScales.length === 0" class="mix-warn">
-        两个模型没有共同支持的放大倍率，无法混装——请换一组模型
+        两个模型没有共同支持的倍率，请更换其中一个模型
       </div>
       <div v-if="!srModels.length" class="empty-models">
         暂无漫画向模型{{ showAllModels ? '' : '，可勾选「显示全部模型」用通用模型处理' }}
@@ -447,11 +460,10 @@ export default { name: 'MangaSR' }
         <MangaModelGrid :models="srModels" :selected="colorModelId" @select="selectColorModel" />
         <div class="mix-row">
           <NCheckbox v-model:checked="mixSplit" size="small">
-            分趟处理（省显存）
+            分批处理（降低显存占用）
           </NCheckbox>
           <span class="mix-hint">
-            先跑完全部黑白页、释放引擎后再加载彩色模型，显存峰值≈单个模型；代价是趟间
-            重建引擎（几秒）、进度按「先黑白后彩色」推进；输出与 PDF 页序不受影响
+            先处理黑白页，再加载彩色模型；切换模型需要额外时间。输出图片与 PDF 仍按原页序排列
           </span>
         </div>
       </template>
@@ -488,7 +500,7 @@ export default { name: 'MangaSR' }
         <div v-if="batchN >= 2" class="row inline">
           <span class="lbl">整本合并</span>
           <NCheckbox v-model:checked="mergePdf">
-            另外输出一份 PDF（全部页按顺序无损封装，逐页图片文件仍保留）
+            同时生成 PDF，按页序合并；保留单页输出文件
           </NCheckbox>
         </div>
         <div class="row stack">
@@ -496,12 +508,11 @@ export default { name: 'MangaSR' }
           <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
         </div>
         <p class="hint-row">
-          自动=按模型默认；扫描件超大页显存不足时调小分块。整本输出到「{{
+          自动使用模型默认分块；大幅扫描页处理时显存不足，可调小分块。整本输出到「{{
             outDirLabel
-          }}」下的「文件夹名_倍率」目录，按源目录结构镜像（卷/话子目录原样保留）；散页保存到「{{
+          }}」下的「文件夹名_倍率」目录，保留源目录结构（包括卷、话子目录）；散页保存到「{{
             outDirLabel === '源文件夹旁边' ? '源图片所在目录' : outDirLabel
-          }}」。混装识别：创建任务时逐页判断彩色/黑白（识别统计见任务日志），识别结果随任务保存、续跑不重算。PDF
-          无损口径：PNG 结果逐像素一致直接嵌入，JPG 结果按原文件字节嵌入不再压缩。
+          }}」。彩色与黑白页的识别统计可在任务日志查看。PDF 保留输出图片的数据，不进行二次有损压缩。
         </p>
       </div>
     </section>

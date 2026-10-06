@@ -23,7 +23,7 @@ class ModelSpec:
     engine: str  # onnx | torch
     scale: list[int]
     content: list[str]
-    speed: str  # fast | balanced | slow
+    speed: str  # fastest | fast | balanced | slow
     vram_gb: float
     io: dict = field(default_factory=dict)
     tile_hint: int = 0
@@ -35,6 +35,9 @@ class ModelSpec:
     u8_wrap: bool = True  # False = 禁用 uint8 包装双会话结构（CUGAN×DML 0x887A0006 前科）
     scenes: list[str] = field(default_factory=lambda: ["video", "image"])  # 适用场景标签：video/manga/image
     files: list[dict] = field(default_factory=list)
+    category: str = ""  # 主用途；与 content 内容标签、scenes 任务场景独立
+    version: str = ""
+    temporal: bool = False
 
     @classmethod
     def from_dict(cls, d: dict) -> "ModelSpec":
@@ -48,6 +51,8 @@ class ModelSpec:
             u8_wrap=d.get("u8_wrap", True),
             scenes=d.get("scenes", ["video", "image"]),
             files=d.get("files", []),
+            category=d.get("category", ""), version=d.get("version", ""),
+            temporal=bool(d.get("temporal", False)),
         )
 
     def engine_kwargs(self, scale: int, tile: int = 0) -> dict:

@@ -15,11 +15,12 @@
   "speed": "balanced",
   "vram_gb": 6,
   "tile_hint": 512,
-  "description": "真人实拍与通用内容首选：4x 超分细节自然、表现稳定；720p→4K、1080p→8K 均可（8K 需 HEVC 编码）",
+  "description": "通用真实退化图片的 4x 超分修复基线，也可逐帧处理视频。适合照片和实拍素材；可能改变细节纹理，视频需检查运动稳定性。",
   "io": {
     "color": "rgb",
     "range": "0-1",
-    "pad": 4
+    "pad": 4,
+    "legacy_imagenet_wrap": true
   },
   "files": [
     {
@@ -35,5 +36,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "photo_restore"
 }

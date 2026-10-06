@@ -105,8 +105,8 @@ const gpuShortName = computed(() =>
     <!-- Hero -->
     <section class="hero">
       <div class="hero-text">
-        <h1>视频超分<span class="grad">工作台</span></h1>
-        <p>低分辨率视频 · AI 重建 · 高清输出　让老片重获新生</p>
+        <h1><span class="rainframe-wordmark">雨帧</span><span class="hero-heading">超分工作台</span></h1>
+        <p>用 AI 放大视频与图片，让细节更清晰</p>
         <div class="hero-actions">
           <NButton type="primary" size="large" @click="ui.page = 'newtask'">＋ 新建超分任务</NButton>
           <NButton size="large" quaternary @click="ui.page = 'tasks'">查看任务队列</NButton>
@@ -170,21 +170,21 @@ const gpuShortName = computed(() =>
       <div class="guide-steps">
         <div class="g-step">
           <span class="g-num">1</span>
-          <div><b>选视频</b>新建超分任务，把要处理的视频拖进窗口或点击选择</div>
+          <div><b>导入视频</b>新建任务，选择视频或将文件拖入窗口</div>
         </div>
         <div class="g-step">
           <span class="g-num">2</span>
-          <div><b>挑模型</b>不确定哪个合适？用「模型对比」拿同一段素材并排试</div>
+          <div><b>选择模型</b>参考素材推荐，也可用同一片段对比不同模型</div>
         </div>
         <div class="g-step">
           <span class="g-num">3</span>
-          <div><b>入队等待</b>处理期间可以最小化窗口，完成时会有系统通知</div>
+          <div><b>开始处理</b>加入队列后按顺序处理；可在设置中开启完成通知</div>
         </div>
       </div>
       <div class="guide-actions">
         <NButton type="primary" @click="ui.page = 'newtask'">＋ 新建超分任务</NButton>
-        <NButton quaternary @click="ui.page = 'mcompare'">先对比模型</NButton>
-        <NButton quaternary @click="ui.page = 'mangasr'">超分整本漫画</NButton>
+        <NButton quaternary @click="ui.page = 'mcompare'">对比模型效果</NButton>
+        <NButton quaternary @click="ui.page = 'mangasr'">处理整本漫画</NButton>
       </div>
     </section>
 
@@ -362,13 +362,19 @@ h1 {
   letter-spacing: 1px;
   color: var(--sv-hero-fg);
 }
-.grad {
-  background: linear-gradient(90deg, var(--sv-accent-strong), var(--sv-accent-2-strong));
+.rainframe-wordmark {
+  display: inline-block;
+  background: var(--sv-wordmark-grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  margin-left: 8px;
+  font-size: 1.35em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
 }
+.hero-heading { margin-left: 18px; font-size: 0.9em; font-weight: 650; letter-spacing: 0.02em; }
+h1 { display: flex; align-items: baseline; flex-wrap: wrap; }
 .hero-text p { margin: 10px 0 22px; color: var(--sv-text-dim); font-size: 14px; letter-spacing: 0.5px; }
 .hero-actions { display: flex; gap: 12px; }
 
@@ -683,11 +689,11 @@ h1 {
   border-color: var(--sv-mem-border);
 }
 .chip-head { display: flex; align-items: center; gap: 11px; min-width: 0; }
-.chip-icon { display: inline-flex; color: var(--sv-accent-strong); filter: drop-shadow(0 0 5px rgba(var(--sv-accent-rgb), 0.45)); flex-shrink: 0; }
-.chip-icon.icon-amber { color: var(--sv-warning); filter: drop-shadow(0 0 5px rgba(var(--sv-warning-rgb), 0.4)); }
+.chip-icon { display: inline-flex; color: var(--sv-accent-strong); flex-shrink: 0; }
+.chip-icon.icon-amber { color: var(--sv-warning); }
 .chip-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .chip-kind {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 1.8px;
   color: var(--sv-text-faint);
@@ -758,17 +764,11 @@ h1 {
 .gpu-icon {
   display: inline-flex;
   color: var(--sv-accent-strong);
-  filter: drop-shadow(0 0 7px rgba(var(--sv-accent-rgb), 0.65));
-  animation: gpu-breathe 2.6s ease-in-out infinite;
   flex-shrink: 0;
-}
-@keyframes gpu-breathe {
-  0%, 100% { filter: drop-shadow(0 0 5px rgba(var(--sv-accent-rgb), 0.45)); }
-  50% { filter: drop-shadow(0 0 10px rgba(var(--sv-accent-rgb), 0.85)); }
 }
 .gpu-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .gpu-kind {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 2px;
   color: var(--sv-text-faint);
@@ -777,7 +777,7 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 型号名：银蓝金属渐变 + 缓速流光扫过 */
+/* 型号名：静态银蓝渐变，避免文字持续流光分散注意力 */
 .gpu-name {
   font-size: 21px;
   font-weight: 800;
@@ -787,15 +787,9 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   background: var(--sv-metal-grad);
-  background-size: 220% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: gpu-shimmer 7s linear infinite;
-}
-@keyframes gpu-shimmer {
-  0% { background-position: 0% 0; }
-  100% { background-position: -220% 0; }
 }
 .gpu-backend {
   position: relative;

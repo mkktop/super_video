@@ -25,7 +25,7 @@ unzip ffmpeg.zip -d ffmpeg_tmp && cp ffmpeg_tmp/ffmpeg-n8.1-latest-win64-gpl-8.1
 cd backend
 py=../.venv/Scripts/python.exe
 
-# 探测媒体信息（含 M0 校验：8bit SDR CFR）
+# 探测媒体信息（SDR 8/10bit，可变帧率处理时转固定帧率）
 $py cli.py probe ../samples/xxx.mp4
 
 # 生成合成测试视频
@@ -45,15 +45,15 @@ $py cli.py serve --port 8730
 
 其余子命令 `worker` / `ort-check` / `selftest` 为打包链路与自检内部使用，日常开发不需直接调用；`mcp` 见下节。
 
-## MCP 接入（AI 客户端直接下超分任务）
+## MCP 接入（AI 客户端调用超分和去水印）
 
 `sv/mcp_server.py` 是一个 stdio MCP server，把运行中 sidecar 的能力暴露给 Claude Desktop / ZCode / Cursor 等 AI 客户端——对话式完成「探测 → 选模型 → 建任务 → 轮询进度」。
 
 **前置条件：雨帧须在运行**。bridge 只代理不拉起（自拉 headless sidecar 会与 Electron 版形成双 runner 抢 GPU 队列与 SQLite）。发现逻辑与 Electron 主进程同款：扫描 127.0.0.1:8730-8739、`/api/health` 健康标记校验、版本一致者优先；鉴权令牌自动从 SV_TOKEN / 数据根 token 文件候选逐个试探（frozen 态从 exe 位置复刻 `resolveDataRoot` 候选序列），UI 重启轮换令牌时自动重读重试一次。
 
-**准入总闸**：settings `mcp_enabled`（默认开）——sidecar 中间件对 bridge UA（`rainframe-mcp/*`）在关闭时返回 403，文案自解释由 bridge 转告；`/api/health` 豁免（bridge 靠它发现 sidecar 才能报出「去开闸」而非表现为连不上）；普通 UI 流量不受闸门影响（仅 bridge UA 才读设置文件）。侧栏「MCP 服务」页（日志下方）提供状态、开关与三段预填本机路径的客户端配置片段（`backend:info` 的 `mcpCommand`：安装版 `sidecar.exe mcp`、dev 为仓库 venv python 跑 `cli.py mcp`），另附「任意 AI 客户端（通用）」指令块——跨客户端无统一深链标准，通用路径是把接入指令（命令行+验证步骤+两种报错指引）发给 AI，由它写自己宿主的配置并自行验证。
+**准入总闸**：settings `mcp_enabled`（默认开）——sidecar 中间件对 bridge UA（`rainframe-mcp/*`）在关闭时返回 403，文案自解释由 bridge 转告；`/api/health` 豁免（bridge 靠它发现 sidecar 才能报出「去开闸」而非表现为连不上）；普通 UI 流量不受闸门影响（仅 bridge UA 才读设置文件）。侧栏「AI 接入」页（日志下方）提供状态、开关与三段预填本机路径的客户端配置片段（`backend:info` 的 `mcpCommand`：安装版 `sidecar.exe mcp`、dev 为仓库 venv python 跑 `cli.py mcp`），另附「其他支持 MCP 的客户端」指令块——跨客户端无统一深链标准，通用路径是把接入指令（命令行+验证步骤+两种报错指引）发给 AI，由它写自己宿主的配置并自行验证。
 
-客户端配置（stdio，三客户端通用形状）：
+客户端配置示例（stdio；下例适用于使用 mcpServers 字段的客户端，其他客户端按各自格式配置）：
 
 ```jsonc
 {
@@ -64,12 +64,35 @@ $py cli.py serve --port 8730
     }
   }
 }
-// dev 仓库：command 指向 .venv\\Scripts\\python.exe，args 为 ["-m", "sv.mcp_server"]（cwd 需在 backend）
+// 开发版请复制「AI 接入」页生成的配置：command 为 venv python，args 含 cli.py 的绝对路径与 "mcp"。
 ```
 
-工具面 10 个（`rf_` 前缀）：`rf_status`（版本/GPU/引擎）、`rf_probe`（探测+智能推荐）、`rf_models` / `rf_model_download`、`rf_task_create`（视频单输入 / 图片批量 inputs / 漫画整夹 `input_folder`+`kind=manga`）、`rf_tasks` / `rf_task`（轮询进度；漫画批量 images 清单自动瘦身防灌爆上下文）、`rf_task_cancel` / `rf_task_resume`、`rf_scan_folder`。长任务契约：创建立即返回任务 id，客户端轮询 `rf_task` 直到终态。
+工具面 23 个（`rf_` 前缀）：
 
-协议层零依赖手写（initialize / tools/list / tools/call / ping 的逐行 JSON-RPC，Python stdlib），刻意不引入官方 mcp SDK——其 httpx 传递依赖与本仓库 pin 的 httpx2 共存未经验证，且该协议子集自 2024-11-05 以来稳定；PyInstaller 经 cli.py 惰性 import 自动发现，打包零改动。安全边界：不暴露 delete_model / remove_task / reorder / settings 写等破坏性与配置类端点；输出纪律：任务列表 ≤30 条、扫描预览 ≤20 文件、images 清单 >20 条只回计数+样例。
+| 功能 | 工具 |
+|---|---|
+| 状态、媒体探测、模型 | `rf_status`、`rf_probe`、`rf_models`、`rf_model_download` |
+| 超分任务 | `rf_task_create`、`rf_tasks`、`rf_task`、`rf_task_cancel`、`rf_task_resume`、`rf_scan_folder` |
+| 诊断与结果预览 | `rf_diagnostics`、`rf_task_preview` |
+| 图片去水印 | `rf_watermark_preview`、`rf_watermark_batch`、`rf_watermark_job`、`rf_watermark_cancel` |
+| 模型对比 | `rf_compare_create`、`rf_compare_job`、`rf_compare_cancel`、`rf_compare_preview` |
+| 视频剪切 | `rf_trim_create`、`rf_trim_job`、`rf_trim_cancel` |
+
+超分任务创建立即返回任务 id，客户端轮询 `rf_task` 直到终态。整夹超分使用 `input_folder`，bridge 自动设置 `folder_src`，保留章节目录结构；显式 `extra_params.folder_src` 优先。`rf_tasks` 默认每页 30 条，`limit` 为 1~100，使用 `next_offset` 继续读取，保持 status/q 不变；列表变化时 offset 分页位置可能变化。
+
+工具在请求后端前校验声明的参数类型、枚举、范围和必填项，不进行类型转换；例如 `overwrite="false"` 会返回协议错误 -32602，不会创建任务。编码枚举与后端共用常量，软件 H.265 为 `h265`，硬件编码需对应硬件能力；分块 `tile` 越小越省显存。
+
+`rf_diagnostics` 返回队列闸门、最近性能样本及日志尾；可选 task_id 附带该任务详情和性能日志尾。log_lines 默认 80、上限 200，perf_limit 默认 20、上限 60，单行日志限制 2000 字符。性能日志 API 的可选 `n` 参数从文件尾读取，上限 500 行、最多读取 1 MiB；不传 n 保持原有完整日志接口。
+
+`rf_task_preview` 返回源图/结果的 MCP 原生 PNG，最长边 1200 像素；提供 sample_index 则读取同时间的静帧，初次可能返回 building，需要稍后重试，unsupported 时省略索引回落普通预览。模型对比使用 `rf_compare_create` 创建 2~6 个不同模型的短片段或图片对比（共同支持的倍率，torch 暂不参与），查询用 `rf_compare_job`，结果图用 `rf_compare_preview`；视频索引需小于 still_count，单片段最长 20 秒。视频剪切用 `rf_trim_create`，查询用 `rf_trim_job`，完成后的 output 可作为超分输入。对比、剪切和去水印作业 id 均与超分任务分开使用；各自的 cancel 工具遵循后端取消粒度，不提供断点续跑。
+
+去水印工具复用界面同一套后端：`mode=fixed|smart`、`removal=auto|repair|white`、右下角区域 `mask`（`unit=px|percent`，`width/height/right/bottom`）、`sample={path,mask}` 和 `threshold` 均可传入。默认 `fixed+auto`；smart 必须提供纯色页边上的同款水印样本，fixed+repair 可选样本以按文字形状生成遮罩，没样本时修补整个框。repair 可能留下模糊，不可靠的智能匹配仍会跳过。
+
+先调用 `rf_watermark_preview` 检查：默认返回定位/清除方式等文字信息及原图、处理后两张 MCP 原生 PNG 图像；`include_images=false` 只返回信息，不把 base64 塞入文本。再用相同参数调用 `rf_watermark_batch`，传 `paths` 或 `folder`（未传 paths 时自动递归扫描，清单不经过 AI 上下文）；可指定 `output_dir` 作为输出父目录。结果保留原图、尺寸和相对目录结构，另存 PNG，同名目录自动避让。
+
+去水印作业独立于超分队列：用返回的 `id` 作为 `job_id` 调用 `rf_watermark_job`，轮询到 `done/cancelled`，并检查 `succeeded/skipped/failed`。用 `rf_watermark_cancel` 请求停止，当前图片处理完后退出，已有结果保留；此 id 不能传给 `rf_task`，也不支持 `rf_task_resume`。错误最多回前 20 条，并返回总数；智能定位或增强清除的完整记录见结果目录中的 `watermark-report.json`。
+
+协议层使用 Python stdlib 实现（initialize / tools/list / tools/call / ping 的逐行 JSON-RPC），图像预览惰性使用项目已有 Pillow，不引入官方 mcp SDK。PyInstaller 经 cli.py 惰性 import 自动发现。安全边界：不暴露 delete_model / remove_task / reorder / settings 写等端点；输出纪律：任务列表每页最多 100 条、扫描预览最多 20 文件、images 清单超过 20 条只回计数+样例，图片最长边 1200 像素，单次原始预览/日志读取上限 32 MiB。
 
 ## 桌面端（app/）
 
@@ -127,7 +150,7 @@ sv/
 │  └─ registry_json/   内置模型 manifest
 └─ utils/process.py    进程树终止（取消/清理）
 scripts/               calibrate_color.py（IO 校准）、convert_fp16.py / export_onnx_x4plus.py、build_trt_component.py、bench_*.py（基准）
-tests/                 54 个测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/GPU 租约/DB 迁移/回归/MCP bridge）
+tests/                 测试文件（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/GPU 租约/DB 迁移/回归/MCP bridge）
 ```
 
 ## HTTP API 一览
@@ -198,7 +221,13 @@ worker 的 `done`/`failed`/`canceled` 终态事件不直接上 WS——runner �
 ## 测试与基准
 
 ```bash
-$py -m pytest tests/ -q          # 476 项（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归/MCP bridge；从 backend 目录跑；无 GPU/部分模型缺失时按机器跳过）
+$py -m pytest tests/ -q          # 管线/引擎等测试（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归/MCP bridge；从 backend 目录跑；无 GPU/部分模型缺失时按机器跳过）
 cd ../app && pnpm test           # 前端 vitest（CI 同跑：ci.yml 后端 pytest + 前端类型检查/单测/构建）
 $py scripts/bench.py             # 速度与内存基准表
 ```
+
+MCP 默认模型：动漫 `animejanai-v31-hd-balanced-sharp`（x2）；黑白漫画 `mangajanai`（默认 x2，权重按源高度自适应）；彩漫 `illustrationjanai-4x-dat2`（x4）。`rf_task_create` 可省略 `model_id`，通过 `content_type=anime/manga_bw/manga_color` 选默认；省略类型时 `kind=manga` 按黑白漫画，其余按动漫。显式模型和倍率优先，真人素材继续通过 `rf_probe` 选择。`rf_probe` 的图片推荐依据黑白/彩色检测，不区分摄影与彩漫，照片请手动选通用模型。
+
+模型清单新增 `category`（主用途）、`version`（具体权重版本）、`temporal`（是否使用跨帧信息）。主用途分为 `anime_video` 动漫视频、`anime_restore` 动漫重建/降噪、`manga_bw` 黑白漫画、`illustration` 彩漫/插画、`photo_restore` 照片/通用修复、`general_upscale` 轻量通用放大、`interp` 补帧。原有 `content` 内容标签与 `scenes` 任务场景保持独立；`rf_models` 返回相同字段。速度档只描述计算取向，不是画质排名；Sharp 为风格选择，逐帧超分不保证无闪烁。IllustrationJaNai 当前权重版本：2x 为 V3 SPAN S，4x 为 V1 ESRGAN，4x DAT2 为 V1 DAT2。
+
+分类说明依据：[AnimeJaNai](https://github.com/the-database/mpv-AnimeJaNai)、[MangaJaNai](https://github.com/the-database/MangaJaNai)、[ArtCNN](https://github.com/Artoriuz/ArtCNN)、[Real-ESRGAN 模型库](https://github.com/xinntao/Real-ESRGAN/blob/master/docs/model_zoo.md)、[HAT](https://github.com/XPixelGroup/HAT)、[SwinIR](https://github.com/JingyunLiang/SwinIR)、[DIS](https://github.com/Kim2091/DIS)、[SeemoRe](https://github.com/eduardzamfir/seemoredetails)。这些分类描述用途，不代表统一素材实测后的质量排名。

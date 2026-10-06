@@ -81,7 +81,7 @@ const darkOverrides: GlobalThemeOverrides = {
     textColorBase: '#E9ECF2',
     textColor1: '#E9ECF2',
     textColor2: '#C3C8D2',
-    textColor3: '#8B919D',
+    textColor3: '#969EAC',
   },
   Card: {
     borderRadiusMedium: '14px',
@@ -168,7 +168,7 @@ onUnmounted(() => offNavigate?.())
           <main class="page" :class="{ 'page-full': ui.page === 'compare' }">
             <!-- 后端初始化失败：给出原因与重试入口，替代无限 loading -->
             <div v-if="store.initError" class="init-error">
-              <div class="init-error-title">后端服务连接失败</div>
+              <div class="init-error-title">无法连接本地处理服务</div>
               <div class="init-error-detail">{{ store.initError }}</div>
               <n-button type="primary" size="small" @click="retryInit">重试</n-button>
             </div>
@@ -214,8 +214,9 @@ onUnmounted(() => offNavigate?.())
   --sv-fill-3: rgba(255, 255, 255, 0.06);
   /* —— 文字 —— */
   --sv-text: #e9ecf2;          /* 主文字 */
-  --sv-text-dim: #9aa1ad;      /* 次文字 */
-  --sv-text-faint: #7c838f;    /* 弱文字/标签 */
+  --sv-text-dim: #abb2bf;      /* 次文字 */
+  --sv-text-faint: #969eac;    /* 弱文字/标签 */
+  --sv-wordmark-grad: linear-gradient(115deg, #b8f0f5 0%, #86baff 48%, #b9a5f5 100%);
   --sv-text-code: #c9cdd6;     /* 等宽代码/日志 */
   /* —— 品牌与状态色 —— */
   --sv-accent: #4f8cff;
@@ -333,6 +334,7 @@ onUnmounted(() => offNavigate?.())
   --sv-text: #1c2333;
   --sv-text-dim: #525c6d;
   --sv-text-faint: #6d7480;
+  --sv-wordmark-grad: linear-gradient(115deg, #167b91 0%, #316ad0 48%, #7951ba 100%);
   --sv-text-code: #333c4d;
   --sv-accent: #3a78f2;
   --sv-accent-strong: #2f66d9;

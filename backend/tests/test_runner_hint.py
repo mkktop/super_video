@@ -8,6 +8,30 @@ import pytest
 from sv.server.runner import error_hint
 
 
+def test_native_utf16_padding_does_not_drop_worker_events(_own_db):
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from sv.server.runner import Runner
+    task=_own_db.new_task('in','out','model',{})
+    messages=[{'type':'started','total_frames':7},
+              {'type':'log','line':'escaped\x00payload'},
+              {'type':'progress','frames':3,'total':7},
+              {'type':'done','frames':7}]
+    async def stream():
+        yield 'native ORT warning\r\n'.encode('utf-16-le')
+        for message in messages:
+            yield b'\x00'+json.dumps(message).encode('utf-8')+b'\n'
+    events=[]
+    runner=Runner(SimpleNamespace(publish=events.append))
+    runner.proc=SimpleNamespace(stdout=stream())
+    final=asyncio.run(runner._pump_until_final(task))
+    assert final==messages[-1]
+    assert _own_db.get_task(task['id'])['total_frames']==7
+    assert _own_db.get_task(task['id'])['progress_frames']==3
+    assert next(e for e in events if e['type']=='log')['line']=='escaped\x00payload'
+
+
 def test_engine_info_lines_are_not_errors():
     """[engine] 前缀是引擎状态日志（u8 包装生效/后端回退），不能充当任务错误。"""
     assert error_hint("[engine] u8 包装生效（前后处理 GPU 化）: 2x_AnimeJaNai_HD_V3_UltraCompact_fp16_u8.onnx") is None

@@ -22,7 +22,7 @@
     "pad": 1,
     "batch_hint": 1
   },
-  "description": "真人/通用内容的 2x 均衡档（原生 fp16）：补上 x4plus 之外的 2x 空档，720p→1440p、840p→4K 这类目标不用再硬上 4x；带轻度修复倾向，压制源观感干净",
+  "description": "DIS 2x Balanced：轻量通用放大，侧重速度与重建质量折中。本条目为 Pretrain 权重，不将其视为重度压缩、去噪或真人修复专模。",
   "files": [
     {
       "name": "2x-DIS_Balanced_Pretrain_fp16.onnx",
@@ -38,5 +38,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "general_upscale"
 }

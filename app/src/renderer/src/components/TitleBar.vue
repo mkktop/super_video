@@ -9,15 +9,21 @@ const maximized = ref(false)
 const version = ref('')
 let off: (() => void) | null = null
 
-// 版本徽章展示：主版本进药丸，预发布段拆成独立「预览」小签
+// 当前版本保持低调；完整版本号通过悬停提示查看。
 const ver = computed(() => versionParts(version.value))
 
 const minimize = () => window.sv.win.minimize()
 const toggleMax = () => window.sv.win.toggleMaximize()
 const close = () => window.sv.win.close()
 
-// 启动检查发现新版本 → 版本号旁常驻提示,点击去设置页处理
-const hasUpdate = computed(() => store.update.status === 'available')
+// 更新状态只突出需要关注的操作，点击统一进入设置页。
+const updateHint = computed(() => {
+  const u = store.update
+  if (u.ready) return { text: '更新已就绪', title: `v${u.ready} 已下载，前往设置安装更新`, ready: true }
+  if (u.downloading) return { text: `下载中 ${Math.floor(u.percent)}%`, title: '正在下载更新，前往设置查看进度', ready: false }
+  if (u.status === 'available') return { text: '发现新版本', title: `可更新至 v${u.version}，前往设置查看更新`, ready: false }
+  return null
+})
 
 onMounted(async () => {
   off = window.sv.win.onMaximized((m) => (maximized.value = m))
@@ -35,16 +41,30 @@ onUnmounted(() => off?.())
         <span class="mark-sheen" aria-hidden="true" />
       </span>
       <span class="name">雨帧</span>
-      <span class="ver"><span class="ver-dot" aria-hidden="true" />v{{ ver.base }}</span>
-      <span v-if="ver.pre" class="pre">{{ ver.pre }}</span>
       <button
-        v-if="hasUpdate"
-        class="upd"
-        title="发现新版本,点击前往设置页下载"
+        v-if="version"
+        class="version"
+        :title="`当前版本 v${version} · 查看版本与更新`"
+        :aria-label="`当前版本 v${version}，查看版本与更新`"
         @click="ui.page = 'settings'"
+        @dblclick.stop
       >
-        <span class="upd-dot" />
-        v{{ store.update.version }} 可更新
+        <span class="version-number"><span class="version-prefix">v</span><span>{{ ver.base }}</span></span>
+        <span v-if="ver.pre" class="version-channel">{{ ver.pre }}</span>
+      </button>
+      <button
+        v-if="updateHint"
+        class="update-hint"
+        :class="{ ready: updateHint.ready }"
+        :title="updateHint.title"
+        :aria-label="updateHint.title"
+        @click="ui.page = 'settings'"
+        @dblclick.stop
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 11V3m0 0L5 6m3-3 3 3M3 10v3h10v-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span>{{ updateHint.text }}</span>
       </button>
     </div>
     <div class="controls">
@@ -142,85 +162,52 @@ onUnmounted(() => off?.())
   background-clip: text;
   color: transparent;
 }
-/* 版本徽章：品牌渐变微光点 + 渐变发丝描边药丸（border-box 双层背景做 1px 渐变边） */
-.ver {
+/* 版本为次级信息；更新提示使用独立的静态强调色。 */
+.version, .update-hint {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--sv-text);
+  flex-shrink: 0;
+  gap: 7px;
+  height: 24px;
+  padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 999px;
-  padding: 1px 9px 1px 7px;
-  margin-left: 2px;
-  letter-spacing: 0.2px;
-  line-height: 1.5;
-  background:
-    linear-gradient(var(--sv-fill-3), var(--sv-fill-3)) padding-box,
-    linear-gradient(90deg, rgba(var(--sv-accent-rgb), 0.55), rgba(var(--sv-accent2-rgb), 0.55)) border-box;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-.ver-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, rgb(var(--sv-accent-rgb)), rgb(var(--sv-accent2-rgb)));
-  box-shadow: 0 0 6px rgba(var(--sv-accent-rgb), 0.55);
-}
-/* 预发布通道小签：amber 系 token，紧贴版本药丸成对出现 */
-.pre {
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.5px;
-  color: var(--sv-warning);
-  background: var(--sv-warning-bg);
-  border: 1px solid rgba(var(--sv-warning-rgb), 0.38);
-  border-radius: 5px;
-  padding: 0.5px 5px;
-  margin-left: -4px;
-  line-height: 1.5;
-}
-.upd {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  border-radius: 6px;
+  font: inherit;
   font-size: 11px;
-  color: var(--sv-accent-strong);
-  background: var(--sv-accent-bg);
-  border: 1px solid rgba(var(--sv-accent-rgb), 0.45);
-  border-radius: 999px;
-  padding: 1px 10px;
-  margin-left: 6px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
   -webkit-app-region: no-drag;
-  transition: background var(--sv-dur-fast) ease, color var(--sv-dur-fast) ease, box-shadow var(--sv-dur-fast) ease;
+  transition: background var(--sv-dur-fast) ease, border-color var(--sv-dur-fast) ease, color var(--sv-dur-fast) ease;
 }
-.upd:hover {
-  background: rgba(var(--sv-accent-rgb), 0.24);
+.version {
+  margin-left: 2px;
+  color: var(--sv-text-dim);
+  background: var(--sv-fill-1);
+  border-color: var(--sv-border-soft);
+}
+.version-number { display: inline-flex; align-items: baseline; gap: 3px; font-weight: 500; letter-spacing: 0.2px; }
+.version-prefix { font-size: 10px; }
+.version-channel {
+  color: var(--sv-warning);
+  border-left: 1px solid var(--sv-border);
+  padding-left: 7px;
+  font-size: 10px;
+}
+.version:hover { color: var(--sv-text); background: var(--sv-fill-3); }
+.update-hint {
   color: var(--sv-accent-strong);
+  background: var(--sv-accent-bg);
+  font-weight: 500;
 }
-/* 有更新时太容易错过：轻微呼吸辉光提示（box-shadow 2.5s 循环） */
-@media (prefers-reduced-motion: no-preference) {
-  .upd { animation: upd-breathe 2.5s ease-in-out infinite; }
+.update-hint:hover { border-color: rgba(var(--sv-accent-rgb), 0.4); }
+.update-hint.ready { color: var(--sv-success); background: var(--sv-success-bg); }
+.version:focus-visible, .update-hint:focus-visible {
+  outline: 2px solid var(--sv-accent);
+  outline-offset: 2px;
 }
-@keyframes upd-breathe {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--sv-accent-rgb), 0); }
-  50% { box-shadow: 0 0 12px 1px rgba(var(--sv-accent-rgb), 0.45); }
-}
-.upd-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--sv-accent);
-  box-shadow: 0 0 6px rgba(var(--sv-accent-rgb), 0.9);
-  animation: upd-pulse 2s ease-in-out infinite;
-}
-@keyframes upd-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
+.brand { min-width: 0; }
+.controls { flex-shrink: 0; }
 .controls {
   display: flex;
   height: 100%;

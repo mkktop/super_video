@@ -47,6 +47,7 @@ describe('图片去水印', () => {
     expect(api.startWatermark).toHaveBeenCalledWith({
       paths: ['D:\\manga\\001.jpg', 'D:\\manga\\002.jpg'], folder: undefined, output_dir: undefined,
       mask: { unit: 'px', width: 175, height: 80, right: 0, bottom: 0 },
+      removal: 'auto',
     })
     expect(state.job.status).toBe('done')
     expect(state.active).toBe(false)
@@ -97,7 +98,7 @@ describe('图片去水印', () => {
       ] })
     await state.pickFolder()
     expect(api.watermarkPreview).toHaveBeenCalledTimes(1)
-    expect(api.watermarkPreview).toHaveBeenCalledWith('D:\\manga\\vol01\\ch01\\001.jpg', expect.any(Object))
+    expect(api.watermarkPreview).toHaveBeenCalledWith('D:\\manga\\vol01\\ch01\\001.jpg', expect.any(Object), { removal: 'auto' })
     expect(state.selected).toBe(0)
     expect(state.preview).toEqual(preview)
     expect(state.canStart).toBeTruthy()
@@ -165,5 +166,33 @@ describe('图片去水印', () => {
       files: [{ path: 'D:\\manga\\003.jpg', rel: '003.jpg' }] })
     await state.pickFolder()
     expect(state.sample).toBeNull()
+  })
+  it('切换清除方式使旧预览失效，预览和批量提交使用一致的修补方式', async () => {
+    await selectFiles()
+    state.removal = 'repair'; await flush()
+    expect(state.canStart).toBeFalsy()
+    await vi.advanceTimersByTimeAsync(250); await flush()
+    expect(api.watermarkPreview).toHaveBeenLastCalledWith(expect.any(String), expect.any(Object), { removal: 'repair' })
+    await state.start()
+    expect(api.startWatermark).toHaveBeenCalledWith(expect.objectContaining({ removal: 'repair' }))
+  })
+  it('固定区域自动识别跳过时不会允许提交批量处理', async () => {
+    vi.mocked(api.watermarkPreview).mockResolvedValue({ ...preview, detected: false, box: null, reason: '背景不均匀' })
+    await selectFiles()
+    expect(state.canStart).toBeFalsy()
+    await state.start()
+    expect(api.startWatermark).not.toHaveBeenCalled()
+  })
+  it('固定区域修补可设置样本，并把文字遮罩样本带入预览和批量处理', async () => {
+    await selectFiles(); state.removal = 'repair'
+    await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
+    expect(state.canCapture).toBeTruthy()
+    await state.captureSample()
+    expect(state.regionLocked).toBeTruthy()
+    state.selected = 1; await flush(); await vi.advanceTimersByTimeAsync(250); await flush()
+    expect(api.watermarkPreview).toHaveBeenLastCalledWith(expect.any(String), expect.any(Object),
+      expect.objectContaining({ removal: 'repair', sample: expect.objectContaining({ path: 'D:\\manga\\001.jpg' }) }))
+    await state.start()
+    expect(api.startWatermark).toHaveBeenCalledWith(expect.objectContaining({ removal: 'repair', sample: expect.any(Object) }))
   })
 })

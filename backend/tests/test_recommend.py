@@ -35,7 +35,7 @@ COMB_STATS = {"flat_ratio": 0.3, "comb_frac": 0.4, "frames": 4}
 def test_anime_content_picks_anime_model():
     rec = recommend(_info(), ANIME_STATS)
     assert rec["animated"] is True
-    assert rec["model_id"] == "realesr-animevideov3"
+    assert rec["model_id"] == "animejanai-v31-hd-balanced-sharp"
     assert rec["deband"] is True  # 480p 动画（≤600p）默认建议去色带
     assert rec["interp"] == "off"  # 补帧只提示不自动开
 
@@ -83,8 +83,8 @@ def test_interlace_from_comb_stats():
 
 
 def test_scale_rule_prefers_smallest_reaching_1080p():
-    # 480p：x3 达到 1440≥1080 → x3（比 x4 省算力）
-    assert recommend(_info(height=480), ANIME_STATS)["target_scale"] == 3
+    # AnimeJaNai 原生只支持 x2，低分辨率也必须用有效档位
+    assert recommend(_info(height=480), ANIME_STATS)["target_scale"] == 2
     # 720p：x2 → 1440 ≥1080 → x2
     assert recommend(_info(height=720), ANIME_STATS)["target_scale"] == 2
     # 1080p：x2 → 2160
@@ -96,7 +96,7 @@ def test_no_stats_still_recommends():
     """采样失败（stats=None）：按保守默认推荐（视频向模型线，最坏不踩陷阱）。"""
     rec = recommend(_info(), None)
     assert rec["animated"] is None
-    assert rec["model_id"] == "realesr-animevideov3"
+    assert rec["model_id"] == "animejanai-v31-hd-balanced-sharp"
     assert rec["deband"] is False
 
 
@@ -110,7 +110,7 @@ def test_low_fps_mentioned_in_reasons_only():
 
 def test_build_recommendation_resolves_registry():
     rec = build_recommendation(_info(), ANIME_STATS)
-    assert rec["model_id"] == "realesr-animevideov3"
+    assert rec["model_id"] == "animejanai-v31-hd-balanced-sharp"
     assert rec["model_name"]  # 非空展示名
     # 倍率落在注册表该模型真实支持的档位内（注册表档位少时收口会重算）
     from sv.models.registry import load_registry
@@ -119,6 +119,28 @@ def test_build_recommendation_resolves_registry():
 
 
 # ---- 采样帧统计（合成素材，真实 ffmpeg） ----
+def test_recommendation_skips_models_exceeding_vram_and_recomputes_scale():
+    # 720p 真人首选 x4plus（6GB）；4GB 设备改用轻量视频模型，并回到 x2。
+    rec = build_recommendation(_info(height=720), LIVE_STATS, gpu_vram_gb=4)
+    assert rec["model_id"] == "realesr-animevideov3"
+    assert rec["target_scale"] == 2
+    assert any("1440p" in reason for reason in rec["reasons"])
+    assert not any("2880p" in reason for reason in rec["reasons"])
+
+
+def test_recommendation_reports_no_fitting_model():
+    rec = build_recommendation(_info(), ANIME_STATS, gpu_vram_gb=0.5)
+    assert rec["model_id"] is None
+    assert rec["model_name"] == ""
+    assert rec["target_scale"] is None
+    assert any("显存" in reason for reason in rec["reasons"])
+
+
+def test_unknown_vram_keeps_normal_recommendation():
+    rec = build_recommendation(_info(), ANIME_STATS, gpu_vram_gb=None)
+    assert rec["model_id"] == "animejanai-v31-hd-balanced-sharp"
+
+
 
 
 def _make(path: Path, vf: str | None = None) -> MediaInfo:
@@ -210,3 +232,29 @@ def test_probe_recommend_silent_on_analysis_failure(client, tmp_path, monkeypatc
     r = client.post("/api/probe", json={"path": str(clip), "recommend": True})
     assert r.status_code == 200
     assert "recommend" not in r.json()
+
+
+def test_probe_recommendation_uses_device_vram(client, tmp_path, monkeypatch):
+    clip = tmp_path / "low_vram.mp4"
+    _make(clip)
+    monkeypatch.setattr("sv.pipeline.analyze.sample_frame_stats", lambda info: ANIME_STATS)
+    monkeypatch.setattr("sv.server.routes.models.cached_hardware",
+                        lambda: {"gpus": [{"vram_gb": 0.5}]})
+    result = client.post("/api/probe", json={"path": str(clip), "recommend": True})
+    assert result.status_code == 200
+    assert result.json()["ok"] is True
+    assert result.json()["recommend"]["model_id"] is None
+
+@pytest.mark.parametrize("color,model,scale", [(False, "mangajanai", 2), (True, "illustrationjanai-4x-dat2", 4)])
+def test_image_recommendation(client, tmp_path, color, model, scale):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (100, 160), "white")
+    ImageDraw.Draw(im).rectangle((10, 10, 70, 90), fill="red" if color else "black")
+    path = tmp_path / "page.png"
+    im.save(path)
+    result = client.post("/api/probe", json={"path": str(path), "recommend": True})
+    assert result.status_code == 200, result.text
+    rec = result.json()["recommend"]
+    assert rec["model_id"] == model
+    assert rec["target_scale"] == scale
+    assert not rec["deinterlace"] and not rec["deband"]

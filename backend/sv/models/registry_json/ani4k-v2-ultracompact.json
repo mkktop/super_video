@@ -16,7 +16,7 @@
   "vram_gb": 2,
   "tile_hint": 0,
   "fp16": true,
-  "description": "Ani4K v2 极速档：1080p→4K 速度实时级，批量快速出片；不挑源分辨率，任意边长直接处理",
+  "description": "面向动漫视频的轻量 2x 放大候选，UltraCompact 档偏速度；低分辨率源建议先与修复模型对比。",
   "io": {
     "color": "rgb",
     "range": "0-1",
@@ -37,5 +37,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "anime_video"
 }

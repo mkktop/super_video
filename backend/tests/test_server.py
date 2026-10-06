@@ -249,7 +249,13 @@ def test_resume_api(client, clips):
         assert client.post(f"/api/tasks/{tid}/resume").status_code == 409
         return
     assert client.post(f"/api/tasks/{tid}/cancel").status_code == 200
-    t = wait_status(client, tid, ("canceled",), timeout=30)
+    t = wait_status(client, tid, ("canceled", "done"), timeout=30)
+    if t["status"] == "done":
+        # A done event may already be in flight when cancel is accepted. Product
+        # semantics preserve the completed result; the completed task cannot resume.
+        assert out.exists()
+        assert client.post(f"/api/tasks/{tid}/resume").status_code == 409
+        return
     assert client.post(f"/api/tasks/{tid}/resume").status_code == 200
     # 慢机上断言前 runner 可能已把任务领走：queued/running 都是"续跑已生效"
     st = client.get(f"/api/tasks/{tid}").json()["status"]

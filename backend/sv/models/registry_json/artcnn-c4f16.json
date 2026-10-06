@@ -1,6 +1,6 @@
 {
   "id": "artcnn-c4f16",
-  "name": "ArtCNN C4F16（极速）",
+  "name": "ArtCNN C4F16（轻量重建）",
   "vendor": "Artoriuz",
   "license": "MIT",
   "engine": "onnx",
@@ -12,7 +12,7 @@
     "anime"
   ],
   "temporal": false,
-  "speed": "fast",
+  "speed": "balanced",
   "vram_gb": 1,
   "tile_hint": 0,
   "fp16": true,
@@ -22,7 +22,7 @@
     "pad": 1,
     "batch_hint": 1
   },
-  "description": "超轻量动漫 2x（权重仅 50KB）：老显卡/核显也能跑的极速档，全卷积任意边长免对齐；画质弱于 R8F64，速度优先时选它",
+  "description": "动漫亮度通道 2x 重建：C4F16 参数较少，适合较干净素材；不直接重建色度。当前颜色处理有 CPU 开销，实际速度低于 AnimeJaNai 快速档。",
   "files": [
     {
       "name": "ArtCNN_C4F16.onnx",
@@ -38,5 +38,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "anime_restore"
 }

@@ -110,6 +110,8 @@ def _load_onnx_engine(
         if log:
             log({"type": "log", "line": f"生成 fp16 变体: {weight.name}"})
         weight = ensure_fp16_file(weight)
+        if log and not weight.stem.endswith("_fp16"):
+            log({"type": "log", "line": "fp16 转换未完成，当前使用 fp32 原件"})
     used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
 
     def _oom(e: Exception) -> bool:
@@ -203,7 +205,7 @@ def _load_onnx_engine(
                     log({"type": "log", "line": "TensorRT 加速组件已加载"})
         if log:
             log({"type": "log", "line":
-                 "TensorRT 引擎加载中：新模型或新分辨率首次使用需编译引擎（约 1~2 分钟），完成后可直接加载"})
+                 "TensorRT 引擎加载中：新模型或新分辨率首次编译可能需要数分钟，较大模型耗时更长；完成后可复用缓存"})
     engine = None
     if entry is not None and entry["sig"] != sig:
         # 本槽换签名重建：先释放本槽上一个常驻引擎（DML/CUDA 资源回收靠析构）；
@@ -225,6 +227,14 @@ def _load_onnx_engine(
                 weight, scale, io=spec.io, tile=tile, batch=batch,
                 device=ort_device, validate_hw=warmup_hw, **extra)
             engine.load()
+            # Requested TRT may silently fall back when its component is absent
+            # or initialization fails. CUGAN must never execute that unsafe chain.
+            if ("cugan" in spec.id.lower()
+                    and engine.provider_used[:1] not in (
+                        ["TensorrtExecutionProvider"], ["CPUExecutionProvider"])):
+                raise RuntimeError(
+                    "CUGAN 的 TensorRT 未成功启用，已阻止回退到不稳定的 DirectML/CUDA。"
+                    + _cugan_alt_hint())
             import numpy as np
             # 预热兼显存探测兼输出探测。必须用源帧真实尺寸：DML 会话一旦跑过 64x64 这类
             # 小形状，后续真实尺寸的执行路径被拖慢且不可逆（实测 960x720：
@@ -337,6 +347,21 @@ def _load_onnx_engine(
                         log({"type": "log", "line":
                              "CUDA 执行层在个别算子上崩溃，已切换为 CPU 推理重试（速度较慢）"})
                 continue
+            # DML 某些 fp16 导出在 Conv/Add 等算子上报 8007023E，设备未被移除。
+            # 仅识别该执行错误；若原件存在，保持 GPU 后端改用 fp32 重试一次。
+            dml_message = (str(e) + " " + (_unmask(e) or "")).lower().replace("\\", "/")
+            if (ort_device == "auto" and "providers/dml/" in dml_message
+                    and "8007023e" in dml_message and weight.stem.endswith("_fp16")):
+                original = weight.with_name(weight.stem[:-5] + weight.suffix)
+                if original.exists():
+                    engine = None
+                    import gc
+                    gc.collect()
+                    weight = original
+                    if log:
+                        log({"type": "log", "line":
+                             "DirectML 无法执行该模型的 fp16 算子，已改用 fp32 原件重试"})
+                    continue
             # 最后一次尝试仍失败必须 raise：带着没加载成功的 engine 继续走，
             # 后面会以更难懂的方式崩（如 provider_used AttributeError）
             if not _oom(e):
@@ -375,7 +400,8 @@ def _load_onnx_engine(
         raise RuntimeError("引擎加载重试次数耗尽")  # 理论不可达：链上每档要么 continue 要么 raise
     _ENGINE_CACHE.pop(slot, None)  # 本槽单条语义：换签名即释放旧引擎（显存）再换入
     # 降链可能已把转换版 fp16 换回 fp32 原件，精度口径按落定权重重算
-    used_precision = "fp16" if weight.stem.endswith("_fp16") else "fp32"
+    used_precision = "fp16" if (weight.stem.endswith("_fp16")
+                                or getattr(engine, "_in_fp16", False)) else "fp32"
     # 设备移除兜底出的 CPU 引擎不缓存（瞬态病因，见 except 分支注释）
     if not transient_dev_fallback:
         _ENGINE_CACHE[slot] = {"sig": sig, "engine": engine,

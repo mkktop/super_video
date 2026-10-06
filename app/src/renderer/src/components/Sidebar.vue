@@ -7,22 +7,22 @@ const items = computed(() => [
   { key: 'home', label: '首页', icon: 'home' },
   {
     key: 'tasks',
-    label: '任务',
+    label: '任务队列',
     icon: 'tasks',
     // 蓝徽标=在跑/排队数；红徽标=失败数（无人盯也会错过失败，给个常驻角标）
     badge: store.tasks.filter((t) => t.status === 'running' || t.status === 'queued').length,
     failed: store.tasks.filter((t) => t.status === 'failed').length,
   },
   { key: 'newtask', label: '新建任务', icon: 'plus' },
-  { key: 'models', label: '模型市场', icon: 'cube' },
+  { key: 'models', label: '模型库', icon: 'cube' },
   { key: 'mcompare', label: '模型对比', icon: 'vs' },
   { key: 'trim', label: '视频剪切', icon: 'cut' },
   { key: 'imagesr', label: '图片超分', icon: 'image' },
   { key: 'mangasr', label: '漫画超分', icon: 'manga' },
   { key: 'watermark', label: '图片去水印', icon: 'erase' },
-  { key: 'perf', label: '性能', icon: 'pulse' },
-  { key: 'logs', label: '日志', icon: 'log' },
-  { key: 'aiassistant', label: 'MCP 服务', icon: 'spark' },
+  { key: 'perf', label: '性能监控', icon: 'pulse' },
+  { key: 'logs', label: '运行日志', icon: 'log' },
+  { key: 'aiassistant', label: 'AI 接入', icon: 'spark' },
   { key: 'settings', label: '设置', icon: 'gear' },
 ])
 
@@ -117,7 +117,7 @@ function navTo(key: string) {
       <div v-if="miniPerf" class="foot-perf">{{ miniPerf }}</div>
       <div class="foot">
         <span class="dot" :class="store.connected ? 'on' : 'off'" />
-        <span class="foot-text">{{ store.connected ? '后端已连接' : '连接中断' }}</span>
+        <span class="foot-text">{{ store.connected ? '本地服务已连接' : '本地服务连接中断' }}</span>
       </div>
     </div>
   </aside>

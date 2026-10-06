@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import shutil
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -186,9 +187,19 @@ def probe_media(body: ProbeBody) -> dict:
             from ...pipeline.analyze import sample_frame_stats
             from ...pipeline.recommend import build_recommendation
 
-            stats = sample_frame_stats(info)
+            from ..consts import _IMAGE_EXTS
+            if p.suffix.lower() in _IMAGE_EXTS:
+                from PIL import Image
+                from .tasks import _page_is_color
+                with Image.open(p) as im:
+                    stats = {"image_type": "manga_color" if _page_is_color(im) else "manga_bw"}
+            else:
+                stats = sample_frame_stats(info)
             if stats is not None:
-                resp["recommend"] = build_recommendation(info, stats)
+                hw = cached_hardware()
+                gpu_vram = next((g["vram_gb"] for g in hw.get("gpus", [])
+                                 if g.get("vram_gb")), None)
+                resp["recommend"] = build_recommendation(info, stats, gpu_vram_gb=gpu_vram)
         except Exception as e:  # noqa: BLE001
             log.warning(f"源分析失败（跳过推荐）: {e}")
     return resp
@@ -202,6 +213,10 @@ def get_models() -> list[dict]:
     )
     out = []
     for spec in load_registry().values():
+        # PyTorch is excluded from the frozen sidecar; do not offer unusable
+        # task models in the installed UI or the MCP catalogue.
+        if getattr(sys, "frozen", False) and spec.engine == "torch":
+            continue
         bundled = bool(spec.files) and all(
             (BUNDLED_DIR / f["name"]).exists() for f in spec.files
         )
@@ -213,6 +228,7 @@ def get_models() -> list[dict]:
             "id": spec.id, "name": spec.name, "scale": spec.scale,
             "kind": spec.kind,
             "content": spec.content, "speed": spec.speed,
+            "category": spec.category, "version": spec.version, "temporal": spec.temporal,
             "scenes": spec.scenes,  # 适用场景标签：video/manga/image（前端卡片角标+筛选）
             "vram_gb": spec.vram_gb, "description": spec.description,
             "tile_hint": spec.tile_hint,

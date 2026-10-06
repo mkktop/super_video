@@ -16,7 +16,10 @@ OLD_CODECS = {
 }
 
 # 内容类型 → 模型偏好（前者缺注册时顺延）；只推荐 onnx 系（torch 需独立环境）
-_ANIME_PREF = ["realesr-animevideov3", "real-cugan"]
+DEFAULT_ANIME_MODEL = "animejanai-v31-hd-balanced-sharp"
+DEFAULT_MANGA_MODEL = "mangajanai"
+DEFAULT_COLOR_MODEL = "illustrationjanai-4x-dat2"
+_ANIME_PREF = [DEFAULT_ANIME_MODEL, "realesr-animevideov3", "real-cugan"]
 _LIVE_PREF = ["realesrgan-x4plus", "realesr-animevideov3"]
 
 _INTERLACED_FIELD_ORDER = {"tt", "bb", "tb", "bt"}
@@ -30,13 +33,23 @@ def _pick_scale(scales: list[int], h: int) -> int:
 
 def recommend(info: MediaInfo, stats: dict | None) -> dict:
     """纯规则推荐（不查注册表，模型可用性由 build_recommendation 收口）。"""
+    if stats and stats.get("image_type") in ("manga_bw", "manga_color"):
+        color = stats["image_type"] == "manga_color"
+        return {
+            "model_id": DEFAULT_COLOR_MODEL if color else DEFAULT_MANGA_MODEL,
+            "target_scale": 4 if color else 2,
+            "deinterlace": False, "deband": False, "interp": "off", "animated": None,
+            "content_type": stats["image_type"],
+            "reasons": ["彩色漫画/插画优先使用 IllustrationJaNai DAT2 x4" if color
+                        else "黑白漫画优先使用 MangaJaNai，按源高度自动选择权重"],
+        }
     reasons: list[str] = []
     animated: bool | None = None
     if stats and stats.get("frames"):
         animated = stats.get("flat_ratio", 0.0) >= FLAT_ANIME_MIN
         pct = stats["flat_ratio"] * 100
         reasons.append(
-            f"采样 {stats['frames']} 帧平坦像素占 {pct:.0f}%，判定为"
+            f"采样 {stats['frames']} 帧中平坦区域占 {pct:.0f}%，素材更接近"
             + ("动画内容（大色块平涂）" if animated else "真人/实拍内容（纹理连续）")
         )
     old_codec = info.video_codec in OLD_CODECS
@@ -60,13 +73,13 @@ def recommend(info: MediaInfo, stats: dict | None) -> dict:
         if info.height >= 960:
             model_pref = ["realesr-animevideov3", "realesrgan-x4plus"]
             reasons.append(
-                f"真人高清源（{info.height}p）：x2 超分避开 8K 编码上限，画质与速度更稳")
+                f"真人高清源（{info.height}p）：优先推荐 x2，减少输出到 8K 时可能遇到的编码限制")
         else:
             model_pref = _LIVE_PREF
     else:
         model_pref = _ANIME_PREF
     # 倍率先按首选模型的档位估（模型缺失时 build_recommendation 会换备选并重算）
-    scales = [2, 3, 4] if model_pref[0] == "realesr-animevideov3" else [4]
+    scales = [2] if model_pref[0] == DEFAULT_ANIME_MODEL else ([2, 3, 4] if model_pref[0] == "realesr-animevideov3" else [4])
     target_scale = _pick_scale(scales, info.height)
     reasons.append(f"源高 {info.height}px，推荐 x{target_scale}（→ {info.height * target_scale}p）")
 
@@ -92,7 +105,7 @@ def recommend(info: MediaInfo, stats: dict | None) -> dict:
     }
 
 
-def build_recommendation(info: MediaInfo, stats: dict | None) -> dict:
+def build_recommendation(info: MediaInfo, stats: dict | None, *, gpu_vram_gb: float | None = None) -> dict:
     """recommend() + 注册表收口：首选模型缺失/无该倍率时顺延备选并重算倍率。"""
     from ..models.registry import load_registry
 
@@ -101,15 +114,28 @@ def build_recommendation(info: MediaInfo, stats: dict | None) -> dict:
     pref = _ANIME_PREF if rec["animated"] is not False else (
         ["realesr-animevideov3", "realesrgan-x4plus"]
         if info.height >= 960 else _LIVE_PREF)
+    if rec.get("content_type"):
+        pref = [rec["model_id"]]
     chosen = next((m for m in pref
                    if m in specs and specs[m].kind == "sr" and specs[m].engine == "onnx"
-                   and specs[m].scale), None)
+                   and specs[m].scale
+                   and (gpu_vram_gb is None or specs[m].vram_gb <= gpu_vram_gb)), None)
     if chosen is None:  # 注册表大改导致偏好全缺：如实透出"无法推荐模型"
         rec["model_id"] = None
         rec["model_name"] = ""
+        rec["target_scale"] = None
+        rec["reasons"] = [reason for reason in rec["reasons"]
+                          if not reason.startswith("源高 ") and not reason.startswith("真人高清源（")]
+        rec["reasons"].append("当前推荐候选中没有适合本机显存的模型" if gpu_vram_gb is not None
+                              else "当前没有可用的推荐候选模型")
         return rec
+    original_model = rec["model_id"]
     rec["model_id"] = chosen
     rec["model_name"] = specs[chosen].name
-    if rec["target_scale"] not in specs[chosen].scale:
+    if chosen != original_model or rec["target_scale"] not in specs[chosen].scale:
         rec["target_scale"] = _pick_scale(specs[chosen].scale, info.height)
+        rec["reasons"] = [reason for reason in rec["reasons"]
+                          if not reason.startswith("源高 ") and not reason.startswith("真人高清源（")]
+        rec["reasons"].append(f"使用可用候选 {specs[chosen].name}，源高 {info.height}px，"
+                              f"推荐 x{rec['target_scale']}（→ {info.height * rec['target_scale']}p）")
     return rec

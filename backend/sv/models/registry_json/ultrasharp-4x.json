@@ -21,7 +21,7 @@
     "range": "0-1",
     "pad": 1
   },
-  "description": "Upscayl 生态最出圈的社区照片 4x：锐利干净、泛用性极强；官方 ONNX 导出",
+  "description": "通用照片 4x 放大候选，偏锐利观感；可能强化边缘、噪点或纹理，锐度不等同于真实细节恢复。",
   "files": [
     {
       "name": "4x-UltraSharp.onnx",
@@ -36,5 +36,6 @@
   "u8_wrap": true,
   "scenes": [
     "image"
-  ]
+  ],
+  "category": "photo_restore"
 }

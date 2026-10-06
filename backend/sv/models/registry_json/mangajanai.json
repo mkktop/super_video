@@ -27,7 +27,7 @@
     "batch_hint": 1,
     "auto_variant": "height"
   },
-  "description": "黑白漫画专用超分：按源图高度自动选 7 档专训权重之一（网点频率对位，还原印刷网点、去 JPEG/摩尔纹），2x/4x 各 7 档；彩色页请用 IllustrationJaNai",
+  "description": "黑白漫画专用，按源高度自动选择 7 档权重，提供 2x/4x。针对文字、线条、网点、JPEG 与摩尔纹退化训练；彩页应使用 IllustrationJaNai。",
   "files": [
     {
       "name": "2x_MangaJaNai_1200p.onnx",
@@ -188,5 +188,6 @@
   "scenes": [
     "manga",
     "image"
-  ]
+  ],
+  "category": "manga_bw"
 }

@@ -9,15 +9,14 @@
     4
   ],
   "content": [
-    "real",
-    "anime"
+    "general"
   ],
   "temporal": false,
   "speed": "slow",
   "vram_gb": 6,
   "tile_hint": 512,
   "fp16": false,
-  "description": "x4plus 的 PyTorch 直跑版（需独立 CUDA 环境）：与 ONNX 版同权重同效果，同样支持分块与断点续跑，供对比与备用",
+  "description": "Real-ESRGAN x4plus 的 PyTorch 运行版本，与 ONNX 条目使用同一模型权重。当前安装包未内置 PyTorch，供源码独立 CUDA 环境使用；TensorRT 组件不提供此依赖。运行后端不构成更高画质档，安装版请选 ONNX 条目。",
   "io": {
     "arch": "rrdbnet"
   },
@@ -35,5 +34,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "photo_restore"
 }

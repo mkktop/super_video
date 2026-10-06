@@ -24,6 +24,7 @@ a = Analysis(
         "sv.engines.rife", "sv.engines.torch_engine",
         # u8 图手术 / fp16 转换是惰性 import，静态分析可能漏收
         "onnx", "onnxconverter_common",
+        "cv2",  # 图片去水印的 CPU 局部修补，使用 PyInstaller 的 OpenCV hook 收集 DLL
     ],
     hookspath=[],
     excludes=["tkinter", "matplotlib", "torch", "IPython", "jedi"],

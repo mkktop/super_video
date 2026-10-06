@@ -10,6 +10,10 @@ DML 提速 1.36~1.73x。
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+from importlib.metadata import version, PackageNotFoundError
+import json
+import os
 
 from .registry import ModelSpec, model_dir
 
@@ -33,10 +37,47 @@ def ensure_fp16_file(fp32_file: Path) -> Path:
     alt = fp16_path(fp32_file)
     if alt.exists() or BUNDLED_DIR in fp32_file.parents:
         return alt if alt.exists() else fp32_file
+    marker = None
+    try:
+        from ..paths import TEMP_DIR
+        versions = {}
+        for package in ('onnx', 'onnxconverter-common', 'onnxruntime-directml', 'onnxruntime-gpu'):
+            try:
+                versions[package] = version(package)
+            except PackageNotFoundError:
+                versions[package] = None
+        with fp32_file.open('rb') as stream:
+            source_hash = hashlib.file_digest(stream, 'sha256').hexdigest()
+        fingerprint = json.dumps({'source': source_hash, 'versions': versions,
+                                  'blocked_ops': _BLOCK_LIST_EXTRA, 'revision': 1}, sort_keys=True)
+        key = hashlib.sha256(fingerprint.encode()).hexdigest()
+        marker = TEMP_DIR / 'fp16_failures' / f'{key}.json'
+        if marker.exists():
+            return fp32_file
+    except OSError:
+        pass  # Missing/unreadable source follows the existing graceful fallback.
     try:
         convert_file(fp32_file, alt)
         return alt
-    except Exception:  # noqa: BLE001 — 任何转换问题都优雅回退 fp32
+    except Exception as exc:  # noqa: BLE001 — 任何转换问题都优雅回退 fp32
+        # Graph/type/dependency failures remain reproducible for this model/version.
+        # Resource and filesystem failures may recover without changing dependencies.
+        transient = isinstance(exc, (MemoryError, OSError)) or any(
+            word in str(exc).lower() for word in ('memory', 'alloc', 'space', 'permission', 'denied'))
+        if marker is not None and not transient:
+            temporary = marker.with_name(f'{marker.stem}.{os.getpid()}.tmp')
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                temporary.write_text(json.dumps({'fingerprint': json.loads(fingerprint),
+                    'error': f'{type(exc).__name__}: {exc}'}, ensure_ascii=False), encoding='utf-8')
+                temporary.replace(marker)
+            except OSError:
+                pass
+            finally:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
         return fp32_file
 
 

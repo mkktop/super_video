@@ -16,7 +16,7 @@
   "speed": "fast",
   "vram_gb": 2,
   "tile_hint": 0,
-  "description": "动漫视频专用：专为视频内容训练、成片稳定不易闪烁；1080p→4K 选 x2，480p / 720p 老动画升清用 x4",
+  "description": "面向动漫视频的轻量逐帧超分，提供 x2/x3/x4 权重。适合速度优先；没有跨帧一致性约束，运动时的闪烁需用视频片段检查。",
   "io": {
     "color": "bgr",
     "range": "0-1",
@@ -48,5 +48,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "anime_video"
 }

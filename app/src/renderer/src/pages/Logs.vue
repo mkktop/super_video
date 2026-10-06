@@ -67,15 +67,15 @@ function onVisible() {
   <div class="logs-page">
     <div class="page-head">
       <div>
-        <h1>服务日志</h1>
-        <p class="sub">sidecar 运行日志 · 最近 300 行 · 3 秒自动刷新</p>
+        <h1>运行日志</h1>
+        <p class="sub">本地处理服务的最近 300 行日志，每 3 秒自动刷新</p>
       </div>
       <div class="head-actions">
         <NInput
           v-model:value="query"
           size="small"
           clearable
-          placeholder="过滤关键字…"
+          placeholder="输入关键词筛选日志"
           style="width: 200px"
         />
         <span class="as-label">自动滚动</span>
@@ -90,7 +90,7 @@ function onVisible() {
         v-if="!lines.length"
         variant="log"
         title="暂无日志"
-        desc="sidecar 启动后运行日志会显示在这里"
+        desc="本地处理服务启动后，运行日志会显示在这里"
       />
       <EmptyState
         v-else-if="!shown.length"

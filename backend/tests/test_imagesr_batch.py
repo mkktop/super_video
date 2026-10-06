@@ -85,10 +85,11 @@ def test_real_photo_entries_semantics():
 
 
 def test_illustrationjanai_semantics():
-    """彩色页系：2x 为官方 fp16 导出（不再转换、禁包装），4x 双架构分档。"""
+    """彩色页系：2x 原生 fp16，DML 兼容转换后允许包装，4x 双架构。"""
     specs = load_registry()
     fast = specs["illustrationjanai-2x"]
-    assert fast.fp16 is False and fast.u8_wrap is False
+    assert fast.fp16 is False and fast.u8_wrap is True
+    assert fast.io['dml_opset'] == 20
     assert fast.io.get("batch_hint") == 1 and fast.speed == "fastest"
     dat2 = specs["illustrationjanai-4x-dat2"]
     assert dat2.speed == "slow" and dat2.tile_hint == 256
@@ -288,7 +289,7 @@ def test_local_weights_match_manifest():
 @pytest.mark.parametrize("mid,scale,tile,expect_wrap", [
     ("mangajanai", 2, 0, True),
     ("hat-real-x4", 4, 256, False),
-    ("illustrationjanai-2x", 2, 0, False),
+    ("illustrationjanai-2x", 2, 0, True),
     ("ultrasharp-4x", 4, 0, True),
     ("seemore-b", 3, 256, False),
 ])

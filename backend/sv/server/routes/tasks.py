@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -236,6 +236,8 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
     """
     from ..consts import _IMAGE_EXTS, _IMAGE_TASK_KINDS
 
+    _require_model_runtime(spec)
+
     params_in = dict(body.params)
     kind = str(params_in.get("kind") or "image")
     if kind not in _IMAGE_TASK_KINDS:
@@ -251,6 +253,7 @@ def _create_image_task(body: TaskCreate, spec) -> dict:
         except KeyError:
             raise HTTPException(
                 404, f"未知的彩色页模型 {model_id_color}") from None
+        _require_model_runtime(color_spec)
     inputs_raw = list(body.inputs) if body.inputs else [body.input]
     if not inputs_raw or any(not i for i in inputs_raw):
         raise HTTPException(400, "未提供输入图片")
@@ -442,6 +445,12 @@ def create_task(body: TaskCreate) -> dict:
         return _create_task(body)
 
 
+def _require_model_runtime(spec) -> None:
+    import sys
+    if getattr(sys, "frozen", False) and spec.engine == "torch":
+        raise HTTPException(400, "当前安装版不包含 PyTorch，请选择 Real-ESRGAN x4plus ONNX 模型")
+
+
 def _create_task(body: TaskCreate) -> dict:
     from ..consts import _AUDIO_MODES, _CODECS, _CONTAINERS, _IMAGE_EXTS, _PRESETS_XCODE
 
@@ -462,6 +471,7 @@ def _create_task(body: TaskCreate) -> dict:
         if body.model_id not in specs:
             raise HTTPException(404, f"未知模型 {body.model_id}")
         spec = specs[body.model_id]
+        _require_model_runtime(spec)
         if input_path.suffix.lower() in _IMAGE_EXTS:
             return _create_image_task(body, spec)
         info = probe(input_path)
@@ -673,11 +683,14 @@ def get_tasks(q: str = "") -> list[dict]:
 
 
 @router.get("/api/tasks/{task_id}/sr-log")
-def task_sr_log(task_id: str):
+def task_sr_log(task_id: str, n: int | None = Query(default=None, ge=1, le=500)):
     """超分性能日志文本（sr_profiling 开启时任务结束落盘；无则 404）。"""
     p = SR_LOG_DIR / f"{task_id}.log"
     if not p.is_file():
         raise HTTPException(404, "该任务没有性能日志")
+    if n is not None:
+        from ...utils.log_tail import tail_lines
+        return PlainTextResponse("\n".join(tail_lines(p, n)))
     return PlainTextResponse(p.read_text(encoding="utf-8", errors="replace"))
 
 

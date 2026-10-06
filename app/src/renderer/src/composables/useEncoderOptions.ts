@@ -27,7 +27,7 @@ export function useEncoderOptions(
   ])
   const containerOptions = [
     { label: 'MP4（兼容性最好）', value: 'mp4' },
-    { label: 'MKV（字幕/音频全兼容）', value: 'mkv' },
+    { label: 'MKV（适合保留多音轨与字幕）', value: 'mkv' },
     { label: 'MOV（QuickTime）', value: 'mov' },
   ]
   // 解码器：单文件按本文件实测（probe 返回 decoder map，含源编码是否支持）；

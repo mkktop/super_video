@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { ModelInfo } from '../api'
 import { store } from '../store'
+import { DEFAULT_ANIME_MODEL } from './modelDefaults'
 import type { Ref } from 'vue'
 
 export const SCENES = ['video', 'manga', 'image'] as const
@@ -24,7 +25,8 @@ export function useModelOptions(modelId: Ref<string>, targetScale: Ref<number>) 
       .filter((m) => m.kind !== 'interp')
       .filter((m) => scene.value === 'all' || hasScene(m, scene.value))
       // !! 归一防 NaN：bundled 缺省（undefined）时 Number(undefined||false) 会让比较器失效、排序静默不生效
-      .sort((a, b) => Number(!!(b.installed || b.bundled)) - Number(!!(a.installed || a.bundled))))
+      .sort((a, b) => Number(b.id === DEFAULT_ANIME_MODEL) - Number(a.id === DEFAULT_ANIME_MODEL)
+        || Number(!!(b.installed || b.bundled)) - Number(!!(a.installed || a.bundled))))
   const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
   const scaleOptions = computed(() =>
     (selectedModel.value?.scale ?? []).map((s) => ({ label: `x${s}`, value: s })),
@@ -48,9 +50,10 @@ export function useModelOptions(modelId: Ref<string>, targetScale: Ref<number>) 
   /** 选模型：新模型支持当前倍率则保留，否则回落到最小倍率 */
   function selectModel(id: string) {
     const spec = store.models.find((m) => m.id === id)
-    if (!spec || !spec.vram_ok) return
+    if (!spec || !spec.vram_ok) return false
     modelId.value = id
     if (!spec.scale.includes(targetScale.value)) targetScale.value = Math.min(...spec.scale)
+    return true
   }
 
   return {

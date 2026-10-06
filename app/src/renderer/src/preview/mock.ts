@@ -8,6 +8,8 @@
  */
 
 // BASE 指向 vite 预览服务器自身：<img>/<video> 的资源请求不走页面 fetch，
+import { DEFAULT_ANIME_MODEL } from '../composables/modelDefaults'
+
 // 由 vite.preview.config.ts 的中间件应答 SVG；JSON 类 /api 仍被下方 fetch 替身拦截。
 const BASE = window.location.origin
 
@@ -17,14 +19,21 @@ const now = () => Math.floor(Date.now() / 1000)
 
 const MODELS = [
   {
+    id: DEFAULT_ANIME_MODEL, name: 'AnimeJaNai V3.1 HD Balanced Sharp（均衡·锐利）',
+    scale: [2], kind: 'sr', content: ['anime'], category: 'anime_video',
+    speed: 'fast', scenes: ['video', 'image'], vram_gb: 2, tile_hint: 0, engine: 'onnx',
+    description: '动漫 HD 2x 默认推荐，偏锐利线条；建议先试跑片段检查噪声与轮廓。',
+    installed: true, bundled: true, size_mb: 2, vram_ok: true,
+  },
+  {
     id: 'anj-hd-x2', name: 'AnimeJaNai V2 HD x2', scale: [2], kind: 'sr', content: ['anime'],
-    speed: 'fast', scenes: ['hd', 'web'], vram_gb: 2, tile_hint: 0, engine: 'onnx',
+    speed: 'fast', scenes: ['video', 'image'], vram_gb: 2, tile_hint: 0, engine: 'onnx',
     description: '动漫 1080p 及以下素材的极速首选，原生 fp16，锐利且不失笔触',
     installed: true, bundled: true, size_mb: 62, vram_ok: true,
   },
   {
     id: 'anj-hd-x4', name: 'AnimeJaNai V2 HD x4', scale: [4], kind: 'sr', content: ['anime'],
-    speed: 'fast', scenes: ['hd'], vram_gb: 3, tile_hint: 0, engine: 'onnx',
+    speed: 'fast', scenes: ['video', 'image'], vram_gb: 3, tile_hint: 0, engine: 'onnx',
     description: '动漫素材一步到 4K 的主力模型，线条干净、噪点控制好',
     installed: true, bundled: true, size_mb: 62, vram_ok: true,
   },
@@ -43,26 +52,26 @@ const MODELS = [
   },
   {
     id: 'realesr-x4', name: 'RealESRGAN x4plus', scale: [4], kind: 'sr', content: ['real'],
-    speed: 'medium', scenes: ['old', 'hd'], vram_gb: 4, tile_hint: 256, engine: 'onnx',
+    speed: 'medium', scenes: ['video', 'image'], vram_gb: 4, tile_hint: 256, engine: 'onnx',
     description: '真人/实拍通用超分，老片修复常客，对压缩噪声鲁棒',
     installed: true, bundled: false, size_mb: 134, vram_ok: true,
   },
   {
     id: 'cugan-x2', name: 'CUGAN 保守 x2', scale: [2], kind: 'sr', content: ['anime'],
-    speed: 'slow', scenes: ['old'], vram_gb: 6, tile_hint: 256, engine: 'onnx',
+    speed: 'slow', scenes: ['video', 'image'], vram_gb: 6, tile_hint: 256, engine: 'onnx',
     description: '重降噪路线：适合噪点密集的老动画源，速度换干净',
     installed: false, bundled: false, size_mb: 256, vram_ok: true,
     denoise_levels: [0, 1, 2, 3],
   },
   {
     id: 'artcnn-x4', name: 'ArtCNN x4', scale: [4], kind: 'sr', content: ['anime'],
-    speed: 'fast', scenes: ['web'], vram_gb: 1.5, tile_hint: 0, engine: 'onnx',
+    speed: 'fast', scenes: ['video', 'image'], vram_gb: 1.5, tile_hint: 0, engine: 'onnx',
     description: '轻量 CNN，低配显卡也能跑得动的动漫 x4',
     installed: false, bundled: false, size_mb: 24, vram_ok: true,
   },
   {
     id: 'swinir-x4', name: 'SwinIR-real x4', scale: [4], kind: 'sr', content: ['real'],
-    speed: 'slow', scenes: ['old', 'hd'], vram_gb: 8, tile_hint: 192, engine: 'onnx',
+    speed: 'slow', scenes: ['video', 'image'], vram_gb: 8, tile_hint: 192, engine: 'onnx',
     description: '实拍修复画质天花板之一，代价是显存与速度',
     installed: false, bundled: false, size_mb: 512, vram_ok: false,
     vram_note: '推荐 ≥12GB 显存；本机 12GB 可跑但需小分块',
@@ -346,13 +355,13 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
       )
       return Promise.resolve(json({ width: 1100, height: 1645, box: [x, y, right, bottom], original: svg(false), processed: svg(true),
         detected: body.mode === 'smart' && body.sample ? true : null,
-        score: body.mode === 'smart' && body.sample ? .99 : null, reason: '' }))
+        score: body.mode === 'smart' && body.sample ? .99 : null, reason: '', method: 'white' }))
     }
     if (method === 'POST' && path === '/api/watermark/batch') {
       const body = JSON.parse(String(init?.body ?? '{}'))
       return Promise.resolve(json({ id: 'watermark-demo', status: 'done', total: body.paths.length,
         completed: body.paths.length, succeeded: body.paths.length, failed: 0, elapsed_s: 1.2,
-        skipped: 0, mode: body.mode ?? 'fixed', current: '', output_dir: 'D:\\output\\图片_去水印', errors: [] }))
+        skipped: 0, mode: body.mode ?? 'fixed', removal: body.removal ?? 'white', current: '', output_dir: 'D:\\output\\图片_去水印', errors: [] }))
     }
     if (path.startsWith('/api/watermark/batch/')) {
       return Promise.resolve(json({ id: 'watermark-demo', status: 'done', total: 3,
@@ -409,9 +418,10 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
         bit_depth: 8, vfr: false, field_order: 'progressive',
         decoder: { nvdec: true, d3d11va: true },
         recommend: {
-          model_id: 'anj-hd-x4', model_name: 'AnimeJaNai V2 HD x4', target_scale: 4,
-          deinterlace: false, deband: true, interp: 'off', animated: true,
-          reasons: ['检测到动画内容（色彩平坦度 0.83）', '暗部渐变存在轻微色带，建议开启去色带', ' progressive 逐行源，无需反交错'],
+          model_id: DEFAULT_ANIME_MODEL, model_name: MODELS[0].name, target_scale: 2,
+          deinterlace: false, deband: false, interp: 'off', animated: true,
+          reasons: ['采样 4 帧中平坦区域占 83%，素材更接近动画内容（大色块平涂）',
+            '源高 1080px，推荐 x2（→ 2160p）', '源帧率 23.98，如需更流畅可手动开启 RIFE 补帧（默认不自动开）'],
         },
       }))
     }

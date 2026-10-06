@@ -10,10 +10,13 @@ const outputDir = ref('')
 const selected = ref(0)
 const mask = reactive<WatermarkMask>({ unit: 'px', width: 175, height: 75, right: 0, bottom: 0 })
 const mode = ref<'fixed' | 'smart'>('fixed')
+const removal = ref<'white' | 'auto' | 'repair'>('auto')
 const sample = ref<WatermarkSample | null>(null)
 const smartOptions = computed(() => mode.value === 'smart'
-  ? { mode: 'smart' as const, sample: sample.value ?? undefined } : {})
-const regionLocked = computed(() => busy.value || (mode.value === 'smart' && !!sample.value))
+  ? { mode: 'smart' as const, sample: sample.value ?? undefined, removal: removal.value }
+  : removal.value === 'repair' && sample.value
+    ? { removal: removal.value, sample: sample.value } : { removal: removal.value })
+const regionLocked = computed(() => busy.value || (!!sample.value && (mode.value === 'smart' || removal.value === 'repair')))
 const preview = ref<WatermarkPreview | null>(null)
 const previewError = ref('')
 const loading = ref(false)
@@ -38,8 +41,9 @@ const previewKey = computed(() => JSON.stringify([currentPath.value, mask, smart
 const renderedKey = ref('')
 const canStart = computed(() => files.value.length > 0 && preview.value && !busy.value
   && !loading.value && !previewError.value && renderedKey.value === previewKey.value
+  && preview.value.detected !== false
   && (mode.value !== 'smart' || (sample.value && preview.value.detected === true)))
-const canCapture = computed(() => mode.value === 'smart' && !sample.value && !!preview.value
+const canCapture = computed(() => (mode.value === 'smart' || removal.value === 'repair') && !sample.value && !!preview.value
   && !busy.value && !loading.value && !previewError.value && renderedKey.value === previewKey.value)
 const rectangle = computed(() => {
   if (!preview.value?.box) return {}
@@ -91,9 +95,7 @@ async function refreshPreview() {
   if (!currentPath.value) { preview.value = null; loading.value = false; return }
   loading.value = true; previewError.value = ''
   try {
-    const result = mode.value === 'smart'
-      ? await api.watermarkPreview(currentPath.value, { ...mask }, smartOptions.value)
-      : await api.watermarkPreview(currentPath.value, { ...mask })
+    const result = await api.watermarkPreview(currentPath.value, { ...mask }, smartOptions.value)
     if (seq === sequence && !disposed && key === previewKey.value) {
       preview.value = result; renderedKey.value = key
     }
@@ -210,7 +212,7 @@ onBeforeUnmount(() => { disposed = true; ++sequence; clearTimeout(debounce); cle
 
 <template>
   <div class="watermark-page">
-    <header><h2>图片去水印</h2><p>固定填白或智能定位相同样式的水印，适合漫画白色页边。保留原尺寸，结果另存为 PNG。</p></header>
+    <header><h2>图片去水印</h2><p>支持白底、黑底水印和局部画面修补。保留原尺寸，结果另存为 PNG。</p></header>
     <section class="panel">
       <div class="row">
         <n-button :disabled="busy" @click="pickFiles">选择图片</n-button>
@@ -225,20 +227,27 @@ onBeforeUnmount(() => { disposed = true; ++sequence; clearTimeout(debounce); cle
       <p v-if="folder && files.length" class="muted">默认以第一张图片作为示例，可切换其他图片检查区域。当前：{{ imageLabel(currentPath) }}</p>
     </section>
     <section class="panel">
-      <div class="row mode-select"><strong>处理方式</strong>
-        <n-select v-model:value="mode" :disabled="busy" :options="[{ label: '固定区域填白', value: 'fixed' }, { label: '智能定位水印', value: 'smart' }]" />
+      <div class="row mode-select"><strong>水印定位</strong>
+        <n-select v-model:value="mode" :disabled="busy" :options="[{ label: '固定区域', value: 'fixed' }, { label: '智能定位水印', value: 'smart' }]" />
       </div>
-      <div v-if="mode === 'smart'" class="sample-panel">
-        <p class="muted">先在示例原图上框选完整水印及少量白边，设为样本。每张图自动在右下角区域搜索位置和大小；不可靠或疑似覆盖漫画内容时跳过。</p>
+      <div class="row mode-select"><strong>清除方式</strong>
+        <n-select v-model:value="removal" :disabled="busy" :options="[{ label: '自动识别白底 / 黑底', value: 'auto' }, { label: '局部修补（含画面上的水印）', value: 'repair' }, { label: '固定填白', value: 'white' }]" />
+      </div>
+      <p v-if="removal === 'auto'" class="muted">自动判断纯色页边并填白或填黑。背景不均匀或碰到画面时跳过，可切换局部修补。</p>
+      <p v-if="removal === 'repair'" class="muted">纯色页边直接清除，画面上的水印参考周围像素修补，可能留下模糊。智能定位按样本文字生成遮罩；固定区域会修补整个框，请尽量紧贴水印框选。</p>
+      <div v-if="mode === 'smart' || removal === 'repair'" class="sample-panel">
+        <p v-if="mode === 'smart'" class="muted">先从纯色页边框选完整水印及少量空白，设为样本。每张图自动在右下角搜索位置和大小；不同样式的水印需分批设置样本。匹配不可靠时跳过。</p>
+        <p v-else class="muted">可选：从纯色页边上的同款水印设置样本，按文字形状生成遮罩，再切换到水印叠在画面上的图片检查。固定区域沿用框选位置；尺寸不同可先设置百分比。没有样本时修补整个框。</p>
         <div class="row">
           <n-button v-if="!sample" :disabled="!canCapture" @click="captureSample">设为水印样本</n-button>
           <template v-else><span class="muted">水印样本：{{ imageLabel(sample.path) }}</span><n-button size="small" :disabled="busy" @click="resetSample">重新框选样本</n-button></template>
         </div>
-        <p v-if="preview?.detected === true && sample" class="matched">已定位水印 · 匹配度 {{ ((preview.score ?? 0) * 100).toFixed(1) }}%</p>
-        <p v-if="preview?.detected === false" class="error">{{ preview.reason }}。该张不会填白，可切换其他图片检查。</p>
+        <p v-if="preview?.detected === true && sample && mode === 'smart'" class="matched">已定位水印 · 匹配度 {{ ((preview.score ?? 0) * 100).toFixed(1) }}%</p>
+        <p v-if="sample && mode === 'fixed'" class="matched">固定位置 · 使用样本文字遮罩</p>
+        <p v-if="preview?.detected === false" class="error">{{ preview.reason }}。该张不会处理，可切换其他图片检查。</p>
       </div>
-      <div class="row"><strong>{{ mode === 'smart' && sample ? '样本框选参数' : '填白区域' }}</strong>
-        <span class="muted">{{ mode === 'smart' && sample ? '每张图片使用自动定位区域；修改样本请点击「重新框选样本」' : '以图片右下角为基准，也可在原图上拖动框选' }}</span></div>
+      <div class="row"><strong>{{ regionLocked && sample ? '样本框选参数' : '处理区域' }}</strong>
+        <span class="muted">{{ regionLocked && sample ? '修改样本或区域请点击「重新框选样本」' : '以图片右下角为基准，也可在原图上拖动框选' }}</span></div>
       <div class="fields">
         <label>单位<n-select :value="mask.unit" :disabled="regionLocked" :options="[{ label: '像素（相同尺寸）', value: 'px' }, { label: '百分比（不同尺寸）', value: 'percent' }]" @update:value="changeUnit" /></label>
         <label>宽度<n-input-number v-model:value="mask.width" :min="mask.unit === 'px' ? 1 : 0.001" :max="mask.unit === 'percent' ? 100 : 100000" :precision="mask.unit === 'px' ? 0 : 3" :disabled="regionLocked" :update-value-on-input="false" /></label>
@@ -246,17 +255,18 @@ onBeforeUnmount(() => { disposed = true; ++sequence; clearTimeout(debounce); cle
         <label>距右边<n-input-number v-model:value="mask.right" :min="0" :max="mask.unit === 'percent' ? 100 : 100000" :precision="mask.unit === 'px' ? 0 : 3" :disabled="regionLocked" :update-value-on-input="false" /></label>
         <label>距底边<n-input-number v-model:value="mask.bottom" :min="0" :max="mask.unit === 'percent' ? 100 : 100000" :precision="mask.unit === 'px' ? 0 : 3" :disabled="regionLocked" :update-value-on-input="false" /></label>
       </div>
-      <p class="muted">填白会清除框内所有内容，请检查区域是否碰到线稿或文字。默认 175 × 75 像素。</p>
+      <p class="muted">请在预览中检查水印是否清除，以及线稿和文字是否受到影响。默认区域 175 × 75 像素。</p>
       <p v-if="previewError" class="error">{{ previewError }}</p>
+      <p v-if="mode === 'fixed' && preview?.detected === false" class="error">{{ preview.reason }}</p>
       <p v-if="loading" class="muted">正在生成预览…</p>
       <div v-if="preview" class="previews">
-        <div><div class="caption">原图 · {{ mode === 'smart' && sample ? '自动定位结果' : '框内为填白区域' }}</div>
+        <div><div class="caption">原图 · {{ mode === 'smart' && sample ? '自动定位结果' : '框内为处理区域' }}</div>
           <div class="image-stage" :class="{ locked: regionLocked }" @pointerdown="beginDraw" @pointermove="draw" @pointerup="endDraw" @pointercancel="endDraw">
             <img :src="preview.original" alt="去水印前" draggable="false" />
             <div v-if="preview.box" class="mask-box" :style="rectangle" />
           </div>
         </div>
-        <div><div class="caption">处理后预览</div><div class="image-stage result"><img :src="preview.processed" alt="填白去水印后" draggable="false" /></div></div>
+        <div><div class="caption">处理后预览<span v-if="preview.method"> · {{ { white: '填白', black: '填黑', inpaint: '局部修补' }[preview.method] }}</span></div><div class="image-stage result"><img :src="preview.processed" alt="去水印后" draggable="false" /></div></div>
       </div>
       <div v-else-if="!loading" class="empty">选择图片后，查看前后效果并调整区域</div>
     </section>
@@ -276,7 +286,7 @@ onBeforeUnmount(() => { disposed = true; ++sequence; clearTimeout(debounce); cle
       <p v-if="job.current" class="path">{{ job.current }}</p>
       <p v-if="pollError" class="error">进度获取失败，正在重试：{{ pollError }}</p>
       <details v-if="job.errors.length"><summary>查看跳过或失败原因（{{ job.errors.length }} 条）</summary><p v-for="item in job.errors" :key="item.path" class="error">{{ item.kind === 'skipped' ? '已跳过' : '失败' }} · {{ item.path }}：{{ item.error }}</p></details>
-      <p v-if="job.mode === 'smart' && job.status !== 'running'" class="muted">智能定位报告 watermark-report.json 已保存到结果文件夹。跳过的图片保留在源目录，不生成填白结果。</p>
+      <p v-if="job.status !== 'running' && (job.mode === 'smart' || (job.removal && job.removal !== 'white'))" class="muted">处理报告 watermark-report.json 已保存到结果文件夹。跳过的图片保留在源目录，不生成处理结果。</p>
     </section>
   </div>
 </template>

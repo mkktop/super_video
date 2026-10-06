@@ -1,4 +1,4 @@
-"""CPU-only fixed rectangular white fill, with independent batch progress."""
+"""CPU watermark fill and local repair, with independent batch progress."""
 from __future__ import annotations
 
 import base64
@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from ..consts import _IMAGE_EXTS
 from ...watermark_match import MatchSkipped, WatermarkTemplate, locate, make_template
+from ...watermark_repair import Removal, erase
 
 router = APIRouter(prefix="/api/watermark", tags=["watermark"])
 
@@ -49,6 +50,7 @@ class PreviewIn(BaseModel):
     mode: Literal["fixed", "smart"] = "fixed"
     sample: SmartSample | None = None
     threshold: float = Field(default=.88, ge=.80, le=.99, allow_inf_nan=False)
+    removal: Removal = "white"
 
 
 class BatchIn(BaseModel):
@@ -59,6 +61,7 @@ class BatchIn(BaseModel):
     mode: Literal["fixed", "smart"] = "fixed"
     sample: SmartSample | None = None
     threshold: float = Field(default=.88, ge=.80, le=.99, allow_inf_nan=False)
+    removal: Removal = "white"
 
 
 def load_image(path: Path) -> Image.Image:
@@ -83,16 +86,26 @@ def fill_white(im: Image.Image, mask: WhiteMask) -> tuple[int, int, int, int]:
 
 
 def fill_box(im: Image.Image, box: tuple[int, int, int, int]) -> None:
-    white = {"RGB": (255, 255, 255), "RGBA": (255, 255, 255, 255),
-             "L": 255, "LA": (255, 255)}[im.mode]
-    im.paste(white, box)
+    erase(im, box, "white")
 
 
-def prepare_sample(sample: SmartSample | None) -> WatermarkTemplate:
+def prepare_sample(sample: SmartSample | None, removal: Removal = "white", *, trim: bool = True) -> WatermarkTemplate:
     if sample is None:
         raise ValueError("请先框选水印，并点击「设为水印样本」")
     with load_image(Path(sample.path)) as im:
-        return make_template(im, sample.mask.box(im.size))
+        return make_template(im, sample.mask.box(im.size), allow_dark=removal != "white", trim=trim)
+
+
+def process_image(im: Image.Image, body: PreviewIn | BatchIn,
+                  template: WatermarkTemplate | None = None) -> tuple[tuple[int, int, int, int], float | None, str]:
+    if template and body.mode == "smart":
+        match = locate(im, template, body.threshold, allow_dark=body.removal != "white",
+                       allow_artwork=body.removal == "repair")
+        box, score = match.box, match.score
+    else:
+        box, score = body.mask.box(im.size), None
+    method = erase(im, box, body.removal, template)
+    return box, score, method
 
 
 def preview_url(im: Image.Image) -> str:
@@ -114,21 +127,21 @@ def preview(body: PreviewIn) -> dict:
             detected = None
             reason = ""
             score = None
-            if body.mode == "smart" and body.sample:
-                sample = prepare_sample(body.sample)
-                try:
-                    match = locate(im, sample, body.threshold)
-                    box, score, detected = match.box, match.score, True
-                    fill_box(im, box)
-                except MatchSkipped as e:
-                    box, detected, reason = None, False, str(e)
-                finally:
+            method = None
+            sample = None
+            if body.sample and (body.mode == "smart" or body.removal == "repair"):
+                sample = prepare_sample(body.sample, body.removal, trim=body.mode == "smart")
+            try:
+                box, score, method = process_image(im, body, sample)
+                detected = True if sample or body.removal != "white" else None
+            except MatchSkipped as e:
+                box, detected, reason = None, False, str(e)
+            finally:
+                if sample:
                     sample.pixels.close()
-            else:
-                box = fill_white(im, body.mask)
             return {"width": im.width, "height": im.height, "box": box,
                     "original": original, "processed": preview_url(im),
-                    "detected": detected, "score": score, "reason": reason}
+                    "detected": detected, "score": score, "reason": reason, "method": method}
     except (OSError, ValueError, Image.DecompressionBombError) as e:
         raise HTTPException(400, str(e)) from e
 
@@ -163,12 +176,7 @@ def _run(job_id: str, body: BatchIn, out: Path, source: Path | None,
                 target = out / rel.with_suffix(".png")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with load_image(src) as im:
-                    if template:
-                        match = locate(im, template, body.threshold)
-                        box, score = match.box, match.score
-                        fill_box(im, box)
-                    else:
-                        box, score = fill_white(im, body.mask), None
+                    box, score, method = process_image(im, body, template)
                     # Exclusive creation also protects same stems from different extensions.
                     suffix = 0
                     while True:
@@ -187,7 +195,7 @@ def _run(job_id: str, body: BatchIn, out: Path, source: Path | None,
                 with _lock:
                     _jobs[job_id]["succeeded"] += 1
                 results.append({"path": str(src), "output": str(candidate), "box": box,
-                                "score": score, "status": "done"})
+                                "score": score, "method": method, "status": "done"})
             except MatchSkipped as e:
                 with _lock:
                     job = _jobs[job_id]
@@ -205,10 +213,12 @@ def _run(job_id: str, body: BatchIn, out: Path, source: Path | None,
     finally:
         if template:
             template.pixels.close()
+        if template or body.removal != "white":
             try:
                 import json
                 (out / "watermark-report.json").write_text(
-                    json.dumps({"mode": body.mode, "sample": body.sample.model_dump(),
+                    json.dumps({"mode": body.mode, "removal": body.removal,
+                                "sample": body.sample.model_dump() if body.sample else None,
                                 "threshold": body.threshold, "total": len(body.paths),
                                 "cancelled": event.is_set(), "results": results}, ensure_ascii=False, indent=2),
                     encoding="utf-8")
@@ -232,9 +242,9 @@ def start_batch(body: BatchIn) -> dict:
         raise HTTPException(400, "部分图片不存在或格式不支持，请重新选择")
     body = body.model_copy(update={"paths": paths})
     template = None
-    if body.mode == "smart":
+    if body.mode == "smart" or (body.removal == "repair" and body.sample):
         try:
-            template = prepare_sample(body.sample)
+            template = prepare_sample(body.sample, body.removal, trim=body.mode == "smart")
         except (OSError, ValueError, Image.DecompressionBombError) as e:
             raise HTTPException(400, str(e)) from e
     parent = Path(body.output_dir).resolve() if body.output_dir else (
@@ -267,7 +277,7 @@ def start_batch(body: BatchIn) -> dict:
         job_id = uuid.uuid4().hex
         _jobs[job_id] = {"id": job_id, "status": "running", "total": len(paths),
                          "completed": 0, "succeeded": 0, "failed": 0, "skipped": 0, "errors": [],
-                         "current": "", "output_dir": str(out), "mode": body.mode,
+                         "current": "", "output_dir": str(out), "mode": body.mode, "removal": body.removal,
                          "started_at": time.monotonic()}
         _cancel[job_id] = threading.Event()
         threading.Thread(target=_run, args=(job_id, body, out, source, template), daemon=True,

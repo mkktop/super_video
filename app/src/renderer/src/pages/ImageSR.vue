@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { modelCategoryLabel } from '../composables/modelCategories'
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import {
   NButton,
@@ -82,7 +83,6 @@ const srModels = computed(() => {
   const all = store.models.filter((m) => m.kind !== 'interp')
   return all.sort((a, b) => Number(b.installed || b.bundled) - Number(a.installed || a.bundled))
 })
-const contentLabel = { anime: '动漫', comic: '漫画', general: '真人/通用', real: '真人/通用' } as Record<string, string>
 const selectedModel = computed(() => store.models.find((m) => m.id === modelId.value))
 const scaleOptions = computed(
   () => (selectedModel.value?.scale ?? []).map((s) => ({ label: `x${s}`, value: s })),
@@ -228,7 +228,7 @@ export default { name: 'ImageSR' }
     <div class="page-head">
       <div>
         <h1>图片超分</h1>
-        <p class="sub">单张 / 多选图片 → 选模型放大 → 结果保存为 PNG / JPG；整本漫画请用侧栏「漫画超分」</p>
+        <p class="sub">批量放大图片并保存为 PNG 或 JPG。整本漫画请使用「漫画超分」</p>
       </div>
     </div>
 
@@ -237,7 +237,7 @@ export default { name: 'ImageSR' }
       <h2 class="sec-title"><span class="sec-num">1</span>选择图片</h2>
       <div class="pick-row">
         <NButton dashed size="large" class="grow" @click="pick">
-          {{ files.length ? `已选 ${files.length} 张（点击继续追加）` : '选择图片（可多选）' }}
+          {{ files.length ? `已选 ${files.length} 张（点击添加更多）` : '选择图片（可多选）' }}
         </NButton>
       </div>
       <div v-if="dragHint" class="drop-hint">也可以直接把图片拖进窗口</div>
@@ -252,7 +252,7 @@ export default { name: 'ImageSR' }
             alt=""
             @error="onThumbErr(f)"
           />
-          <div v-else class="thumb thumb-broken" title="此图片无法预览（不影响处理）">无法预览</div>
+          <div v-else class="thumb thumb-broken" title="无法显示缩略图，请确认源图片可正常打开">无法预览</div>
           <button class="rm" title="移除" @click="removeAt(i)">✕</button>
           <span class="fname" :title="f">{{ baseName(f) }}</span>
         </div>
@@ -289,7 +289,7 @@ export default { name: 'ImageSR' }
           <div class="m-tags">
             <span>x{{ m.scale.join('/x') }}</span>
             <span>{{ m.vram_gb }}GB 显存</span>
-            <span v-for="c in m.content" :key="c" class="m-content">{{ contentLabel[c] ?? c }}</span>
+            <span class="m-content">{{ modelCategoryLabel(m) }}</span>
           </div>
         </div>
       </div>
@@ -325,7 +325,7 @@ export default { name: 'ImageSR' }
         <div v-if="batchN >= 2" class="row inline">
           <span class="lbl">批量合并</span>
           <NCheckbox v-model:checked="mergePdf">
-            另外输出一份 PDF（全部结果按顺序无损封装，逐张图片文件仍保留）
+            同时生成 PDF，按图片顺序合并；保留单张输出文件
           </NCheckbox>
         </div>
         <div class="row stack">
@@ -333,10 +333,9 @@ export default { name: 'ImageSR' }
           <NSelect v-model:value="tileChoice" :options="tileOptions" style="width: 200px" />
         </div>
         <p class="hint-row">
-          自动=按模型默认；超大图（如 8K 扫描件）显存不足时调小分块。图片保存到「{{
+          自动使用模型默认分块；大图处理时显存不足，可调小分块。图片保存到「{{
             outDirLabel
-          }}」，目录内无同名时沿用原文件名，同名冲突自动改用「原名_倍率」后缀，不覆盖现有文件。PDF
-          无损口径：PNG 结果逐像素一致直接嵌入，JPG 结果按原文件字节嵌入不再压缩。
+          }}」，目录内无同名时沿用原文件名，同名冲突自动改用「原名_倍率」后缀，不覆盖现有文件。PDF 保留输出图片的数据，不进行二次有损压缩。
         </p>
       </div>
     </section>

@@ -643,3 +643,25 @@ def test_worker_dev_removed_masked_bytes_detected(monkeypatch, tmp_path):
         tmp_path / "w.onnx", spec, 2, None, "fp32", 0, (64, 64), log=lambda ev: None)
     assert calls == ["auto", "auto", "auto"], calls
     assert sleeps == [3.0, 3.0]
+
+
+def test_dml_fp16_operator_fault_retries_original_precision(monkeypatch, tmp_path):
+    from sv.server import worker_engine
+    converted=tmp_path/'operator_fp16.onnx';original=tmp_path/'operator.onnx'
+    converted.touch();original.touch();calls=[];logs=[]
+    class Fake:
+        def __init__(self, weight, scale, **kwargs):
+            self.weight=weight;self.device=kwargs['device'];calls.append((weight.name,self.device))
+        def load(self):pass
+        def process(self, frame):
+            if self.weight==converted:
+                raw=b'ORT providers\\dml\\MLOperator 8007023E '+bytes([0xd3,0xa6])
+                raise UnicodeDecodeError('utf-8',raw,len(raw)-2,len(raw),'invalid byte')
+            return frame
+    monkeypatch.setattr(worker_engine,'OnnxSrEngine',Fake)
+    monkeypatch.setattr(worker_engine,'settings',types.SimpleNamespace(load=lambda:{'engine':'auto'}))
+    spec=types.SimpleNamespace(io={},fp16=True,id='operator-test')
+    eng,precision=worker_engine._load_onnx_engine(converted,spec,2,None,'fp16',0,(32,32),log=logs.append,slot='dml-operator-test')
+    assert calls==[('operator_fp16.onnx','auto'),('operator.onnx','auto')]
+    assert precision=='fp32' and eng.device=='auto'
+    assert any('fp32' in e['line'] for e in logs)

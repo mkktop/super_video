@@ -1,6 +1,6 @@
 {
   "id": "artcnn-c4f16-dn",
-  "name": "ArtCNN C4F16 DN（极速 · 降噪）",
+  "name": "ArtCNN C4F16 DN（轻量 · 降噪）",
   "vendor": "Artoriuz",
   "license": "MIT",
   "engine": "onnx",
@@ -12,7 +12,7 @@
     "anime"
   ],
   "temporal": false,
-  "speed": "fast",
+  "speed": "balanced",
   "vram_gb": 1,
   "tile_hint": 0,
   "fp16": true,
@@ -22,7 +22,7 @@
     "pad": 1,
     "batch_hint": 1
   },
-  "description": "极速档的降噪变体（DN=降噪+柔和输出）：老动画压制源、噪点明显的网络视频用它在超分的同时压噪",
+  "description": "动漫亮度通道 2x 降噪重建：DN 带降噪与柔化倾向，适合有噪声的素材；可能削弱细线和纹理，不直接重建色度。",
   "files": [
     {
       "name": "ArtCNN_C4F16_DN.onnx",
@@ -38,5 +38,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "anime_restore"
 }

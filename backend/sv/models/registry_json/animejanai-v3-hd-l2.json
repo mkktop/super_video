@@ -21,7 +21,7 @@
   },
   "id": "animejanai-v3-hd-l2",
   "name": "AnimeJaNai V3 HD L2（均衡）",
-  "description": "新一代均衡主力档：1080p→4K 速度画质折中，V3 系日常首选",
+  "description": "AnimeJaNai V3 HD 动漫 2x 旧代权重，均衡档；适合 HD 动漫，效果需与 V3.1 对比。",
   "files": [
     {
       "name": "2x_AnimeJaNai_HD_V3_UltraCompact.onnx",
@@ -36,5 +36,6 @@
   "scenes": [
     "video",
     "image"
-  ]
+  ],
+  "category": "anime_video"
 }

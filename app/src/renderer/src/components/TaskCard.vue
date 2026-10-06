@@ -25,6 +25,7 @@ const props = defineProps<{
   /** 任务页批量选择模式：显示勾选框（点选只发事件，选中态由父组件管理） */
   selectMode?: boolean
   selected?: boolean
+  compact?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'move', dir: -1 | 1): void
@@ -37,9 +38,9 @@ const canCompare = computed(
   () => !!props.task.preview_src && !!props.task.preview_path,
 )
 // 源文件被删/移动：对比页视频模式要直接播源、静帧从源抽取，都进行不下去——
-// 全页对比入口置灰禁点（预览缩略图是任务完成时落盘的，不受影响，仍可显示）
+// 查看对比入口置灰禁点（预览缩略图是任务完成时落盘的，不受影响，仍可显示）
 const srcGone = computed(() => props.task.input_exists === false)
-const srcGoneTip = '源文件已删除或移动，无法对比'
+const srcGoneTip = '找不到源文件，请恢复原路径后再查看对比'
 
 const fileName = computed(() => {
   const base = props.task.input_path.split(/[\\/]/).pop() ?? ''
@@ -192,7 +193,7 @@ function onOpenInputFolder() {
     size="small"
     :bordered="true"
     class="task-card sv-card"
-    :class="['st-' + task.status, { celebrate: celebrate }]"
+    :class="['st-' + task.status, { celebrate: celebrate, compact: compact && task.status === 'done' }]"
   >
     <!-- 运行中：右上角一颗脉动圆点（与侧栏连接点同款 halo） -->
     <span v-if="task.status === 'running'" class="run-dot" aria-hidden="true" />
@@ -219,12 +220,12 @@ function onOpenInputFolder() {
         @update:checked="emit('toggleSelect')"
       />
       <div class="names">
-        <span class="file">{{ fileName }}</span>
+        <span class="file" :title="fileName">{{ fileName }}</span>
         <span class="arrow">→</span>
-        <span class="out">{{ outName }}</span>
+        <span class="out" :title="outName">{{ outName }}</span>
       </div>
       <div class="badges">
-        <n-tag size="small" :bordered="false">{{ modelName }}</n-tag>
+        <n-tag size="small" :bordered="false" class="model-badge" :title="modelName">{{ modelName }}</n-tag>
         <n-tag v-if="task.params?.kind === 'manga'" size="small" :bordered="false" type="success">
           漫画
         </n-tag>
@@ -254,8 +255,24 @@ function onOpenInputFolder() {
       </div>
     </div>
 
+    <div v-if="task.status === 'running' || task.status === 'done' || task.preview_path" class="task-body" :class="{ 'with-preview': (task.preview_path || task.status === 'done') && !(compact && task.status === 'done') }">
+      <div v-if="(task.preview_path || task.status === 'done') && !(compact && task.status === 'done')" class="preview-slot">
+        <button v-if="!previewBroken" class="preview-button" :disabled="!canCompare || srcGone"
+                :aria-label="`对比 ${fileName}`" :title="srcGone ? srcGoneTip : '查看超分对比'"
+                @click="openCompare(task.id)">
+          <img :src="api.previewUrl(task.id, task.updated_at)" class="preview" :class="{ gone: srcGone }"
+               :alt="`${fileName} 超分预览`" @error="previewBroken = true" />
+        </button>
+        <div v-else class="preview-broken">无预览</div>
+      </div>
     <div v-if="task.status === 'running' || task.status === 'done'" class="progress-wrap">
+      <div v-if="task.status === 'running'" class="run-metrics">
+        <div class="metric metric-progress"><span>处理进度</span><strong>{{ percent }}<small>%</small></strong></div>
+        <div class="metric"><span>处理速度</span><strong>{{ fpsText }}<small>{{ task.params?.kind === 'image' || task.params?.kind === 'manga' ? '张/秒' : '帧/秒' }}</small></strong></div>
+        <div class="metric"><span>预计剩余</span><strong>{{ etaText }}</strong></div>
+      </div>
       <n-progress
+        v-if="task.status === 'running' || !compact"
         type="line"
         :percentage="percent"
         :status="task.status === 'done' ? 'success' : 'default'"
@@ -266,9 +283,7 @@ function onOpenInputFolder() {
       <div class="stats">
         <span>{{ scaleLabel }}</span>
         <span v-if="task.status === 'running'">
-          {{ task.progress_frames }}/{{ task.total_frames }} 帧 ·
-          <Transition name="num" mode="out-in"><span :key="fpsText" class="sv-num">{{ fpsText }}</span></Transition> fps ·
-          剩余 <Transition name="num" mode="out-in"><span :key="etaText" class="sv-num">{{ etaText }}</span></Transition>
+          {{ task.progress_frames }}/{{ task.total_frames }} {{ task.params?.kind === 'image' || task.params?.kind === 'manga' ? '张' : '帧' }}
         </span>
         <span v-else :title="avgSpeed ? avgSpeedTip : undefined">
           {{ fmtBytes(task.out_bytes) }} · 用时 {{ fmtElapsed(task.elapsed_s)
@@ -276,24 +291,15 @@ function onOpenInputFolder() {
         </span>
       </div>
     </div>
+    </div>
 
     <n-collapse v-if="task.error && task.status === 'failed'" class="err">
-      <n-collapse-item title="错误信息" name="err">
+      <n-collapse-item title="失败详情" name="err">
         <div class="err-text">{{ task.error }}</div>
       </n-collapse-item>
     </n-collapse>
 
     <div class="row3">
-      <img
-        v-if="(task.preview_path || task.status === 'done') && !previewBroken"
-        :src="api.previewUrl(task.id, task.updated_at)"
-        class="preview"
-        :class="{ gone: srcGone }"
-        :title="srcGone ? srcGoneTip : undefined"
-        @click="canCompare && !srcGone && openCompare(task.id)"
-        @error="previewBroken = true"
-      />
-      <div v-else-if="task.status === 'done'" class="preview-broken">无预览</div>
       <div class="spacer" />
       <NButton
         v-if="canCompare"
@@ -304,7 +310,7 @@ function onOpenInputFolder() {
         :title="srcGone ? srcGoneTip : undefined"
         @click="openCompare(task.id)"
       >
-        全页对比
+        查看对比
       </NButton>
       <NButton
         v-if="task.status === 'done' && task.has_sr_log"
@@ -331,10 +337,10 @@ function onOpenInputFolder() {
         type="info"
         @click="emit('retryParams')"
       >
-        改参数重试
+        调整参数重试
       </NButton>
       <NButton v-if="task.status === 'done'" size="small" quaternary type="info" @click="onOpenFolder">
-        打开所在文件夹
+        打开输出文件夹
       </NButton>
       <NButton
         v-if="task.status === 'failed' || task.status === 'canceled'"
@@ -343,7 +349,7 @@ function onOpenInputFolder() {
         type="info"
         @click="onOpenInputFolder"
       >
-        输入所在文件夹
+        打开源文件夹
       </NButton>
       <NPopconfirm v-if="!isBusy" @positive-click="onDelete">
         <template #trigger>
@@ -361,7 +367,7 @@ function onOpenInputFolder() {
     <NModal v-model:show="logOpen" preset="card" title="超分性能日志" style="max-width: 760px">
       <NSpin :show="logLoading">
         <pre v-if="logText" class="srlog-pre">{{ logText }}</pre>
-        <div v-else-if="logFailed" class="srlog-msg">日志读取失败（文件可能已被清理）</div>
+        <div v-else-if="logFailed" class="srlog-msg">无法读取日志，文件可能已被清理。请稍后重试</div>
         <div v-else class="srlog-msg">加载中…</div>
       </NSpin>
     </NModal>
@@ -392,10 +398,10 @@ function onOpenInputFolder() {
 .task-card.st-running::before {
   background: linear-gradient(180deg, var(--sv-accent), var(--sv-accent-2), var(--sv-accent));
   background-size: 100% 300%;
-  box-shadow: 0 0 10px rgba(var(--sv-accent-rgb), 0.65);
+  box-shadow: none;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .task-card.st-running::before { animation: ridge-flow 3s linear infinite; }
+  .task-card.st-running::before { animation: none; }
 }
 @keyframes ridge-flow {
   0% { background-position: 0% 100%; }
@@ -406,8 +412,8 @@ function onOpenInputFolder() {
 .task-card.st-canceled::before { background: var(--sv-warning); opacity: 0.7; }
 .task-card:hover {
   border-color: var(--sv-border-strong);
-  transform: translateY(-1px);
-  box-shadow: var(--sv-card-inset), 0 8px 22px rgba(0, 0, 0, 0.32);
+  transform: none;
+  box-shadow: var(--sv-card-inset);
 }
 
 /* 任务完成微庆祝：一次性成功色描边扩散（不循环、不撒花、不发声） */
@@ -466,14 +472,15 @@ function onOpenInputFolder() {
 .drag-grip:hover { color: var(--sv-accent-strong); }
 .task-card:hover .drag-grip { opacity: 1; }
 
-.row1 { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.row1 { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .sel-box { margin-left: 2px; flex-shrink: 0; }
-.names { flex: 1; }
+.names { flex: 1 1 300px; }
 .names { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .file { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .arrow, .out { color: var(--sv-text-dim); font-size: 13px; }
 .out { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.badges { display: flex; gap: 6px; flex-shrink: 0; }
+.badges { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.model-badge :deep(.n-tag__content) { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .progress-wrap { margin-top: 10px; }
 /* 运行中的进度条：渐变填充上叠一道流光 */
 .st-running :deep(.n-progress-graph-line-fill) { position: relative; overflow: hidden; }
@@ -483,12 +490,13 @@ function onOpenInputFolder() {
   inset: 0;
   transform: translateX(-100%);
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
-  animation: fill-sheen 1.6s ease-in-out infinite;
+  animation: none;
 }
 @keyframes fill-sheen { 100% { transform: translateX(100%); } }
 .stats {
   display: flex; justify-content: space-between; margin-top: 6px;
-  font-size: 12px; color: var(--sv-text-dim); font-variant-numeric: tabular-nums;
+  font-size: 13px; color: var(--sv-text-dim); font-variant-numeric: tabular-nums;
+  flex-wrap: wrap; gap: 6px 16px;
 }
 /* fps/ETA 值变化的 150ms 淡入 */
 .num-enter-active { transition: opacity 0.15s ease-out; }
@@ -496,7 +504,7 @@ function onOpenInputFolder() {
 .num-enter-from, .num-leave-to { opacity: 0; }
 .err { margin-top: 8px; }
 .err-text { color: var(--sv-danger); font-size: 12px; word-break: break-all; white-space: pre-wrap; }
-.row3 { display: flex; align-items: flex-end; gap: 10px; margin-top: 10px; }
+.row3 { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .preview-broken {
   width: 88px;
   height: 50px;
@@ -510,16 +518,16 @@ function onOpenInputFolder() {
   justify-content: center;
 }
 .preview {
-  max-height: 96px; max-width: 45%; border-radius: var(--sv-radius-sm); border: 1px solid var(--sv-border-mid);
+  display: block; width: 152px; height: 86px; border-radius: var(--sv-radius-sm); border: 1px solid var(--sv-border-mid);
   object-fit: contain; cursor: pointer;
   transition: transform 0.18s var(--sv-ease), box-shadow 0.18s var(--sv-ease), border-color 0.18s var(--sv-ease);
 }
 /* 悬停放大预览：像捏住一角掀开看细节 */
 .preview:hover:not(.gone) {
-  transform: scale(1.6);
+  transform: none;
   transform-origin: left bottom;
   border-color: rgba(var(--sv-accent-rgb), 0.55);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  box-shadow: none;
   z-index: 6;
   position: relative;
 }
@@ -532,7 +540,32 @@ function onOpenInputFolder() {
   opacity: 0;
   transition: opacity var(--sv-dur-fast) ease;
 }
-.task-card:hover .qbtns { opacity: 1; }
+.task-card:hover .qbtns, .task-card:focus-within .qbtns { opacity: 1; }
+.task-body { margin-top: 12px; }
+.task-body.with-preview { display: grid; grid-template-columns: 152px minmax(0, 1fr); gap: 20px; align-items: center; }
+.task-body .progress-wrap { margin-top: 0; min-width: 0; }
+.task-body:empty { display: none; }
+.preview-button { display: block; padding: 0; background: none; border: none; border-radius: var(--sv-radius-sm); cursor: pointer; }
+.preview-button:disabled { cursor: default; }
+.preview-slot .preview-broken { width: 152px; height: 86px; font-size: 12.5px; }
+.run-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 12px; }
+.metric { display: flex; flex-direction: column; gap: 5px; font-variant-numeric: tabular-nums; }
+.metric > span { color: var(--sv-text-dim); font-size: 12.5px; }
+.metric strong { color: var(--sv-text); font-size: 20px; line-height: 1.3; font-weight: 600; }
+.metric-progress strong { color: var(--sv-accent-strong); }
+.metric small { margin-left: 4px; font-size: 12px; color: var(--sv-text-dim); font-weight: 400; }
+.compact .stats { margin-top: 0; }
+.compact .row3 { margin-top: 6px; }
+@media (max-width: 900px) {
+  .task-body.with-preview { grid-template-columns: 112px minmax(0, 1fr); gap: 12px; }
+  .preview, .preview-slot .preview-broken { width: 112px; height: 72px; }
+  .metric strong { font-size: 17px; }
+  .run-metrics { gap: 8px; }
+}
+@media (max-width: 640px) {
+  .task-body.with-preview { grid-template-columns: minmax(0, 1fr); }
+  .preview-slot { display: none; }
+}
 .qbtn {
   width: 22px;
   height: 22px;

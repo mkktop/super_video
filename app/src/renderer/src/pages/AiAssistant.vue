@@ -38,12 +38,12 @@ const universalInstruction = computed(() => {
   if (!mcpCommand.value) return ''
   const { command, args } = mcpCommand.value
   return [
-    '请帮我接入本机的 MCP 服务「雨帧 RainFrame」（视频/图片/漫画超分工具），步骤：',
+    '请帮我接入本机的 MCP 服务「雨帧 RainFrame」（视频/图片/漫画超分及图片去水印工具），步骤：',
     `1. 在你当前环境的 MCP 配置里新增一个 stdio 服务：name 为 rainframe，command 为 "${command}"，args 为 ${JSON.stringify(args)}；`,
     '2. 重启会话/客户端使配置生效；',
     '3. 调用工具 rf_status 验证：返回 version 即接入成功。若提示——',
     '   「未发现运行中的雨帧」→ 先打开雨帧应用再重试；',
-    '   「MCP 接入已被关闭」→ 在雨帧「MCP 服务」页打开「允许 AI 客户端接入」。',
+    '   「MCP 接入已被关闭」→ 在雨帧「AI 接入」页打开「允许 AI 客户端接入」。',
     '已知客户端的配置位置：Claude Desktop→claude_desktop_config.json 的 mcpServers；Cursor→~/.cursor/mcp.json；ZCode→~/.zcode/cli/config.json 的 mcp.servers；其他环境按你自己的 MCP 配置格式写入。',
   ].join('\n')
 })
@@ -68,6 +68,11 @@ async function saveMcpEnabled(v: boolean) {
 const canDo = [
   '探测视频 / 图片信息，按内容推荐模型、倍率与预处理',
   '下载缺失模型，创建视频、图片与漫画批量任务',
+  '预览图片去水印，自动识别白底/黑底，按样本文字遮罩局部修补',
+  '整夹批量去水印，查询进度或停止处理，原图保留、结果另存 PNG',
+  '读取任务诊断、队列状态、性能和日志，分页查看历史任务',
+  '查看超分前后预览，创建多模型对比并查看同时间的结果图',
+  '创建、查询和取消视频剪切，剪切产物可继续超分',
   '取消任务、失败后断点续跑',
   '轮询进度与速度，完成时汇报产物路径',
 ]
@@ -81,10 +86,10 @@ const cannotDo = [
 <template>
   <div class="ai-page">
     <div class="page-head">
-      <h1>MCP 服务</h1>
+      <h1>AI 接入（MCP）</h1>
       <p class="head-sub">
         通过 MCP 协议把雨帧接入 Claude Desktop、Cursor、ZCode 等 AI 客户端——
-        对话即可探测媒体、选模型、下超分任务、盯进度。
+        通过对话读取素材信息、选择模型、创建任务、预览去水印效果和查询进度。
       </p>
     </div>
 
@@ -92,7 +97,7 @@ const cannotDo = [
     <section class="card sv-card">
       <header class="card-head">
         <div class="card-title">接入状态</div>
-        <div class="card-sub">本地服务与准入开关；关闭后已连接的客户端会收到「接入已关闭」提示</div>
+        <div class="card-sub">管理 AI 客户端访问。关闭接入后，雨帧内的功能仍可使用</div>
       </header>
       <div class="card-body">
         <div class="row switch-row">
@@ -106,7 +111,7 @@ const cannotDo = [
         <div class="row switch-row bordered-top">
           <span class="row-text">
             允许 AI 客户端接入
-            <small>默认开启；走本机令牌鉴权，仅你配置过的客户端可连，应用内功能不受影响</small>
+            <small>通过本机访问令牌验证客户端身份；关闭后不影响雨帧内的功能</small>
           </span>
           <NSwitch v-model:value="mcpEnabled" size="small" @update:value="saveMcpEnabled" />
         </div>
@@ -117,11 +122,11 @@ const cannotDo = [
     <section class="card sv-card">
       <header class="card-head">
         <div class="card-title">客户端配置</div>
-        <div class="card-sub">已知客户端复制专属片段；其他 AI 客户端复制通用指令发给它，由它自己完成配置</div>
+        <div class="card-sub">复制对应客户端的配置；其他支持 MCP 的客户端可参考通用接入说明</div>
       </header>
       <div class="card-body">
         <p class="hint">
-          客户端会自动发现本地服务，无需填端口；使用时保持雨帧运行。
+          按下方配置接入，无需手动填写端口；使用时保持雨帧运行。
           之后直接对 AI 说「把这个视频超成 4K」「这个文件夹的漫画全部处理」即可。
         </p>
         <div v-for="sn in mcpSnippets" :key="sn.name" class="mcp-snippet">
@@ -134,8 +139,8 @@ const cannotDo = [
         </div>
         <div v-if="universalInstruction" class="mcp-snippet">
           <div class="mcp-snippet-head">
-            <span class="mcp-snippet-name">任意 AI 客户端（通用）</span>
-            <span class="mcp-snippet-file">把这段话发给你的 AI，让它自己完成接入与验证</span>
+            <span class="mcp-snippet-name">其他支持 MCP 的客户端</span>
+            <span class="mcp-snippet-file">将说明提供给客户端，按其支持的方式配置并验证连接</span>
             <NButton size="tiny" quaternary @click="copyText(universalInstruction)">复制</NButton>
           </div>
           <pre class="mcp-code">{{ universalInstruction }}</pre>
@@ -147,7 +152,7 @@ const cannotDo = [
     <section class="card sv-card">
       <header class="card-head">
         <div class="card-title">能力与边界</div>
-        <div class="card-sub">AI 客户端能做什么、被明确挡在门外的是什么</div>
+        <div class="card-sub">查看客户端支持的操作与访问限制</div>
       </header>
       <div class="card-body">
         <div class="bounds">

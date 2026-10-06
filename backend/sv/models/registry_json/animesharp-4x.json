@@ -21,7 +21,7 @@
     "range": "0-1",
     "pad": 1
   },
-  "description": "Kim2091 的动漫图片 4x 社区经典：线条锐利化处理，动漫截图/插画放大；官方 ONNX 导出",
+  "description": "动漫图片、线稿与插画的 4x 放大候选，偏锐利风格；可能强化轮廓或改变细线，建议与 IllustrationJaNai 对比。",
   "files": [
     {
       "name": "4x-AnimeSharp.onnx",
@@ -36,5 +36,6 @@
   "u8_wrap": true,
   "scenes": [
     "image"
-  ]
+  ],
+  "category": "illustration"
 }

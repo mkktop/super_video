@@ -21,7 +21,7 @@
     "range": "0-1",
     "pad": 1
   },
-  "description": "老牌 transformer 画质档（SwinIR-L，256 定长分块）：训练集含 Manga109，真人照片与漫画皆可用；与 HAT 二选一即可",
+  "description": "SwinIR-L Real GAN：真人照片与通用图片 4x 修复候选（256 定长分块）。训练包含 Manga109，但并非黑白漫画专模；漫画优先与 MangaJaNai 对比。",
   "files": [
     {
       "name": "SwinIR-L_realSR_x4_GAN.onnx",
@@ -36,5 +36,6 @@
   "u8_wrap": false,
   "scenes": [
     "image"
-  ]
+  ],
+  "category": "photo_restore"
 }

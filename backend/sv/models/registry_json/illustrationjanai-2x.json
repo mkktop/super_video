@@ -1,6 +1,6 @@
 {
   "id": "illustrationjanai-2x",
-  "name": "IllustrationJaNai 2x（彩色插画 · 极速）",
+  "name": "IllustrationJaNai V3 2x SPAN S（彩漫插画 · 快速）",
   "vendor": "the-database",
   "license": "CC-BY-NC-4.0",
   "engine": "onnx",
@@ -20,9 +20,10 @@
     "color": "rgb",
     "range": "0-1",
     "pad": 1,
-    "batch_hint": 1
+    "batch_hint": 1,
+    "dml_opset": 20
   },
-  "description": "彩色漫画页/插画 2x 极速档（SPAN 架构，原生 fp16）：去 JPEG 伪影，封面彩页通用",
+  "description": "IllustrationJaNai V3 SPAN S：彩漫、封面与数字插画的轻量 2x 放大。按实际权重标记版本；版本号与网络结构不能直接代表跨档画质排名。",
   "files": [
     {
       "name": "2x_IllustrationJaNai_V3_SPAN_S.onnx",
@@ -34,9 +35,11 @@
       ]
     }
   ],
-  "u8_wrap": false,
+  "u8_wrap": true,
   "scenes": [
     "manga",
     "image"
-  ]
+  ],
+  "category": "illustration",
+  "version": "V3 SPAN S"
 }

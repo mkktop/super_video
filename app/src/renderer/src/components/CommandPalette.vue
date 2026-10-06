@@ -35,15 +35,15 @@ const commands = computed<Cmd[]>(() => {
     ['home', '首页'],
     ['tasks', '任务队列'],
     ['newtask', '新建任务'],
-    ['models', '模型市场'],
+    ['models', '模型库'],
     ['mcompare', '模型对比'],
     ['trim', '视频剪切'],
     ['imagesr', '图片超分'],
     ['mangasr', '漫画超分'],
     ['watermark', '图片去水印'],
     ['perf', '性能监控'],
-    ['logs', '服务日志'],
-    ['aiassistant', 'MCP 服务'],
+    ['logs', '运行日志'],
+    ['aiassistant', 'AI 接入'],
     ['settings', '设置'],
   ]
   const out: Cmd[] = pages.map(([key, label]) => ({
@@ -64,7 +64,7 @@ const commands = computed<Cmd[]>(() => {
     {
       id: 'act-mcompare',
       label: '打开模型对比',
-      sub: '同段素材并排跑模型',
+      sub: '用同一素材对比模型效果',
       group: '动作',
       run: () => go('mcompare'),
     },

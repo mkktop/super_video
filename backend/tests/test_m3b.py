@@ -121,7 +121,14 @@ def test_torch_engine_matches_onnx():
         "frame = np.clip(rng.normal(120, 50, (64, 64, 3)), 0, 255).astype(np.uint8); "
         "out = eng.process(frame); "
         "assert out.shape == (256, 256, 3) and out.dtype == np.uint8; "
-        "assert int(out.std()) > 3; print('OK')"
+        "assert int(out.std()) > 3; "
+        "from sv.models.registry import get_model, model_file; "
+        "from sv.engines.onnx_engine import OnnxSrEngine; "
+        "spec = get_model('realesrgan-x4plus'); "
+        "ref_engine = OnnxSrEngine(model_file(spec, 4), 4, io=spec.io, device='cpu', u8_wrap=False); "
+        "ref_engine.load(); ref = ref_engine.process(frame); "
+        "mae = np.abs(out.astype(float)-ref).mean(); "
+        "assert mae < 2, ('torch/ONNX RGB mismatch', mae); print('OK')"
         % (Path(__file__).resolve().parents[1], PTH)
     )
     r = subprocess.run([sys.executable, "-c", code],

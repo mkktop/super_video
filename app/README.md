@@ -15,8 +15,8 @@ src/
       ├─ api.ts       sidecar HTTP/WS 客户端（自动带 X-SV-Token；ApiError 带状态码）
       ├─ theme.ts     深色/浅色/跟随系统 → 写 <html data-theme>，localStorage 持久化
       ├─ uiFx.ts      纯表现层状态（页面切换方向），不碰 store 数据流
-      ├─ pages/       11 个页面（Home/Tasks/NewTask/Models/CompareModels/Trim/
-      │               ImageSR/MangaSR/Compare/Perf/Logs/Settings）
+      ├─ pages/       页面组件（Home/Tasks/NewTask/Models/CompareModels/Trim/
+      │               ImageSR/MangaSR/Watermark/Compare/Perf/Logs/AiAssistant/Settings）
       ├─ components/  TaskCard/CompareSlider/CommandPalette/Sidebar/PerfRings 等
       ├─ composables/ 向导页共用逻辑（模型选项/输出设置/编码器/计划门控/更新/TRT）
       └─ preview/     浏览器预览 mock（mock.ts 编造 window.sv + API + WS 事件流）
@@ -27,7 +27,7 @@ src/
 ```bash
 pnpm dev      # 开发模式（electron-vite dev）
 pnpm preview  # 纯浏览器 UI 预览 → http://localhost:5199/preview.html（详见根 README）
-pnpm test     # vitest 单测（tests/，5 个 spec）
+pnpm test     # vitest 单测（tests/）
 pnpm build    # 双 tsconfig 类型检查（node/web 两份都要）+ electron-vite build
 pnpm dist     # build + electron-builder NSIS 安装包 → ../dist-app/
 ```

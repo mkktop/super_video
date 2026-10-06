@@ -84,6 +84,8 @@ class OnnxSrEngine(BaseEngine):
         trt_fp16: bool | None = None,  # None=按 io.trt_fp16（默认 True）；降链重建时显式 False
     ):
         self.model_path = Path(model_path)
+        self._legacy_x4plus = bool((io or {}).get("legacy_imagenet_wrap", False))
+        self._dml_opset = (io or {}).get("dml_opset")
         self.scale = scale
         io = io or {}
         self.color = io.get("color", "bgr")
@@ -137,6 +139,9 @@ class OnnxSrEngine(BaseEngine):
         self.main_thread_only = False
 
     def load(self) -> None:
+        if self._legacy_x4plus:
+            from ..models.legacy_x4plus import corrected_x4plus
+            self.model_path = corrected_x4plus(self.model_path)
         import onnxruntime as ort
 
         from .nvidia_dlls import register_nvidia_dlls
@@ -156,6 +161,12 @@ class OnnxSrEngine(BaseEngine):
             chosen = [p for p in _TRT_CHAIN if p in available] or ["CPUExecutionProvider"]
         else:
             chosen = [p for p in _PROVIDER_ORDER if p in available] or ["CPUExecutionProvider"]
+        if self._dml_opset and chosen[:1] == ["DmlExecutionProvider"]:
+            from ..models.dml_compat import directml_compatible
+            try:
+                self.model_path = directml_compatible(self.model_path, int(self._dml_opset))
+            except Exception as e:  # optional optimization, preserve usable fallback
+                print(f"[engine] DirectML 模型兼容转换失败，使用原始模型（可能较慢）: {e}")
         so = self._session_options()
         self.session = self._try_session(ort, so, chosen)
         self.provider_used = self.session.get_providers()
@@ -446,11 +457,26 @@ class OnnxSrEngine(BaseEngine):
             Image.fromarray(cb).resize((ws, hs), Image.BICUBIC), dtype=np.float32)
         cr2 = np.asarray(
             Image.fromarray(cr).resize((ws, hs), Image.BICUBIC), dtype=np.float32)
-        r2 = y2 + 1.402 * (cr2 - 0.5)
-        g2 = y2 - 0.344136 * (cb2 - 0.5) - 0.714136 * (cr2 - 0.5)
-        b2 = y2 + 1.772 * (cb2 - 0.5)
-        out = np.stack([r2, g2, b2], axis=-1) * 255.0
-        out = np.clip(out, 0, 255).astype(np.uint8)
+        # Quantize one plane at a time: avoid stacking and clipping a full RGB
+        # float image (44 MB at 720p x2). Preserve coefficients and operation order.
+        cb2 = cb2 - 0.5
+        cr2 = cr2 - 0.5
+        out = np.empty((hs, ws, 3), dtype=np.uint8)
+        plane = cr2 * 1.402
+        plane += y2
+        plane *= 255.0
+        np.clip(plane, 0, 255, out=plane)
+        out[..., 0] = plane
+        plane = y2 - 0.344136 * cb2
+        plane -= 0.714136 * cr2
+        plane *= 255.0
+        np.clip(plane, 0, 255, out=plane)
+        out[..., 1] = plane
+        plane = cb2 * 1.772
+        plane += y2
+        plane *= 255.0
+        np.clip(plane, 0, 255, out=plane)
+        out[..., 2] = plane
         if ph or pw:
             out = out[: h * self.scale, : w * self.scale]
         return np.ascontiguousarray(out)

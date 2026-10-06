@@ -1,6 +1,6 @@
 {
   "id": "illustrationjanai-4x",
-  "name": "IllustrationJaNai 4x（彩色插画）",
+  "name": "IllustrationJaNai V1 4x ESRGAN（彩漫插画 · 均衡）",
   "vendor": "the-database",
   "license": "CC-BY-NC-4.0",
   "engine": "onnx",
@@ -21,7 +21,7 @@
     "range": "0-1",
     "pad": 4
   },
-  "description": "彩色漫画页/插画 4x：去 JPEG 伪影与印刷网点残留，封面彩页放大通用",
+  "description": "IllustrationJaNai V1 ESRGAN：彩漫、封面与插画 4x 放大，侧重清理 JPEG 伪影与印刷网点残留。当前权重在纯蓝诊断图上出现明显蓝色衰减；严重压缩素材可能重绘眼睛或衣服细节，建议先预览。",
   "files": [
     {
       "name": "4x_IllustrationJaNai_V1_ESRGAN.onnx",
@@ -37,5 +37,7 @@
   "scenes": [
     "manga",
     "image"
-  ]
+  ],
+  "category": "illustration",
+  "version": "V1 ESRGAN"
 }
