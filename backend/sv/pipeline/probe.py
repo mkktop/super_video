@@ -9,6 +9,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from ..paths import ffmpeg_bin, ffprobe_bin
+from .subtitle import TEXT_CODECS
 from ..utils.process import WINDOWS_CREATE_FLAGS
 
 
@@ -42,6 +43,7 @@ class MediaInfo:
     subtitles: list[str] = field(default_factory=list)  # 字幕流编码名（subrip/hdmv_pgs_subtitle…）
     total_frames: int = 0
     field_order: str = "progressive"  # tt/bb/tb/bt=隔行（ffprobe 场序声明）；progressive=逐行
+    subtitle_tracks: list[dict] = field(default_factory=list)
 
     @property
     def has_audio(self) -> bool:
@@ -137,6 +139,14 @@ def probe(path: str | Path, exact_frames: bool = True) -> MediaInfo:
         audio=audio,
         subtitle_count=len(subs),
         subtitles=[s.get("codec_name", "?") for s in subs],
+        subtitle_tracks=[dict(index=s['index'], stream=i, codec=s.get('codec_name', '?'),
+                              language=s.get('tags', {}).get('language', 'und'),
+                              title=s.get('tags', {}).get('title', ''),
+                              default=bool(s.get('disposition', {}).get('default')),
+                              forced=bool(s.get('disposition', {}).get('forced')),
+                              is_text=s.get('codec_name') in TEXT_CODECS,
+                              burn_supported=s.get('codec_name') in TEXT_CODECS)
+                         for i, s in enumerate(subs)],
         field_order=v.get("field_order", "progressive") or "progressive",
     )
 

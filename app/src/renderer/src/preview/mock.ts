@@ -414,7 +414,13 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
       return Promise.resolve(json({
         ok: true, error: null, width: 1920, height: 1080, fps: 23.976,
         duration_s: 1420.5, total_frames: 34069, codec: 'h264', pix_fmt: 'yuv420p',
-        has_audio: true, audio_tracks: ['aac 2.0'], subtitles: [],
+        has_audio: true, audio_tracks: ['aac 2.0'], subtitles: ['ass', 'subrip', 'hdmv_pgs_subtitle'],
+        subtitle_tracks: [
+          { index: 2, stream: 0, codec: 'ass', language: 'zho', title: '简体中文', default: true, forced: false, is_text: true, burn_supported: true },
+          { index: 3, stream: 1, codec: 'subrip', language: 'eng', title: 'English', default: false, forced: false, is_text: true, burn_supported: true },
+          { index: 4, stream: 2, codec: 'hdmv_pgs_subtitle', language: 'jpn', title: '日语 PGS（暂不支持烧录）', default: false, forced: false, is_text: false, burn_supported: false },
+        ],
+        subtitle_burn: { supported: true, error: null },
         bit_depth: 8, vfr: false, field_order: 'progressive',
         decoder: { nvdec: true, d3d11va: true },
         recommend: {
@@ -424,6 +430,10 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
             '源高 1080px，推荐 x2（→ 2160p）', '源帧率 23.98，如需更流畅可手动开启 RIFE 补帧（默认不自动开）'],
         },
       }))
+    }
+    if (method === 'POST' && path === '/api/subtitles/preview') {
+      return Promise.resolve(new Response(`<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#304050"/><text x="640" y="640" text-anchor="middle" fill="white" stroke="#111" stroke-width="2" paint-order="stroke" font-size="32" font-family="Microsoft YaHei, sans-serif">字幕烧录预览 · 示例画面</text></svg>`,
+        { headers: { 'Content-Type': 'image/svg+xml', 'X-Subtitle-Time': '12.000' } }))
     }
     if (method === 'POST' && path === '/api/models/import') return Promise.resolve(json({ ok: true }))
     if (method === 'GET' && path === '/api/compare/cache') return Promise.resolve(json({ jobs: 3, bytes: 2362232012 }))
@@ -545,6 +555,7 @@ function installSvBridge(): void {
     onUpdateProgress: () => () => {},
     onUpdateReady: () => () => {},
     pickVideo: () => Promise.resolve(['D:\\videos\\anime_ep01_1080p.mkv']),
+    pickSubtitle: () => Promise.resolve('D:\\videos\\anime_ep01_1080p.srt'),
     pickImages: () => Promise.resolve(['D:\\pics\\comic_p01.png', 'D:\\pics\\comic_p02.png', 'D:\\pics\\comic_p03.png']),
     pickOutput: (suggest: string) => Promise.resolve(`D:\\output\\${suggest}`),
     pickModel: () => Promise.resolve('D:\\models\\my_custom.onnx'),

@@ -19,6 +19,7 @@ from PIL import Image
 from ..paths import TEMP_DIR, ffmpeg_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS
 from .probe import MediaInfo
+from .subtitle import output_filters
 from .stream import (
     EncodeOpts,
     PipelineError,
@@ -199,10 +200,10 @@ class ChunkedPipeline:
             cmd += subtitle_args(enc, subs)
             cmd += ["-map_chapters", "1"]
         cmd += video_codec_args(enc)
-        if self.target_size is not None:
-            tw, th = self.target_size
-            if (tw, th) != (info.width * tx.scale, info.height * tx.scale):
-                cmd += ["-vf", f"scale={tw}:{th}:flags=lanczos"]
+        frame_size = (info.width * tx.scale, info.height * tx.scale)
+        vf = output_filters(frame_size, self.target_size or frame_size, enc.burn_subtitle)
+        if vf:
+            cmd += ["-vf", vf]
         if has_audio:
             cmd += audio_args(enc, enc.mp4_family, audio_codecs)
         if enc.mp4_family:

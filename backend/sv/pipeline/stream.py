@@ -13,15 +13,12 @@ import numpy as np
 from ..paths import ffmpeg_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS, kill_tree
 from .probe import MediaInfo
+from .subtitle import BurnSubtitle, TEXT_CODECS, output_filters
 
 _MP4_AUDIO_COPY_OK = {"aac", "mp3", "ac3", "eac3", "alac"}
 
 # 文本字幕（可转 mov_text 进 mp4）；图形字幕（PGS/DVB 等）只能进 mkv 原样保留
-TEXT_SUBS = {
-    "subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "sami",
-    "microdvd", "subviewer", "vplayer", "realtext", "stl", "pjs", "jacosub",
-    "mpl2", "subviewer1",
-}
+TEXT_SUBS = TEXT_CODECS
 
 CONTAINERS = ("mp4", "mkv", "mov")
 
@@ -33,9 +30,10 @@ class EncodeOpts:
     crf: int = 18
     preset: str = "medium"
     audio_mode: str = "auto"  # auto: 兼容则 copy 否则 aac | copy | aac | flac(仅mkv) | none
-    subtitle_mode: str = "none"  # none | auto（mkv 原样保留；mp4/mov 仅全文本字幕时转 mov_text）
+    subtitle_mode: str = "none"  # none | auto（字幕轨保留）| burn / burn_keep（烧录，可同时保留原字幕轨）
     container: str = "mp4"  # mp4 | mkv | mov
     out_kind: str = "video"  # video | png | jpg——图片序列=整视频逐帧导出（无音轨）
+    burn_subtitle: BurnSubtitle | None = None
 
     @property
     def mp4_family(self) -> bool:
@@ -216,7 +214,7 @@ def subtitle_args(enc: EncodeOpts, sub_codecs: list[str]) -> list[str]:
       （ASS 特效字依赖；mp4 家族挂附件会直接混流失败，故仅 mkv）
     - mp4/mov：仅当全部为文本字幕时转 mov_text，否则整体丢弃（避免 PGS 混流失败）
     """
-    if enc.subtitle_mode != "auto" or not sub_codecs:
+    if enc.subtitle_mode not in ("auto", "burn_keep") or not sub_codecs:
         return []
     if enc.mp4_family:
         if all(c in TEXT_SUBS for c in sub_codecs):
@@ -238,6 +236,7 @@ def encoder_cmd(
     audio_codecs: list[str] | None,  # 源各音轨编码（全部映射；None/空=不挂音轨）
     sub_codecs: list[str] | None = None,
     start_number: int = 1,  # 图片序列：本段首帧的全局帧号（分段续跑全局编号）
+    subtitle_start_s: float = 0,
 ) -> list[str]:
     if enc.out_kind != "video":
         # 图片序列：image2 复用器一帧一图；无音轨/封装参数
@@ -270,8 +269,9 @@ def encoder_cmd(
         cmd += ["-map_chapters", "1"]  # 章节从源继承（显式声明；默认取"首个含章节的输入"）
 
     cmd += video_codec_args(enc)
-    if (target_w, target_h) != (frame_w, frame_h):
-        cmd += ["-vf", f"scale={target_w}:{target_h}:flags=lanczos"]
+    vf = output_filters((frame_w, frame_h), (target_w, target_h), enc.burn_subtitle, subtitle_start_s)
+    if vf:
+        cmd += ["-vf", vf]
 
     if mux_source:
         if tracks:
@@ -364,7 +364,8 @@ class StreamPipeline:
         enc_proc = asyncio.create_subprocess_exec(
             *encoder_cmd(info.path, output_path, frame_w, frame_h, target_w, target_h,
                          out_fps_str, enc, self.with_audio,
-                         audio_codecs, sub_codecs, start_number=self.frame_start),
+                         audio_codecs, sub_codecs, start_number=self.frame_start,
+                         subtitle_start_s=self.seek_s or 0),
             stdin=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             creationflags=WINDOWS_CREATE_FLAGS,

@@ -16,6 +16,7 @@ trt-runtime.old/
 
 # 用户素材（仅本地）
 samples/
+reports/
 
 # 打包与工具
 bin/

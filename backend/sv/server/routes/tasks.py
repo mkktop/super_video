@@ -543,9 +543,23 @@ def _create_task(body: TaskCreate) -> dict:
     # 默认 auto（保留）：与音轨 auto 对齐——mkv 原样 copy 无损、mp4 文本转
     # mov_text；图形字幕进不了 mp4 由 worker 落日志说明，不再静默丢轨
     subtitle_mode = params.get("subtitle_mode", "auto")
-    if subtitle_mode not in ("none", "auto"):
-        raise HTTPException(400, "subtitle_mode 仅支持 none / auto")
+    if subtitle_mode not in ("none", "auto", "burn", "burn_keep"):
+        raise HTTPException(400, "subtitle_mode 仅支持 none / auto / burn / burn_keep")
     params["subtitle_mode"] = subtitle_mode
+    params.pop('_burn_subtitle', None)
+    if subtitle_mode in ('burn', 'burn_keep'):
+        if out_kind != 'video':
+            raise HTTPException(400, '字幕烧录仅支持视频输出')
+        from ...pipeline.subtitle import validate_options, subtitle_capability
+        try:
+            capability = subtitle_capability()
+            if not capability['supported']:
+                raise ValueError(capability['error'])
+            params['subtitle'] = validate_options(params.get('subtitle', {}), info)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+    else:
+        params.pop('subtitle', None)
     interp = params.get("interp", "off")
     if interp not in ("off", "rife2x"):
         raise HTTPException(400, "interp 仅支持 off / rife2x")
@@ -737,7 +751,8 @@ async def remove_task(task_id: str) -> dict:
 
 def purge_task_files(task_id: str) -> None:
     """删除任务专属临时产物：分段/分块工作目录 + 预览图 + 对比静帧缓存 + 性能日志。"""
-    for d in (TEMP_DIR / "segmented" / task_id, TEMP_DIR / "chunked" / task_id):
+    for d in (TEMP_DIR / "segmented" / task_id, TEMP_DIR / "chunked" / task_id,
+              TEMP_DIR / 'subtitles' / task_id):
         shutil.rmtree(d, ignore_errors=True)
     task_stills.clear(task_id)
     pv = TEMP_DIR / "previews"
@@ -761,7 +776,7 @@ def sweep_orphan_workdirs(max_age_s: float = 3600.0) -> None:
     """
     ids = db.all_task_ids()
     deadline = time.time() - max_age_s
-    for sub in ("segmented", "chunked"):
+    for sub in ("segmented", "chunked", "subtitles"):
         base = TEMP_DIR / sub
         if not base.is_dir():
             continue

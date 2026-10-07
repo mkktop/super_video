@@ -163,7 +163,7 @@ def api_client(monkeypatch, tmp_path):
     info = SimpleNamespace(
         width=320, height=240, fps=24.0, fps_str="24/1", vfr=False,
         video_codec="h264", pix_fmt="yuv420p", duration_s=1.0,
-        total_frames=24, has_audio=False, audio=[], subtitles=[],
+        total_frames=24, has_audio=False, audio=[], subtitles=[], subtitle_tracks=[],
         path=tmp_path / "in.mp4",
     )
     monkeypatch.setattr("sv.server.routes.tasks.probe", lambda p: info)
@@ -216,7 +216,7 @@ def test_probe_endpoint_decoder_map(monkeypatch, tmp_path):
     info = SimpleNamespace(
         width=320, height=240, fps=24.0, fps_str="24/1", vfr=False,
         video_codec="hevc", pix_fmt="yuv420p10le", duration_s=1.0,
-        total_frames=24, has_audio=False, audio=[], subtitles=[],
+        total_frames=24, has_audio=False, audio=[], subtitles=[], subtitle_tracks=[],
         path=tmp_path / "in.mkv",
     )
     monkeypatch.setattr("sv.server.routes.models.probe", lambda p: info)

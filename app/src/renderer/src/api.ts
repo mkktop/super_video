@@ -96,6 +96,7 @@ export interface Preset {
   container?: 'mp4' | 'mkv' | 'mov'
   audio_mode?: string
   subtitle_mode?: string
+  subtitle?: SubtitleOptions
   denoise?: number | null
   deinterlace?: boolean
   deband?: boolean
@@ -165,6 +166,8 @@ export interface ProbeInfo {
   has_audio: boolean
   audio_tracks?: string[]
   subtitles?: string[]
+  subtitle_tracks?: { index: number; stream: number; codec: string; language: string; title: string; default: boolean; forced: boolean; is_text: boolean; burn_supported: boolean }[]
+  subtitle_burn?: { supported: boolean; error: string | null }
   /** 按本文件实测的硬解可用性（hwdecode=true 时附带） */
   decoder?: { nvdec: boolean; d3d11va: boolean }
   /** 智能推荐（recommend=true 时附带；源分析失败则缺省） */
@@ -175,6 +178,24 @@ export interface ProbeInfo {
   vfr?: boolean
   /** 场序：progressive=逐行；tt/bb/tb/bt=隔行（反交错建议依据） */
   field_order?: string
+}
+
+export interface SubtitleOptions {
+  source: 'embedded' | 'external' | 'matching'
+  path?: string
+  stream?: number
+  selection?: 'track' | 'match'
+  language?: string
+  title?: string
+  encoding?: string
+  delay_s?: number
+  font_name?: string
+  font_size?: number
+  outline?: number
+  shadow?: number
+  font_color?: string
+  margin_v?: number
+  fonts_dir?: string
 }
 
 export interface Task {
@@ -393,6 +414,7 @@ export const api = {
     container?: string
     audio_mode?: string
     subtitle_mode?: string
+    subtitle?: SubtitleOptions
     interp?: string
     denoise?: number | null
     deinterlace?: boolean
@@ -412,6 +434,11 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path, hwdecode, recommend }),
+    })
+  },
+  async subtitlePreview(body: { input: string; subtitle: SubtitleOptions; width: number; height: number; time_s?: number }): Promise<Response> {
+    return _fetch(`${baseUrl}/api/subtitles/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
   },
   async settings(): Promise<Record<string, unknown>> {

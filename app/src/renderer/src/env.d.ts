@@ -28,6 +28,7 @@ declare global {
       onUpdateProgress: (cb: (p: { percent: number; source: 'github' | 'r2' }) => void) => () => void
       onUpdateReady: (cb: (version: string) => void) => () => void
       pickVideo: () => Promise<string[]>
+      pickSubtitle: () => Promise<string | null>
       pickImages: () => Promise<string[]>
       pickOutput: (suggest: string) => Promise<string | null>
       pickModel: () => Promise<string | null>

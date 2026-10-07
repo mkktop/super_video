@@ -729,7 +729,7 @@ _TOOLS: list[tuple[str, str, dict, Callable[[dict], Any]]] = [
           "interp": {"type": "string", "enum": ["off", "rife2x"], "description": "补帧设置（实验性，probe 未推荐勿开）"},
           "overwrite": {"type": "boolean", "description": "确认覆盖已存在的输出（收到 409 后置 true 重交）"},
           "extra_params": {"type": "object",
-                           "description": "透传其他任务参数（target_w/target_h、deinterlace、deband、folder_src、merge_pdf、pdf_out、format、model_id_color、mix_pass 等）"},
+                           "description": "透传其他任务参数。视频字幕烧录：subtitle_mode=burn；烧录并保留原字幕轨用 burn_keep。subtitle={source:external,path:字幕路径,delay_s:0}；指定内嵌文本轨用 source:embedded,stream:0；批量内嵌用 source:embedded,selection:match,language:zh,title:简体，按语言和标题包含匹配唯一文本轨，不依赖轨道序号；同名外挂用 source:matching。支持 SRT/ASS/SSA，还可含 encoding、font_name、font_size、font_color(#RRGGBB)、outline、shadow、margin_v、fonts_dir。其它参数：target_w/target_h、deinterlace、deband、folder_src、merge_pdf、pdf_out、format、model_id_color、mix_pass 等"},
       },
       "anyOf": [{"required": ["input"]}, {"required": ["inputs"]}, {"required": ["input_folder"]}]}, _t_task_create),
     ("rf_tasks",

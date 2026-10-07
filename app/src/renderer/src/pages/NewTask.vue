@@ -23,7 +23,8 @@ import {
   useDialog,
   useMessage,
 } from 'naive-ui'
-import { api, mediaSrc, type ModelInfo, type ProbeInfo } from '../api'
+import { api, mediaSrc, type ModelInfo, type ProbeInfo, type SubtitleOptions } from '../api'
+import SubtitleSettings from '../components/SubtitleSettings.vue'
 import { refreshTasks, store, ui } from '../store'
 import { useFileDrop, useRecentVideos } from '../composables/videoPicks'
 import { DEFAULT_ANIME_MODEL } from '../composables/modelDefaults'
@@ -55,7 +56,10 @@ const container = ref<'mp4' | 'mkv' | 'mov'>('mp4')
 const audioMode = ref('auto')
 // 字幕默认保留（与音轨 auto 对齐）：批量模式不逐文件探测，开关根本不显示，
 // 默认关会让 MKV→MKV 任务静默丢字幕（实测 BDRemux 双 PGS 轨全丢）
-const keepSubtitles = ref(true)
+const subtitleMode = ref<'auto' | 'none' | 'burn' | 'burn_keep'>('auto')
+const subtitleOptions = ref<SubtitleOptions>({ source: 'external' })
+const subtitleReady = ref(false)
+const burnsSubtitles = computed(() => subtitleMode.value === 'burn' || subtitleMode.value === 'burn_keep')
 const interp = ref<'off' | 'rife2x'>('off')
 const denoise = ref<number | null>(null)
 const deinterlace = ref(false) // 反交错（老 DVD/1080i 源；帧数不变，checkpoint 语义安全）
@@ -172,6 +176,7 @@ const canSubmit = computed(
     !!modelId.value &&
     !!selectedModel.value?.vram_ok &&
     !submitting.value &&
+    (isImage.value || !burnsSubtitles.value || subtitleReady.value) &&
     !(resMode.value === 'custom' && !customOk.value),
 )
 
@@ -293,7 +298,8 @@ async function consumeRetryParams() {
     container.value = p.container
   }
   if (typeof p.audio_mode === 'string') audioMode.value = p.audio_mode
-  keepSubtitles.value = p.subtitle_mode === 'auto'
+  subtitleMode.value = p.subtitle_mode === 'burn_keep' ? 'burn_keep' : p.subtitle_mode === 'burn' ? 'burn' : p.subtitle_mode === 'none' ? 'none' : 'auto'
+  subtitleOptions.value = (p.subtitle as SubtitleOptions | undefined) ?? { source: 'external' }
   interp.value = p.interp === 'rife2x' ? 'rife2x' : 'off'
   denoise.value = typeof p.denoise === 'number' ? p.denoise : null
   deinterlace.value = p.deinterlace === true
@@ -335,8 +341,9 @@ function applyPreset(pid: string) {
   container.value = p.container ?? 'mp4'
   audioMode.value = p.audio_mode ?? 'auto'
   // 旧预设不含字幕偏好：保持用户当前选择，不静默重置为关
-  if (p.subtitle_mode === 'auto' || p.subtitle_mode === 'none') {
-    keepSubtitles.value = p.subtitle_mode === 'auto'
+  if (p.subtitle_mode === 'auto' || p.subtitle_mode === 'none' || p.subtitle_mode === 'burn' || p.subtitle_mode === 'burn_keep') {
+    subtitleMode.value = p.subtitle_mode
+    if (p.subtitle_mode === 'burn' || p.subtitle_mode === 'burn_keep') subtitleOptions.value = p.subtitle ?? { source: 'matching' }
   }
   interp.value = p.interp === 'rife2x' ? 'rife2x' : 'off'
   denoise.value = typeof p.denoise === 'number' ? p.denoise : null
@@ -373,7 +380,8 @@ async function saveAsPreset() {
     crf: crf.value,
     container: container.value,
     audio_mode: audioMode.value,
-    subtitle_mode: keepSubtitles.value ? 'auto' : 'none',
+    subtitle_mode: subtitleMode.value,
+    ...(burnsSubtitles.value ? { subtitle: { ...subtitleOptions.value, ...(subtitleOptions.value.source === 'embedded' && subtitleOptions.value.selection === 'match' ? {} : { source: 'matching' as const }), path: undefined, stream: undefined } } : {}),
     interp: interp.value,
     denoise: denoise.value,
     deinterlace: deinterlace.value,
@@ -421,7 +429,8 @@ function buildCreateBody(input: string, overwrite: boolean) {
             crf: crf.value,
             container: container.value,
             audio_mode: audioMode.value,
-            subtitle_mode: keepSubtitles.value ? 'auto' : 'none',
+            subtitle_mode: subtitleMode.value,
+            ...(burnsSubtitles.value ? { subtitle: subtitleOptions.value } : {}),
           }),
       interp: interp.value,
       decoder: decoder.value,
@@ -848,10 +857,16 @@ export default { name: 'NewTask' }
                 <span v-if="audioHint" class="sub-hint">{{ audioHint }}</span>
               </div>
             </NFormItem>
-            <NFormItem v-if="outKind === 'video' && srcSubs.length" label="字幕">
-              <div class="sub-row">
-                <NSwitch v-model:value="keepSubtitles" size="small" />
-                <span class="sub-hint">{{ subHint }}</span>
+            <NFormItem v-if="outKind === 'video'" label="字幕">
+              <div class="sub-col" style="width: 100%; max-width: 380px">
+                <NSelect v-model:value="subtitleMode" :options="[
+                  { label: '保留字幕轨（可开关）', value: 'auto' },
+                  { label: '烧录进画面（始终显示）', value: 'burn', disabled: probeInfo?.subtitle_burn?.supported === false },
+                  { label: '烧录并保留原字幕轨', value: 'burn_keep', disabled: probeInfo?.subtitle_burn?.supported === false },
+                  { label: '不保留字幕', value: 'none' },
+                ]" />
+                <span v-if="subtitleMode === 'auto' && srcSubs.length" class="sub-hint">{{ subHint }}</span>
+                <span v-if="probeInfo?.subtitle_burn?.supported === false" class="sub-hint">{{ probeInfo.subtitle_burn.error }}</span>
               </div>
             </NFormItem>
           </div>
@@ -917,6 +932,14 @@ export default { name: 'NewTask' }
             </NFormItem>
           </div>
         </div>
+        <div v-if="outKind === 'video' && burnsSubtitles" class="subtitle-block">
+          <h3>字幕烧录</h3>
+          <p v-if="subtitleMode === 'burn_keep'" class="sub-hint">成片同时保留源视频字幕轨；播放器开启相同字幕时可能重复显示。</p>
+          <SubtitleSettings v-model="subtitleOptions" :inputs="inputs" :probe="probeInfo"
+            :width="resMode === 'custom' ? effW : srcW * targetScale"
+            :height="resMode === 'custom' ? effH : srcH * targetScale"
+            @ready="subtitleReady = $event" />
+        </div>
       </NForm>
     </section>
 
@@ -932,7 +955,7 @@ export default { name: 'NewTask' }
       </button>
       <span class="footer-spacer" />
       <span v-if="inputs.length" class="footer-summary">
-        {{ inputs.length === 1 ? '1 个视频已就绪' : `${inputs.length} 个视频将使用相同参数` }}
+        {{ !isImage && burnsSubtitles && !subtitleReady ? '请先选择可烧录的字幕' : inputs.length === 1 ? '1 个视频已就绪' : `${inputs.length} 个视频将使用相同参数` }}
       </span>
       <NButton
         type="primary"
@@ -1238,6 +1261,8 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
   column-gap: 36px;
 }
 .out-col { display: flex; flex-direction: column; }
+.subtitle-block { margin-top: 20px; padding-top: 22px; border-top: 1px solid var(--sv-border); }
+.subtitle-block h3 { margin: 0 0 18px; font-size: 14px; font-weight: 600; }
 
 .batch-note { font-size: 12.5px; color: var(--sv-text-dim); }
 .res-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

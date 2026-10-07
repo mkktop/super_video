@@ -6,10 +6,14 @@ import json
 import logging
 import shutil
 import sys
+import tempfile
+import math
+import subprocess
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
+from ...paths import TEMP_DIR
 
 from ...models import manager
 from ...models.registry import (
@@ -92,6 +96,7 @@ class PresetCreate(BaseModel):
     container: str = "mp4"
     audio_mode: str = "auto"
     subtitle_mode: str = "auto"
+    subtitle: dict = Field(default_factory=dict)
     interp: str = "off"
     denoise: int | None = None
     deinterlace: bool = False
@@ -117,8 +122,19 @@ def create_preset(body: PresetCreate) -> dict:
         raise HTTPException(400, "container 仅支持 mp4 / mkv / mov")
     if body.audio_mode not in _AUDIO_MODES:
         raise HTTPException(400, f"audio_mode 仅支持 {' / '.join(_AUDIO_MODES)}")
-    if body.subtitle_mode not in ("none", "auto"):
-        raise HTTPException(400, "subtitle_mode 仅支持 none / auto")
+    if body.subtitle_mode not in ("none", "auto", "burn", "burn_keep"):
+        raise HTTPException(400, "subtitle_mode 仅支持 none / auto / burn / burn_keep")
+    if body.subtitle_mode in ('burn', 'burn_keep'):
+        from ...pipeline.subtitle import validate_options
+        # Presets keep style preferences, never the previous episode's subtitle path/track.
+        semantic_match = body.subtitle.get('source') == 'embedded' and body.subtitle.get('selection') == 'match'
+        opts = dict(body.subtitle) if semantic_match else dict(body.subtitle, source='matching')
+        try:
+            body.subtitle = validate_options(opts)
+            body.subtitle.pop('stream', None)
+            body.subtitle.pop('path', None)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
     if body.interp not in ("off", "rife2x"):
         raise HTTPException(400, "interp 仅支持 off / rife2x")
     try:
@@ -143,6 +159,46 @@ class ProbeBody(BaseModel):
     recommend: bool = False  # 附带智能推荐（采样 4 帧内容分析，+~1s；任务页推荐卡用）
 
 
+class SubtitlePreviewBody(BaseModel):
+    input: str
+    subtitle: dict = Field(default_factory=dict)
+    width: int = Field(ge=2, le=8192)
+    height: int = Field(ge=2, le=8192)
+    time_s: float | None = None
+
+
+@router.post('/api/subtitles/preview')
+def subtitle_preview(body: SubtitlePreviewBody):
+    """Render source resized to output dimensions using the exact production subtitle filter."""
+    from ...pipeline.subtitle import prepare_subtitle, output_filters, _run
+    if body.width * body.height > 33_554_432:
+        raise HTTPException(400, '字幕预览分辨率过大')
+    if body.time_s is not None and (not math.isfinite(body.time_s) or body.time_s < 0):
+        raise HTTPException(400, '预览时间需为非负有限数')
+    try:
+        info = probe(body.input, exact_frames=False)
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='subtitle-preview-', dir=TEMP_DIR) as tmp:
+            work = Path(tmp)
+            size = (body.width, body.height)
+            burn = prepare_subtitle(info, body.subtitle, work / 'snapshot', size)
+            t = body.time_s
+            if t is None:
+                import re
+                text = burn.path.read_text(encoding='utf-8')
+                match = re.search(r'^Dialogue:\s*[^,]*,(\d+):(\d+):(\d+(?:\.\d+)?),', text, re.M)
+                t = (int(match[1]) * 3600 + int(match[2]) * 60 + float(match[3]) + burn.delay_s + 0.2) if match else 0
+            t = max(0, min(t, max(0, info.duration_s - 0.1)))
+            vf = output_filters((info.width, info.height), size, burn, t)
+            _run(['-loglevel', 'error', '-ss', f'{t:.9f}', '-i', str(info.path),
+                  '-vf', vf, '-frames:v', '1', '-an', '-sn', 'preview.png'], work, 30)
+            return Response((work / 'preview.png').read_bytes(), media_type='image/png',
+                            headers={'X-Subtitle-Time': f'{t:.3f}',
+                                     'X-Subtitle-Warnings': json.dumps(burn.warnings, ensure_ascii=True)})
+    except (ValueError, OSError, UnsupportedMedia, subprocess.TimeoutExpired) as e:
+        raise HTTPException(400, str(e)) from e
+
+
 @router.post("/api/probe")
 def probe_media(body: ProbeBody) -> dict:
     """向导第一步：媒体信息 + M0 可行性（供 UI 展示与预估）。"""
@@ -158,6 +214,7 @@ def probe_media(body: ProbeBody) -> dict:
             m0_error = str(e)
     except UnsupportedMedia as e:
         raise HTTPException(422, str(e))
+    from ...pipeline.subtitle import subtitle_capability
     resp = {
         "ok": m0_error is None,
         "error": m0_error,
@@ -169,6 +226,8 @@ def probe_media(body: ProbeBody) -> dict:
         "has_audio": info.has_audio,
         "audio_tracks": [a.codec for a in info.audio],
         "subtitles": info.subtitles,
+        "subtitle_tracks": info.subtitle_tracks,
+        "subtitle_burn": subtitle_capability(),
         # 媒体属性透出（UI 信息卡展示 10bit/VFR/隔行，用户据此决定预处理开关）
         "bit_depth": getattr(info, "bit_depth", 8),
         "vfr": bool(getattr(info, "vfr", False)),

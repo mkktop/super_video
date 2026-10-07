@@ -34,6 +34,8 @@ pnpm dist     # build + electron-builder NSIS 安装包 → ../dist-app/
 
 ## 页面管理：动态组件 + KeepAlive（无 vue-router）
 
+新建视频任务的输出设置提供「保留字幕轨 / 烧录进画面 / 烧录并保留原字幕轨 / 不保留字幕」。烧录模式由 `components/SubtitleSettings.vue` 管理：选择内嵌文本轨、外部 SRT/ASS/SSA 或同名字幕匹配，调整编码、延迟及文本字幕字体、颜色、描边、阴影和边距，调用 `/api/subtitles/preview` 显示源画面按输出尺寸缩放后的真实字幕渲染。预览不包含 AI 超分效果；浏览器 preview 模式使用示意图。批量内嵌字幕按语言/标题逐视频查找唯一文本轨，无匹配或多条匹配时停止提示。预设保存匹配条件或同名文件规则，不绑定上一集的文件或轨道序号。后端检测 FFmpeg 的字幕滤镜，缺少 libass 时界面禁用烧录并显示原因。
+
 项目**没有用 vue-router / Pinia**（PLAN.md 蓝图提过，实际未采用）：页面切换是
 `App.vue` 里动态 `<component :is>` + `<KeepAlive>` + `<Transition>` 的组合，
 全局状态是 `store.ts` 的单个 `reactive` 对象。

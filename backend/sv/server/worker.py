@@ -79,6 +79,7 @@ def _encode_opts(params: dict, out_kind: str) -> EncodeOpts:
         subtitle_mode=params.get("subtitle_mode", "auto"),
         container=params.get("container", "mp4"),
         out_kind=out_kind,
+        burn_subtitle=params.get('_burn_subtitle'),
     )
 
 
@@ -157,6 +158,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     _release_aux_slots()
 
     params = task["params"]
+    params.pop('_burn_subtitle', None)
     model_id = task["model_id"]
     input_path = Path(task["input_path"])
     output_path = Path(task["output_path"])
@@ -214,13 +216,25 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         return 1
     # 字幕保留但容器装不下图形字幕（PGS/DVB 只能进 mkv）：明确告知丢弃，
     # 不静默——用户看到"字幕开关开着"却找不到轨，会以为功能坏了
-    if (out_kind == "video" and params.get("subtitle_mode", "auto") == "auto"
+    if (out_kind == "video" and params.get("subtitle_mode", "auto") in ("auto", "burn_keep")
             and info.subtitles
             and params.get("container", "mp4") in ("mp4", "mov")
             and not all(c in TEXT_SUBS for c in info.subtitles)):
         emit({"type": "log", "line":
               "源含图形字幕（PGS/DVB 等），MP4/MOV 容器无法封装，本次不保留字幕；"
               "如需保留请将封装容器改为 MKV"})
+    if params.get('subtitle_mode') in ('burn', 'burn_keep'):
+        try:
+            from sv.pipeline.subtitle import prepare_subtitle
+            params['_burn_subtitle'] = prepare_subtitle(
+                info, params.get('subtitle', {}), TEMP_DIR / 'subtitles' / task_id,
+                target_size or (info.width * target, info.height * target))
+            emit({'type': 'log', 'line': '字幕已准备，将在最终尺寸上烧录进画面'})
+            for warning in params['_burn_subtitle'].warnings:
+                emit({'type': 'log', 'line': warning})
+        except Exception as e:
+            emit({'type': 'failed', 'error': f'字幕不可用：{e}'})
+            return 1
     denoise = params.get("denoise")  # real-cugan 降噪档：0/1/2/3 → 对应变体权重
     variant = f"denoise{int(denoise)}" if denoise is not None else None
     if variant is None:
@@ -368,6 +382,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             rewrite_final_previews(output_path, input_path,
                                    preview_dir / f"{task_id}.jpg",
                                    preview_dir / f"{task_id}_src.jpg")
+        shutil.rmtree(TEMP_DIR / 'subtitles' / task_id, ignore_errors=True)
         emit({
             "type": "done", "frames": stats.frames,
             "elapsed": round(stats.elapsed_s, 1),
@@ -540,6 +555,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     # 的成片要等 concat 落盘后才有意义——上面 parallel 分支已保证此刻文件完整）
     if shard is None and out_kind == "video":
         rewrite_final_previews(output_path, input_path, preview_path, src_preview_path)
+        shutil.rmtree(TEMP_DIR / 'subtitles' / task_id, ignore_errors=True)
     emit({
         "type": "done", "frames": stats.frames,
         "total_frames": stats.frames,  # 真实片尾修正后回填 DB（旧事件无此键按估算）

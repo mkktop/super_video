@@ -23,6 +23,7 @@ from pathlib import Path
 from ..paths import TEMP_DIR, ffmpeg_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS
 from .probe import MediaInfo
+from .subtitle import check_resume_fingerprint
 from .stream import (
     EncodeOpts,
     PipelineError,
@@ -175,6 +176,7 @@ class SegmentedPipeline:
             raise PipelineError("无法确定总帧数，不能分段处理")
         work = TEMP_DIR / "segmented" / self.task_id
         work.mkdir(parents=True, exist_ok=True)
+        check_resume_fingerprint(work, self.enc.burn_subtitle)
         # 分段数自适应：约 8 段（小视频至少 60 帧/段，大视频每段 ≤600 帧 ≈ 3-5 分钟工作量）
         seg = self.seg_frames or min(600, max(60, total_in // 8))
         factor = 2 if self.interp is not None else 1

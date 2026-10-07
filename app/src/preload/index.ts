@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('sv', {
     return () => ipcRenderer.removeListener('app:update-ready', fn)
   },
   pickVideo: () => ipcRenderer.invoke('dialog:pickVideo') as Promise<string[]>,
+  pickSubtitle: () => ipcRenderer.invoke('dialog:pickSubtitle') as Promise<string | null>,
   pickImages: () => ipcRenderer.invoke('dialog:pickImages') as Promise<string[]>,
   pickOutput: (suggest: string) => ipcRenderer.invoke('dialog:pickOutput', suggest) as Promise<string | null>,
   pickDir: () => ipcRenderer.invoke('dialog:pickDir') as Promise<string | null>,

@@ -220,6 +220,36 @@ worker 的 `done`/`failed`/`canceled` 终态事件不直接上 WS——runner �
 
 ## 测试与基准
 
+视频字幕烧录由 `sv/pipeline/subtitle.py` 负责准备、字体预检、任务快照与后置滤镜；三条视频管线复用，在最终尺寸上渲染后编码。任务创建参数示例（HTTP `params` 或 MCP `extra_params`）：
+
+```json
+{
+  "subtitle_mode": "burn",
+  "subtitle": {
+    "source": "external",
+    "path": "D:/videos/episode.srt",
+    "encoding": "utf-8-sig",
+    "delay_s": 0,
+    "font_name": "Microsoft YaHei",
+    "font_size": 48,
+    "font_color": "#FFFFFF",
+    "outline": 2,
+    "shadow": 1,
+    "margin_v": 50
+  }
+}
+```
+
+`subtitle_mode` 支持 `none/auto/burn/burn_keep`：最后一种烧录后同时保留源视频的软字幕，MKV 原样复制，MP4/MOV 沿用现有文本字幕兼容策略。播放时再次启用同一条软字幕可能重复显示。
+
+内嵌字幕使用 `source: "embedded", stream: 0`（字幕相对序号）；批量推荐 `source: "embedded", selection: "match", language: "zh", title: "简体"`。语言和标题至少一项；两项同时填写时需同时匹配，标题为不区分大小写的包含匹配，语言支持 chi/zho 等别名。每个视频必须匹配到唯一文本轨，不依赖轨道顺序。自动同名文件匹配使用 `source: "matching"`，要求视频旁唯一同名 SRT/ASS/SSA。保存预设时保留匹配条件或同名规则，移除固定文件路径和轨道序号。
+
+可选 `fonts_dir`，编码支持 `utf-8-sig/gb18030/big5`。字号、描边、阴影和边距以 1920×1080 为设计基准，`font_color` 为 `#RRGGBB`；ASS/SSA 原样式不覆盖。正延迟表示晚显示。PGS/VobSub 等位图字幕拒绝烧录，仍可原样保留到 MKV。probe 返回轨道的 `is_text/burn_supported` 和整体 `subtitle_burn.supported/error`；缺少 FFmpeg ass/subtitles 滤镜时创建任务直接报错，避免先运行 AI 推理。
+
+`POST /api/subtitles/preview` 接受 `input/subtitle/width/height/time_s?`，返回 PNG；省略时间则定位第一条字幕，响应头 `X-Subtitle-Time` 给出实际时间，`X-Subtitle-Warnings` 是字体警告 JSON。预览显示源画面缩放后的字幕效果，不执行 AI 推理。
+
+快照位于 `.tmp/subtitles/<task_id>`；成功或删除任务后清理，取消/失败后保留。续跑会校验字幕、字体、渲染器、目标尺寸与帧率指纹；改变设置需新建任务。`test_subtitle_burn.py` 用真实 FFmpeg 验证三条管线、补帧、跨段动画、延迟、分数帧率、真实中途取消与续跑、快照一致性、字体附件、API 与预览，以及 MP4/MKV 烧录后保留字幕、音频数据不变和 concat 视频复制。
+
 ```bash
 $py -m pytest tests/ -q          # 管线/引擎等测试（管线/引擎/服务层/并行/组件/下载器/图片超分/模型对比/PDF 合并/新模型/回归/MCP bridge；从 backend 目录跑；无 GPU/部分模型缺失时按机器跳过）
 cd ../app && pnpm test           # 前端 vitest（CI 同跑：ci.yml 后端 pytest + 前端类型检查/单测/构建）
