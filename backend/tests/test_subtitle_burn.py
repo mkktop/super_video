@@ -102,6 +102,51 @@ def test_snapshot_rejects_modified_subtitle(media, tmp_path):
         prepare_subtitle(info, options, tmp_path / 'snapshot', (320, 180))
 
 
+@pytest.mark.parametrize('source', ['external', 'embedded'])
+def test_ass_custom_styles_render_and_preserve_original_by_default(media, tmp_path, source):
+    info, sub = media
+    original = prepare_subtitle(info, {'source': 'external', 'path': str(sub)}, tmp_path / 'base-ass', (320, 180))
+    ass = tmp_path / 'authored.ass'
+    ass.write_bytes(original.path.read_bytes())
+    options = {'source': 'external', 'path': str(ass)}
+    if source == 'embedded':
+        mkv = tmp_path / 'authored.mkv'
+        ffmpeg('-i', str(info.path), '-i', str(ass), '-map', '0:v', '-map', '1:s', '-c', 'copy', str(mkv))
+        info = probe(mkv)
+        options = {'source': 'embedded', 'stream': 0}
+    keep = prepare_subtitle(info, dict(options, outline=8, font_color='#FF0000'), tmp_path / 'keep', (320, 180))
+    assert keep.path.read_text(encoding='utf-8') == original.path.read_text(encoding='utf-8')
+    custom = prepare_subtitle(info, dict(options, style_mode='custom', outline=8,
+                                        font_size=96, font_color='#FF0000'), tmp_path / 'custom', (320, 180))
+    for burn, name in [(keep, 'keep'), (custom, 'custom')]:
+        vf = output_filters((320, 180), (320, 180), burn, .75)
+        raw = ffmpeg('-f', 'lavfi', '-i', 'color=c=0x304050:s=320x180:r=24', '-vf', vf,
+                     '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-')
+        pixels = np.frombuffer(raw, np.uint8).reshape(180, 320, 3)
+        if name == 'custom':
+            assert np.count_nonzero((pixels[:, :, 0] > 180) & (pixels[:, :, 1] < 80)) > 5
+            assert np.count_nonzero(np.all(pixels < 20, axis=2)) > black_original
+        else:
+            assert np.count_nonzero((pixels[:, :, 0] > 180) & (pixels[:, :, 1] < 80)) == 0
+            black_original = np.count_nonzero(np.all(pixels < 20, axis=2))
+    with pytest.raises(ValueError, match='改变'):
+        prepare_subtitle(info, dict(options, style_mode='preserve'), tmp_path / 'custom', (320, 180))
+
+
+def test_ass_custom_styles_keep_design_coordinates_and_inline_effects(media, tmp_path):
+    from sv.pipeline.subtitle import override_ass_styles
+    info, sub = media
+    original = prepare_subtitle(info, {'source': 'external', 'path': str(sub)}, tmp_path / 'ass', (320, 180))
+    text = original.path.read_text(encoding='utf-8').replace('PlayResY: 1080', 'PlayResY: 720')
+    text = text.replace('你好 Subtitle', r'{\pos(800,600)\t(0,500,\bord4)}你好 Subtitle')
+    custom = override_ass_styles(text, validate_options({'source': 'external', 'path': str(sub), 'font_size': 96, 'outline': 6}))
+    assert 'PlayResY: 720' in custom
+    assert ',64.000000,' in custom  # 96 at 1080p becomes 64 in the authored 720p grid
+    assert ',4.000000,' in custom  # proportional outline
+    assert r'{\pos(800,600)\t(0,500,\bord4)}' in custom
+    assert 'ScaledBorderAndShadow: yes' in custom
+
+
 def test_delay_and_segment_animation(media, tmp_path):
     info, sub = media
     # Test fixture is self-contained: preserve a normalized header, author animated events.

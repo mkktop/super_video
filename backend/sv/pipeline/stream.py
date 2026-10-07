@@ -14,6 +14,7 @@ from ..paths import ffmpeg_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS, kill_tree
 from .probe import MediaInfo
 from .subtitle import BurnSubtitle, TEXT_CODECS, output_filters
+from .watermark import Watermark, watermark_filter
 
 _MP4_AUDIO_COPY_OK = {"aac", "mp3", "ac3", "eac3", "alac"}
 
@@ -34,6 +35,7 @@ class EncodeOpts:
     container: str = "mp4"  # mp4 | mkv | mov
     out_kind: str = "video"  # video | png | jpg——图片序列=整视频逐帧导出（无音轨）
     burn_subtitle: BurnSubtitle | None = None
+    watermark: Watermark | None = None
 
     @property
     def mp4_family(self) -> bool:
@@ -270,6 +272,7 @@ def encoder_cmd(
 
     cmd += video_codec_args(enc)
     vf = output_filters((frame_w, frame_h), (target_w, target_h), enc.burn_subtitle, subtitle_start_s)
+    vf = watermark_filter(vf, enc.watermark, (target_w, target_h), subtitle_start_s)
     if vf:
         cmd += ["-vf", vf]
 

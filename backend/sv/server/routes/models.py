@@ -97,6 +97,7 @@ class PresetCreate(BaseModel):
     audio_mode: str = "auto"
     subtitle_mode: str = "auto"
     subtitle: dict = Field(default_factory=dict)
+    watermark: dict | None = None
     interp: str = "off"
     denoise: int | None = None
     deinterlace: bool = False
@@ -138,6 +139,9 @@ def create_preset(body: PresetCreate) -> dict:
     if body.interp not in ("off", "rife2x"):
         raise HTTPException(400, "interp 仅支持 off / rife2x")
     try:
+        if body.watermark:
+            from ...pipeline.watermark import validate_watermark
+            body.watermark = validate_watermark(body.watermark)
         validate_denoise(specs[body.model_id], body.target_scale, body.denoise)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
@@ -162,6 +166,7 @@ class ProbeBody(BaseModel):
 class SubtitlePreviewBody(BaseModel):
     input: str
     subtitle: dict = Field(default_factory=dict)
+    watermark: dict | None = None
     width: int = Field(ge=2, le=8192)
     height: int = Field(ge=2, le=8192)
     time_s: float | None = None
@@ -181,20 +186,25 @@ def subtitle_preview(body: SubtitlePreviewBody):
         with tempfile.TemporaryDirectory(prefix='subtitle-preview-', dir=TEMP_DIR) as tmp:
             work = Path(tmp)
             size = (body.width, body.height)
-            burn = prepare_subtitle(info, body.subtitle, work / 'snapshot', size)
+            burn = prepare_subtitle(info, body.subtitle, work / 'snapshot', size) if body.subtitle else None
+            from ...pipeline.watermark import prepare_watermark, watermark_filter
+            watermark = prepare_watermark(body.watermark, work / 'watermark', size) if body.watermark else None
+            if burn is None and watermark is None:
+                raise ValueError('请设置字幕或片头水印')
             t = body.time_s
             if t is None:
                 import re
-                text = burn.path.read_text(encoding='utf-8')
+                text = burn.path.read_text(encoding='utf-8') if burn else ''
                 match = re.search(r'^Dialogue:\s*[^,]*,(\d+):(\d+):(\d+(?:\.\d+)?),', text, re.M)
-                t = (int(match[1]) * 3600 + int(match[2]) * 60 + float(match[3]) + burn.delay_s + 0.2) if match else 0
+                t = (int(match[1]) * 3600 + int(match[2]) * 60 + float(match[3]) + burn.delay_s + 0.2) if match else (watermark.options['start_s'] + min(.2, watermark.options['duration_s'] / 2) if watermark else 0)
             t = max(0, min(t, max(0, info.duration_s - 0.1)))
             vf = output_filters((info.width, info.height), size, burn, t)
+            vf = watermark_filter(vf, watermark, size, t)
             _run(['-loglevel', 'error', '-ss', f'{t:.9f}', '-i', str(info.path),
-                  '-vf', vf, '-frames:v', '1', '-an', '-sn', 'preview.png'], work, 30)
+                  '-vf', vf or 'null', '-frames:v', '1', '-an', '-sn', 'preview.png'], work, 30)
             return Response((work / 'preview.png').read_bytes(), media_type='image/png',
                             headers={'X-Subtitle-Time': f'{t:.3f}',
-                                     'X-Subtitle-Warnings': json.dumps(burn.warnings, ensure_ascii=True)})
+                                     'X-Subtitle-Warnings': json.dumps((burn.warnings if burn else ()) + (watermark.warnings if watermark else ()), ensure_ascii=True)})
     except (ValueError, OSError, UnsupportedMedia, subprocess.TimeoutExpired) as e:
         raise HTTPException(400, str(e)) from e
 

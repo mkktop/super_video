@@ -29,6 +29,7 @@ declare global {
       onUpdateReady: (cb: (version: string) => void) => () => void
       pickVideo: () => Promise<string[]>
       pickSubtitle: () => Promise<string | null>
+      pickLogo: () => Promise<string | null>
       pickImages: () => Promise<string[]>
       pickOutput: (suggest: string) => Promise<string | null>
       pickModel: () => Promise<string | null>

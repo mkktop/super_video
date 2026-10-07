@@ -46,7 +46,7 @@ def add(preset: dict) -> dict:
         "created_at": time.time(),
         **{k: v for k, v in preset.items()
            if k in ("model_id", "target_scale", "codec", "crf", "container",
-                    "audio_mode", "subtitle_mode", "subtitle", "interp", "denoise",
+                    "audio_mode", "subtitle_mode", "subtitle", "watermark", "interp", "denoise",
                     "deinterlace", "deband")},
     }
     presets = load() + [rec]

@@ -24,6 +24,7 @@ from ..paths import TEMP_DIR, ffmpeg_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS
 from .probe import MediaInfo
 from .subtitle import check_resume_fingerprint
+from .watermark import check_watermark_resume
 from .stream import (
     EncodeOpts,
     PipelineError,
@@ -177,6 +178,7 @@ class SegmentedPipeline:
         work = TEMP_DIR / "segmented" / self.task_id
         work.mkdir(parents=True, exist_ok=True)
         check_resume_fingerprint(work, self.enc.burn_subtitle)
+        check_watermark_resume(work, self.enc.watermark)
         # 分段数自适应：约 8 段（小视频至少 60 帧/段，大视频每段 ≤600 帧 ≈ 3-5 分钟工作量）
         seg = self.seg_frames or min(600, max(60, total_in // 8))
         factor = 2 if self.interp is not None else 1

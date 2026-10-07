@@ -547,6 +547,15 @@ def _create_task(body: TaskCreate) -> dict:
         raise HTTPException(400, "subtitle_mode 仅支持 none / auto / burn / burn_keep")
     params["subtitle_mode"] = subtitle_mode
     params.pop('_burn_subtitle', None)
+    params.pop('_watermark', None)
+    if params.get('watermark'):
+        from ...pipeline.watermark import validate_watermark
+        if out_kind != 'video':
+            raise HTTPException(400, '片头水印仅支持视频输出')
+        try:
+            params['watermark'] = validate_watermark(params['watermark'])
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
     if subtitle_mode in ('burn', 'burn_keep'):
         if out_kind != 'video':
             raise HTTPException(400, '字幕烧录仅支持视频输出')
@@ -752,7 +761,7 @@ async def remove_task(task_id: str) -> dict:
 def purge_task_files(task_id: str) -> None:
     """删除任务专属临时产物：分段/分块工作目录 + 预览图 + 对比静帧缓存 + 性能日志。"""
     for d in (TEMP_DIR / "segmented" / task_id, TEMP_DIR / "chunked" / task_id,
-              TEMP_DIR / 'subtitles' / task_id):
+              TEMP_DIR / 'subtitles' / task_id, TEMP_DIR / 'watermarks' / task_id):
         shutil.rmtree(d, ignore_errors=True)
     task_stills.clear(task_id)
     pv = TEMP_DIR / "previews"
@@ -776,7 +785,7 @@ def sweep_orphan_workdirs(max_age_s: float = 3600.0) -> None:
     """
     ids = db.all_task_ids()
     deadline = time.time() - max_age_s
-    for sub in ("segmented", "chunked", "subtitles"):
+    for sub in ("segmented", "chunked", "subtitles", "watermarks"):
         base = TEMP_DIR / sub
         if not base.is_dir():
             continue

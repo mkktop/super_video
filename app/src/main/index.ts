@@ -954,6 +954,14 @@ ipcMain.handle('dialog:pickSubtitle', async () => {
   return r.canceled ? null : r.filePaths[0] ?? null
 })
 
+ipcMain.handle('dialog:pickLogo', async () => {
+  const r = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Logo 图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+  })
+  return r.canceled ? null : r.filePaths[0] ?? null
+})
+
 ipcMain.handle('dialog:pickOutput', async (_e, suggest: string) => {
   // 过滤器跟随建议文件名的扩展名（MP4/MKV/MOV），另附所有文件兜底
   const ext = (suggest.split('.').pop() ?? '').toLowerCase()

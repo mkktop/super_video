@@ -82,6 +82,10 @@ def validate_options(options: dict, info=None) -> dict:
     if source not in ('embedded', 'external', 'matching'):
         raise ValueError('字幕来源需为 embedded / external / matching')
     result = {'source': source}
+    style_mode = options.get('style_mode', 'preserve')
+    if style_mode not in ('preserve', 'custom'):
+        raise ValueError('ASS 样式需为 preserve / custom')
+    result['style_mode'] = style_mode
     encoding = options.get('encoding', 'utf-8-sig')
     if encoding not in ENCODINGS:
         raise ValueError('字幕编码需为 UTF-8 / GB18030 / Big5')
@@ -176,7 +180,7 @@ def prepare_subtitle(info, options: dict, directory: Path, size: tuple[int, int]
     source = Path(options['path']) if options['source'] == 'external' else info.path
     stat = source.stat()
     render_options = dict(options)
-    for name, default in (('selection', 'track'), ('shadow', 1), ('font_color', '#FFFFFF')):
+    for name, default in (('selection', 'track'), ('shadow', 1), ('font_color', '#FFFFFF'), ('style_mode', 'preserve')):
         if render_options.get(name) == default:
             render_options.pop(name, None)
     signature = {'version': 1, 'options': render_options, 'source': str(source.resolve()),
@@ -260,6 +264,8 @@ def prepare_subtitle(info, options: dict, directory: Path, size: tuple[int, int]
                      '&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,'
                      f"{options['outline']},{options['shadow']},2,60,60,{options['margin_v']},1")
             text = re.sub(r'^Style:.*$', lambda m: style, text, flags=re.M)
+        elif options['style_mode'] == 'custom':
+            text = override_ass_styles(text, options)
         ass.write_text(text, encoding='utf-8')
         # Exercise every authored font, including inline overrides, before long AI inference.
         names = {line.split(',')[1] for line in text.splitlines()
@@ -291,6 +297,44 @@ def prepare_subtitle(info, options: dict, directory: Path, size: tuple[int, int]
     finally:
         if work.exists():
             shutil.rmtree(work)
+
+
+def override_ass_styles(text: str, options: dict) -> str:
+    """Override authored base styles while preserving event timing and inline effects."""
+    match = re.search(r'^PlayResY:\s*(\d+)', text, re.M | re.I)
+    # ASS defaults to a 384x288 design grid when no resolution is specified.
+    height = int(match[1]) if match and int(match[1]) > 0 else 288
+    scale = height / 1080
+    rgb = options['font_color'][1:]
+    changes = {'fontname': options['font_name'], 'fontsize': f'{options["font_size"] * scale:.6f}',
+               'primarycolour': '&H00' + rgb[4:6] + rgb[2:4] + rgb[:2],
+               'outline': f'{options["outline"] * scale:.6f}', 'shadow': f'{options["shadow"] * scale:.6f}',
+               'marginv': str(round(options['margin_v'] * scale)), 'borderstyle': '1'}
+    lines = text.splitlines()
+    section, fields = '', []
+    for i, line in enumerate(lines):
+        if line.strip().startswith('['):
+            section = line.strip().casefold()
+        elif section == '[v4+ styles]':
+            if line.casefold().startswith('format:'):
+                fields = [f.strip().casefold() for f in line.split(':', 1)[1].split(',')]
+            elif line.casefold().startswith('style:') and fields:
+                values = line.split(':', 1)[1].strip().split(',')
+                if len(values) != len(fields):
+                    raise ValueError('ASS 样式格式损坏，无法自定义覆盖')
+                for key, value in changes.items():
+                    if key in fields:
+                        values[fields.index(key)] = value
+                lines[i] = 'Style: ' + ','.join(values)
+    if not fields:
+        raise ValueError('ASS 缺少样式定义，无法自定义覆盖')
+    # Keep outline/shadow proportional to output resolution too.
+    output = '\n'.join(lines) + '\n'
+    if re.search(r'^ScaledBorderAndShadow:', output, re.M | re.I):
+        output = re.sub(r'^ScaledBorderAndShadow:.*$', 'ScaledBorderAndShadow: yes', output, flags=re.M | re.I)
+    else:
+        output = re.sub(r'^\[Script Info\]', '[Script Info]\nScaledBorderAndShadow: yes', output, count=1, flags=re.M | re.I)
+    return output
 
 
 def filter_path(path: Path) -> str:

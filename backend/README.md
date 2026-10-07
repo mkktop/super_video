@@ -220,6 +220,16 @@ worker 的 `done`/`failed`/`canceled` 终态事件不直接上 WS——runner �
 
 ## 测试与基准
 
+视频任务可通过 `params.watermark`（MCP 使用 `extra_params.watermark`）设置片头顶部水印：
+
+```json
+{"watermark":{"kind":"text","text":"频道名 · 制作","position":"top-right","start_s":0,"duration_s":5,"opacity":0.85,"font_size":48,"font_name":"Microsoft YaHei","font_color":"#FFFFFF","margin":40}}
+```
+
+图片 Logo 使用 `kind: "image", path: "D:/logo.png", width_pct: 12`，支持 PNG/JPG/WebP，透明 PNG 保留透明区域、按比例缩放，高度最多占画面 40%。位置支持 `top-left/top-center/top-right`。字号和边距采用 1080p 设计基准随最终尺寸缩放；开始时间和时长使用全片时间轴，分段不会重复显示。未提供 watermark 时保持原行为。字幕与水印在最终编码滤镜中一起绘制，concat 仍复制视频；取消时保留 `.tmp/watermarks/<task_id>`，成功或删除任务后清理，续跑拒绝复用改变了水印的旧编码分段。预设保存同一品牌图片路径或文字设置；图片被移动后需重新选择。
+
+`POST /api/subtitles/preview` 也接受 `watermark`，可单独预览水印或与 `subtitle` 一起预览。没有字幕时省略 subtitle 即可。图片 Logo 第一版使用静态首帧，不播放动图。
+
 视频字幕烧录由 `sv/pipeline/subtitle.py` 负责准备、字体预检、任务快照与后置滤镜；三条视频管线复用，在最终尺寸上渲染后编码。任务创建参数示例（HTTP `params` 或 MCP `extra_params`）：
 
 ```json
@@ -247,6 +257,8 @@ worker 的 `done`/`failed`/`canceled` 终态事件不直接上 WS——runner �
 可选 `fonts_dir`，编码支持 `utf-8-sig/gb18030/big5`。字号、描边、阴影和边距以 1920×1080 为设计基准，`font_color` 为 `#RRGGBB`；ASS/SSA 原样式不覆盖。正延迟表示晚显示。PGS/VobSub 等位图字幕拒绝烧录，仍可原样保留到 MKV。probe 返回轨道的 `is_text/burn_supported` 和整体 `subtitle_burn.supported/error`；缺少 FFmpeg ass/subtitles 滤镜时创建任务直接报错，避免先运行 AI 推理。
 
 `POST /api/subtitles/preview` 接受 `input/subtitle/width/height/time_s?`，返回 PNG；省略时间则定位第一条字幕，响应头 `X-Subtitle-Time` 给出实际时间，`X-Subtitle-Warnings` 是字体警告 JSON。预览显示源画面缩放后的字幕效果，不执行 AI 推理。
+
+ASS/SSA 默认 `subtitle.style_mode: "preserve"` 保留原样式；设置 `"custom"` 可覆盖所有基础样式的字体、字号、主色、描边、阴影和垂直边距，字号等 1080p 参数会换算到原 ASS 的 PlayResY，保持定位坐标与动画。行内覆盖标签及单行显式边距仍优先；对带复杂特效的字幕应先检查预览。任务、预设与续跑指纹均记录此选择。
 
 快照位于 `.tmp/subtitles/<task_id>`；成功或删除任务后清理，取消/失败后保留。续跑会校验字幕、字体、渲染器、目标尺寸与帧率指纹；改变设置需新建任务。`test_subtitle_burn.py` 用真实 FFmpeg 验证三条管线、补帧、跨段动画、延迟、分数帧率、真实中途取消与续跑、快照一致性、字体附件、API 与预览，以及 MP4/MKV 烧录后保留字幕、音频数据不变和 concat 视频复制。
 

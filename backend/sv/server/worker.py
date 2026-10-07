@@ -80,6 +80,7 @@ def _encode_opts(params: dict, out_kind: str) -> EncodeOpts:
         container=params.get("container", "mp4"),
         out_kind=out_kind,
         burn_subtitle=params.get('_burn_subtitle'),
+        watermark=params.get('_watermark'),
     )
 
 
@@ -159,6 +160,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
 
     params = task["params"]
     params.pop('_burn_subtitle', None)
+    params.pop('_watermark', None)
     model_id = task["model_id"]
     input_path = Path(task["input_path"])
     output_path = Path(task["output_path"])
@@ -234,6 +236,18 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
                 emit({'type': 'log', 'line': warning})
         except Exception as e:
             emit({'type': 'failed', 'error': f'字幕不可用：{e}'})
+            return 1
+    if params.get('watermark'):
+        try:
+            from sv.pipeline.watermark import prepare_watermark
+            params['_watermark'] = prepare_watermark(
+                params['watermark'], TEMP_DIR / 'watermarks' / task_id,
+                target_size or (info.width * target, info.height * target))
+            emit({'type': 'log', 'line': '片头水印已准备，将在最终编码时按设定时间显示'})
+            for warning in params['_watermark'].warnings:
+                emit({'type': 'log', 'line': warning})
+        except Exception as e:
+            emit({'type': 'failed', 'error': f'水印不可用：{e}'})
             return 1
     denoise = params.get("denoise")  # real-cugan 降噪档：0/1/2/3 → 对应变体权重
     variant = f"denoise{int(denoise)}" if denoise is not None else None
@@ -383,6 +397,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
                                    preview_dir / f"{task_id}.jpg",
                                    preview_dir / f"{task_id}_src.jpg")
         shutil.rmtree(TEMP_DIR / 'subtitles' / task_id, ignore_errors=True)
+        shutil.rmtree(TEMP_DIR / 'watermarks' / task_id, ignore_errors=True)
         emit({
             "type": "done", "frames": stats.frames,
             "elapsed": round(stats.elapsed_s, 1),
@@ -556,6 +571,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     if shard is None and out_kind == "video":
         rewrite_final_previews(output_path, input_path, preview_path, src_preview_path)
         shutil.rmtree(TEMP_DIR / 'subtitles' / task_id, ignore_errors=True)
+        shutil.rmtree(TEMP_DIR / 'watermarks' / task_id, ignore_errors=True)
     emit({
         "type": "done", "frames": stats.frames,
         "total_frames": stats.frames,  # 真实片尾修正后回填 DB（旧事件无此键按估算）

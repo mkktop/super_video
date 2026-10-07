@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NColorPicker, NInput, NInputNumber, NSelect, useMessage } from 'naive-ui'
-import { api, type ProbeInfo, type SubtitleOptions } from '../api'
+import { api, type ProbeInfo, type SubtitleOptions, type WatermarkOptions } from '../api'
 
 const props = defineProps<{
   modelValue: SubtitleOptions
@@ -9,6 +9,7 @@ const props = defineProps<{
   probe: ProbeInfo | null
   width: number
   height: number
+  watermark?: WatermarkOptions
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: SubtitleOptions]
@@ -40,6 +41,8 @@ watch(ready, v => emit('ready', v), { immediate: true })
 const isPlain = computed(() => props.modelValue.source === 'external'
   ? !props.modelValue.path || /\.srt$/i.test(props.modelValue.path)
   : props.modelValue.source === 'matching' || props.modelValue.selection === 'match' || !['ass', 'ssa'].includes(props.probe?.subtitles?.[props.modelValue.stream ?? 0] ?? ''))
+const editStyle = computed(() => isPlain.value || props.modelValue.style_mode === 'custom')
+const mayHaveAss = computed(() => !isPlain.value || props.modelValue.source === 'matching' || props.modelValue.selection === 'match')
 async function pickSubtitle() {
   const path = await window.sv.pickSubtitle()
   if (path) update({ path })
@@ -56,10 +59,13 @@ let sequence = 0
 function clearPreview() {
   sequence++
   previewing.value = false
-  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = ''
 }
-watch(() => [props.modelValue, props.inputs, props.width, props.height, previewTime.value], clearPreview, { deep: true })
+function imageFailed() {
+  clearPreview()
+  message.error('字幕预览图片加载失败，请重新预览')
+}
+watch(() => [props.modelValue, props.watermark, props.inputs, props.width, props.height, previewTime.value], clearPreview, { deep: true })
 onBeforeUnmount(clearPreview)
 async function preview() {
   clearPreview()
@@ -67,13 +73,21 @@ async function preview() {
   previewing.value = true
   try {
     const response = await api.subtitlePreview({ input: props.inputs[0], subtitle: props.modelValue,
+      watermark: props.watermark,
       width: props.width, height: props.height,
       ...(previewTime.value === null ? {} : { time_s: previewTime.value }),
     })
     if (!response.ok) throw new Error((await response.json()).detail ?? '字幕预览失败')
     const blob = await response.blob()
+    // The desktop CSP permits data: images; blob: object URLs are blocked.
+    const imageUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(new Error('字幕预览图片读取失败'))
+      reader.readAsDataURL(blob)
+    })
     if (seq !== sequence) return
-    previewUrl.value = URL.createObjectURL(blob)
+    previewUrl.value = imageUrl
     renderedTime.value = response.headers.get('X-Subtitle-Time') ?? ''
     const warnings = JSON.parse(response.headers.get('X-Subtitle-Warnings') ?? '[]') as string[]
     if (warnings.length) message.warning(warnings.join('\n'))
@@ -116,17 +130,21 @@ async function preview() {
     <label v-if="modelValue.source === 'external'" class="subtitle-field">字幕编码
       <NSelect :value="modelValue.encoding ?? 'utf-8-sig'" :options="[{ label: 'UTF-8', value: 'utf-8-sig' }, { label: 'GB18030 / GBK', value: 'gb18030' }, { label: 'Big5', value: 'big5' }]" @update:value="encoding => update({ encoding })" />
     </label>
-    <p v-if="modelValue.source === 'matching'" class="subtitle-hint">每个视频需有唯一同名的 SRT、ASS 或 SSA 文件。多个候选时会提示选择；ASS 保留原样式。</p>
+    <p v-if="modelValue.source === 'matching'" class="subtitle-hint">每个视频需有唯一同名的 SRT、ASS 或 SSA 文件。多个候选时会提示选择。</p>
+    <label v-if="mayHaveAss" class="subtitle-field">ASS / SSA 样式
+      <NSelect :value="modelValue.style_mode ?? 'preserve'" :options="[{ label: '保留原样式', value: 'preserve' }, { label: '自定义覆盖基础样式', value: 'custom' }]" @update:value="style_mode => update({ style_mode })" />
+    </label>
+    <span v-if="mayHaveAss && modelValue.style_mode === 'custom'" class="subtitle-hint">覆盖基础字体、字号、颜色、描边、阴影和垂直边距，保留原定位与动画。字幕中的行内样式及单行边距仍优先，建议检查预览。</span>
     <div class="subtitle-pair">
       <label class="subtitle-field">字幕延迟（秒）
         <NInputNumber :value="modelValue.delay_s ?? 0" :min="-3600" :max="3600" :step="0.1" @update:value="v => update({ delay_s: v ?? 0 })" />
       </label>
-      <label v-if="isPlain" class="subtitle-field">字号（1080p 基准）
+      <label v-if="editStyle" class="subtitle-field">字号（1080p 基准）
         <NInputNumber :value="modelValue.font_size ?? 48" :min="12" :max="144" @update:value="v => update({ font_size: v ?? 48 })" />
       </label>
     </div>
     <span class="subtitle-hint">延迟为正值时晚显示，为负值时提前显示。</span>
-    <template v-if="isPlain">
+    <template v-if="editStyle">
       <label class="subtitle-field">字体
         <NInput :value="modelValue.font_name ?? 'Microsoft YaHei'" @update:value="font_name => update({ font_name })" />
       </label>
@@ -142,13 +160,13 @@ async function preview() {
         <label class="subtitle-field">描边
           <NInputNumber :value="modelValue.outline ?? 2" :min="0" :max="8" :step="0.5" @update:value="v => update({ outline: v ?? 2 })" />
         </label>
-        <label class="subtitle-field">底部边距
+        <label class="subtitle-field">{{ !isPlain ? '垂直边距' : '底部边距' }}
           <NInputNumber :value="modelValue.margin_v ?? 50" :min="0" :max="400" @update:value="v => update({ margin_v: v ?? 50 })" />
         </label>
       </div>
     </template>
     <span v-else class="subtitle-hint">ASS / SSA 保留原字体、位置和动画效果。</span>
-    <span v-if="modelValue.source === 'matching' || modelValue.selection === 'match'" class="subtitle-hint">匹配到普通文本字幕时使用以上样式；ASS / SSA 保留字幕原样式。</span>
+    <span v-if="(modelValue.source === 'matching' || modelValue.selection === 'match') && modelValue.style_mode !== 'custom'" class="subtitle-hint">匹配到普通文本字幕时使用以上样式；ASS / SSA 保留字幕原样式。</span>
     <div class="subtitle-field">
       <span>字体目录（可选）</span>
       <div class="subtitle-line"><NInput :value="modelValue.fonts_dir ?? ''" :input-props="{ 'aria-label': '字体目录（可选）' }" clearable placeholder="补充字幕所需的字体" @update:value="fonts_dir => update({ fonts_dir })" />
@@ -162,7 +180,7 @@ async function preview() {
       <NButton :disabled="!ready || width < 2 || height < 2" :loading="previewing" @click="preview">预览字幕</NButton>
     </div>
     <template v-if="previewUrl">
-      <img :src="previewUrl" class="subtitle-preview" alt="字幕烧录画面预览" />
+      <img :src="previewUrl" class="subtitle-preview" alt="字幕烧录画面预览" @error="imageFailed" />
       <span class="subtitle-hint">{{ renderedTime }} 秒 · 源画面缩放到输出尺寸的字幕预览</span>
     </template>
     <div v-else class="subtitle-placeholder">{{ inputs.length === 1 ? '选择字幕后预览，检查字体、位置与显示时间' : '字幕将逐个匹配，建议先用单个视频检查样式' }}</div>

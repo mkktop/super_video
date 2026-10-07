@@ -432,8 +432,19 @@ function route(rawUrl: string, init?: RequestInit): Promise<Response> {
       }))
     }
     if (method === 'POST' && path === '/api/subtitles/preview') {
-      return Promise.resolve(new Response(`<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#304050"/><text x="640" y="640" text-anchor="middle" fill="white" stroke="#111" stroke-width="2" paint-order="stroke" font-size="32" font-family="Microsoft YaHei, sans-serif">字幕烧录预览 · 示例画面</text></svg>`,
-        { headers: { 'Content-Type': 'image/svg+xml', 'X-Subtitle-Time': '12.000' } }))
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      const t = Number(body.time_s ?? 12)
+      const wm = body.watermark
+      const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      const show = wm && t >= (wm.start_s ?? 0) && t < (wm.start_s ?? 0) + (wm.duration_s ?? 5)
+      const position = wm?.position ?? 'top-right'
+      const x = position === 'top-left' ? 40 : position === 'top-center' ? 640 : 1240
+      const anchor = position === 'top-left' ? 'start' : position === 'top-center' ? 'middle' : 'end'
+      const lines = (wm?.kind === 'text' ? wm.text ?? '' : 'Logo · 示例').split(/\r?\n/)
+      const logo = show ? `<text x="${x}" y="60" text-anchor="${anchor}" fill="white" opacity="${wm.opacity ?? .85}" font-size="32">${lines.map((line: string, i: number) => `<tspan x="${x}" dy="${i === 0 ? 0 : 38}">${escape(line)}</tspan>`).join('')}</text>` : ''
+      const subtitle = body.subtitle ? '<text x="640" y="640" text-anchor="middle" fill="white" stroke="#111" stroke-width="2" paint-order="stroke" font-size="32">字幕烧录预览 · 示例画面</text>' : ''
+      return Promise.resolve(new Response(`<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#304050"/>${logo}${subtitle}</svg>`,
+        { headers: { 'Content-Type': 'image/svg+xml', 'X-Subtitle-Time': t.toFixed(3) } }))
     }
     if (method === 'POST' && path === '/api/models/import') return Promise.resolve(json({ ok: true }))
     if (method === 'GET' && path === '/api/compare/cache') return Promise.resolve(json({ jobs: 3, bytes: 2362232012 }))
@@ -556,6 +567,7 @@ function installSvBridge(): void {
     onUpdateReady: () => () => {},
     pickVideo: () => Promise.resolve(['D:\\videos\\anime_ep01_1080p.mkv']),
     pickSubtitle: () => Promise.resolve('D:\\videos\\anime_ep01_1080p.srt'),
+    pickLogo: () => Promise.resolve('D:\\videos\\logo.png'),
     pickImages: () => Promise.resolve(['D:\\pics\\comic_p01.png', 'D:\\pics\\comic_p02.png', 'D:\\pics\\comic_p03.png']),
     pickOutput: (suggest: string) => Promise.resolve(`D:\\output\\${suggest}`),
     pickModel: () => Promise.resolve('D:\\models\\my_custom.onnx'),

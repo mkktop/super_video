@@ -97,6 +97,7 @@ export interface Preset {
   audio_mode?: string
   subtitle_mode?: string
   subtitle?: SubtitleOptions
+  watermark?: WatermarkOptions | null
   denoise?: number | null
   deinterlace?: boolean
   deband?: boolean
@@ -181,6 +182,7 @@ export interface ProbeInfo {
 }
 
 export interface SubtitleOptions {
+  style_mode?: 'preserve' | 'custom'
   source: 'embedded' | 'external' | 'matching'
   path?: string
   stream?: number
@@ -196,6 +198,21 @@ export interface SubtitleOptions {
   font_color?: string
   margin_v?: number
   fonts_dir?: string
+}
+
+export interface WatermarkOptions {
+  kind: 'text' | 'image'
+  text?: string
+  path?: string
+  position?: 'top-left' | 'top-center' | 'top-right'
+  start_s?: number
+  duration_s?: number
+  opacity?: number
+  width_pct?: number
+  font_name?: string
+  font_size?: number
+  font_color?: string
+  margin?: number
 }
 
 export interface Task {
@@ -415,6 +432,7 @@ export const api = {
     audio_mode?: string
     subtitle_mode?: string
     subtitle?: SubtitleOptions
+    watermark?: WatermarkOptions | null
     interp?: string
     denoise?: number | null
     deinterlace?: boolean
@@ -436,7 +454,7 @@ export const api = {
       body: JSON.stringify({ path, hwdecode, recommend }),
     })
   },
-  async subtitlePreview(body: { input: string; subtitle: SubtitleOptions; width: number; height: number; time_s?: number }): Promise<Response> {
+  async subtitlePreview(body: { input: string; subtitle?: SubtitleOptions; watermark?: WatermarkOptions; width: number; height: number; time_s?: number }): Promise<Response> {
     return _fetch(`${baseUrl}/api/subtitles/preview`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })

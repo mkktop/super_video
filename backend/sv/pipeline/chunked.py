@@ -20,6 +20,7 @@ from ..paths import TEMP_DIR, ffmpeg_bin
 from ..utils.process import WINDOWS_CREATE_FLAGS
 from .probe import MediaInfo
 from .subtitle import output_filters
+from .watermark import watermark_filter
 from .stream import (
     EncodeOpts,
     PipelineError,
@@ -202,6 +203,7 @@ class ChunkedPipeline:
         cmd += video_codec_args(enc)
         frame_size = (info.width * tx.scale, info.height * tx.scale)
         vf = output_filters(frame_size, self.target_size or frame_size, enc.burn_subtitle)
+        vf = watermark_filter(vf, enc.watermark, self.target_size or frame_size, 0)
         if vf:
             cmd += ["-vf", vf]
         if has_audio:

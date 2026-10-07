@@ -23,8 +23,9 @@ import {
   useDialog,
   useMessage,
 } from 'naive-ui'
-import { api, mediaSrc, type ModelInfo, type ProbeInfo, type SubtitleOptions } from '../api'
+import { api, mediaSrc, type ModelInfo, type ProbeInfo, type SubtitleOptions, type WatermarkOptions } from '../api'
 import SubtitleSettings from '../components/SubtitleSettings.vue'
+import WatermarkSettings from '../components/WatermarkSettings.vue'
 import { refreshTasks, store, ui } from '../store'
 import { useFileDrop, useRecentVideos } from '../composables/videoPicks'
 import { DEFAULT_ANIME_MODEL } from '../composables/modelDefaults'
@@ -60,6 +61,9 @@ const subtitleMode = ref<'auto' | 'none' | 'burn' | 'burn_keep'>('auto')
 const subtitleOptions = ref<SubtitleOptions>({ source: 'external' })
 const subtitleReady = ref(false)
 const burnsSubtitles = computed(() => subtitleMode.value === 'burn' || subtitleMode.value === 'burn_keep')
+const watermarkEnabled = ref(false)
+const watermarkOptions = ref<WatermarkOptions>({ kind: 'text', start_s: 0, duration_s: 5, position: 'top-right' })
+const watermarkReady = ref(false)
 const interp = ref<'off' | 'rife2x'>('off')
 const denoise = ref<number | null>(null)
 const deinterlace = ref(false) // 反交错（老 DVD/1080i 源；帧数不变，checkpoint 语义安全）
@@ -177,6 +181,7 @@ const canSubmit = computed(
     !!selectedModel.value?.vram_ok &&
     !submitting.value &&
     (isImage.value || !burnsSubtitles.value || subtitleReady.value) &&
+    (isImage.value || outKind.value !== 'video' || !watermarkEnabled.value || watermarkReady.value) &&
     !(resMode.value === 'custom' && !customOk.value),
 )
 
@@ -300,6 +305,8 @@ async function consumeRetryParams() {
   if (typeof p.audio_mode === 'string') audioMode.value = p.audio_mode
   subtitleMode.value = p.subtitle_mode === 'burn_keep' ? 'burn_keep' : p.subtitle_mode === 'burn' ? 'burn' : p.subtitle_mode === 'none' ? 'none' : 'auto'
   subtitleOptions.value = (p.subtitle as SubtitleOptions | undefined) ?? { source: 'external' }
+  watermarkEnabled.value = !!p.watermark
+  watermarkOptions.value = { kind: 'text', start_s: 0, duration_s: 5, position: 'top-right', ...(p.watermark as WatermarkOptions | undefined) }
   interp.value = p.interp === 'rife2x' ? 'rife2x' : 'off'
   denoise.value = typeof p.denoise === 'number' ? p.denoise : null
   deinterlace.value = p.deinterlace === true
@@ -340,6 +347,8 @@ function applyPreset(pid: string) {
   crf.value = p.crf
   container.value = p.container ?? 'mp4'
   audioMode.value = p.audio_mode ?? 'auto'
+  watermarkEnabled.value = !!p.watermark
+  watermarkOptions.value = { kind: 'text', start_s: 0, duration_s: 5, position: 'top-right', ...p.watermark }
   // 旧预设不含字幕偏好：保持用户当前选择，不静默重置为关
   if (p.subtitle_mode === 'auto' || p.subtitle_mode === 'none' || p.subtitle_mode === 'burn' || p.subtitle_mode === 'burn_keep') {
     subtitleMode.value = p.subtitle_mode
@@ -382,6 +391,7 @@ async function saveAsPreset() {
     audio_mode: audioMode.value,
     subtitle_mode: subtitleMode.value,
     ...(burnsSubtitles.value ? { subtitle: { ...subtitleOptions.value, ...(subtitleOptions.value.source === 'embedded' && subtitleOptions.value.selection === 'match' ? {} : { source: 'matching' as const }), path: undefined, stream: undefined } } : {}),
+    watermark: watermarkEnabled.value ? watermarkOptions.value : null,
     interp: interp.value,
     denoise: denoise.value,
     deinterlace: deinterlace.value,
@@ -431,6 +441,7 @@ function buildCreateBody(input: string, overwrite: boolean) {
             audio_mode: audioMode.value,
             subtitle_mode: subtitleMode.value,
             ...(burnsSubtitles.value ? { subtitle: subtitleOptions.value } : {}),
+            ...(outKind.value === 'video' && watermarkEnabled.value ? { watermark: watermarkOptions.value } : {}),
           }),
       interp: interp.value,
       decoder: decoder.value,
@@ -936,9 +947,19 @@ export default { name: 'NewTask' }
           <h3>字幕烧录</h3>
           <p v-if="subtitleMode === 'burn_keep'" class="sub-hint">成片同时保留源视频字幕轨；播放器开启相同字幕时可能重复显示。</p>
           <SubtitleSettings v-model="subtitleOptions" :inputs="inputs" :probe="probeInfo"
+            :watermark="watermarkEnabled && watermarkReady ? watermarkOptions : undefined"
             :width="resMode === 'custom' ? effW : srcW * targetScale"
             :height="resMode === 'custom' ? effH : srcH * targetScale"
             @ready="subtitleReady = $event" />
+        </div>
+        <div v-if="outKind === 'video'" class="subtitle-block">
+          <div class="watermark-toggle"><h3>片头水印 / Logo</h3><NSwitch v-model:value="watermarkEnabled" aria-label="启用片头水印" /></div>
+          <p v-if="!watermarkEnabled" class="sub-hint">在视频开头几秒显示制作署名或品牌 Logo，之后自动消失。</p>
+          <WatermarkSettings v-if="watermarkEnabled" v-model="watermarkOptions" :inputs="inputs"
+            :width="resMode === 'custom' ? effW : srcW * targetScale"
+            :height="resMode === 'custom' ? effH : srcH * targetScale"
+            :subtitle="burnsSubtitles && subtitleReady ? subtitleOptions : undefined"
+            @ready="watermarkReady = $event" />
         </div>
       </NForm>
     </section>
@@ -955,7 +976,7 @@ export default { name: 'NewTask' }
       </button>
       <span class="footer-spacer" />
       <span v-if="inputs.length" class="footer-summary">
-        {{ !isImage && burnsSubtitles && !subtitleReady ? '请先选择可烧录的字幕' : inputs.length === 1 ? '1 个视频已就绪' : `${inputs.length} 个视频将使用相同参数` }}
+        {{ !isImage && burnsSubtitles && !subtitleReady ? '请先选择可烧录的字幕' : outKind === 'video' && watermarkEnabled && !watermarkReady ? '请填写水印文字或选择 Logo 图片' : inputs.length === 1 ? '1 个视频已就绪' : `${inputs.length} 个视频将使用相同参数` }}
       </span>
       <NButton
         type="primary"
@@ -1263,6 +1284,8 @@ h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
 .out-col { display: flex; flex-direction: column; }
 .subtitle-block { margin-top: 20px; padding-top: 22px; border-top: 1px solid var(--sv-border); }
 .subtitle-block h3 { margin: 0 0 18px; font-size: 14px; font-weight: 600; }
+.watermark-toggle { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+.watermark-toggle h3 { margin: 0; }
 
 .batch-note { font-size: 12.5px; color: var(--sv-text-dim); }
 .res-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
