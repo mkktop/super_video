@@ -88,7 +88,11 @@ def test_search_filters_by_path_and_model(client):
     assert client.get("/api/tasks?q=不存在的关键词xyz").json() == []
 
 
-def test_batch_cancel_delete_resume(client, tiny):
+def test_batch_cancel_delete_resume(client, tiny, monkeypatch):
+    from sv.server import db
+
+    # 本测试验证批量端点的状态变更，阻止后台调度抢先启动续跑任务。
+    monkeypatch.setattr(db, "next_queued", lambda: None)
     a = seed_task(tiny, str(TEMP_DIR / "sb_bat_a.mp4"))          # queued
     b = seed_task(tiny, str(TEMP_DIR / "sb_bat_b.mp4"))          # queued
     f = seed_task(tiny, str(TEMP_DIR / "sb_bat_f.mp4"), status="failed")
