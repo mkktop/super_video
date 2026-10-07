@@ -50,7 +50,7 @@ def test_legacy_graph_removes_only_validated_wrapper(tmp_path, monkeypatch,named
 
 @pytest.mark.parametrize('precision',['fp32','fp16'])
 def test_real_x4plus_onnx_matches_official_torch_rgb(precision):
-    import torch
+    pytest.importorskip('torch', reason='Optional PyTorch dependency required for real-model comparison')
     from sv.engines.torch_engine import TorchSrEngine
     from sv.engines.onnx_engine import OnnxSrEngine
     from sv.models.registry import get_model,model_file
