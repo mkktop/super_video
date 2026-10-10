@@ -38,7 +38,7 @@ const universalInstruction = computed(() => {
   if (!mcpCommand.value) return ''
   const { command, args } = mcpCommand.value
   return [
-    '请帮我接入本机的 MCP 服务「雨帧 RainFrame」（视频/图片/漫画超分及图片去水印工具），步骤：',
+    '请帮我接入本机的 MCP 服务「雨帧 RainFrame」（视频/图片/漫画超分、字幕烧录、片头水印及图片去水印工具），步骤：',
     `1. 在你当前环境的 MCP 配置里新增一个 stdio 服务：name 为 rainframe，command 为 "${command}"，args 为 ${JSON.stringify(args)}；`,
     '2. 重启会话/客户端使配置生效；',
     '3. 调用工具 rf_status 验证：返回 version 即接入成功。若提示——',
@@ -68,6 +68,7 @@ async function saveMcpEnabled(v: boolean) {
 const canDo = [
   '探测视频 / 图片信息，按内容推荐模型、倍率与预处理',
   '下载缺失模型，创建视频、图片与漫画批量任务',
+  '预览并烧录字幕，保留或自定义 ASS 样式，添加片头文字或图片 Logo',
   '预览图片去水印，自动识别白底/黑底，按样本文字遮罩局部修补',
   '整夹批量去水印，查询进度或停止处理，原图保留、结果另存 PNG',
   '读取任务诊断、队列状态、性能和日志，分页查看历史任务',
@@ -89,7 +90,7 @@ const cannotDo = [
       <h1>AI 接入（MCP）</h1>
       <p class="head-sub">
         通过 MCP 协议把雨帧接入 Claude Desktop、Cursor、ZCode 等 AI 客户端——
-        通过对话读取素材信息、选择模型、创建任务、预览去水印效果和查询进度。
+        通过对话读取素材信息、选择模型、创建任务、预览字幕和水印效果、查询进度。
       </p>
     </div>
 

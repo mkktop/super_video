@@ -67,18 +67,38 @@ $py cli.py serve --port 8730
 // 开发版请复制「AI 接入」页生成的配置：command 为 venv python，args 含 cli.py 的绝对路径与 "mcp"。
 ```
 
-工具面 23 个（`rf_` 前缀）：
+工具面 25 个（`rf_` 前缀）：
 
 | 功能 | 工具 |
 |---|---|
 | 状态、媒体探测、模型 | `rf_status`、`rf_probe`、`rf_models`、`rf_model_download` |
 | 超分任务 | `rf_task_create`、`rf_tasks`、`rf_task`、`rf_task_cancel`、`rf_task_resume`、`rf_scan_folder` |
 | 诊断与结果预览 | `rf_diagnostics`、`rf_task_preview` |
+| 视频字幕和片头水印预览 | `rf_subtitle_preview`、`rf_video_watermark_preview` |
 | 图片去水印 | `rf_watermark_preview`、`rf_watermark_batch`、`rf_watermark_job`、`rf_watermark_cancel` |
 | 模型对比 | `rf_compare_create`、`rf_compare_job`、`rf_compare_cancel`、`rf_compare_preview` |
 | 视频剪切 | `rf_trim_create`、`rf_trim_job`、`rf_trim_cancel` |
 
 超分任务创建立即返回任务 id，客户端轮询 `rf_task` 直到终态。整夹超分使用 `input_folder`，bridge 自动设置 `folder_src`，保留章节目录结构；显式 `extra_params.folder_src` 优先。`rf_tasks` 默认每页 30 条，`limit` 为 1~100，使用 `next_offset` 继续读取，保持 status/q 不变；列表变化时 offset 分页位置可能变化。
+
+视频任务可以直接传 `subtitle_mode`、`subtitle`、`watermark`，也兼容 `extra_params` 中的同名参数（后者显式值优先）。`subtitle_mode=burn` 烧录字幕，`burn_keep` 同时保留容器兼容的原字幕轨。字幕支持外部 SRT/ASS/SSA、内封文本轨和同名外挂匹配；PGS 等位图字幕暂不支持烧录。ASS/SSA 默认 `style_mode=preserve`，改为 `custom` 可覆盖字体、颜色、字号、描边、阴影和底部边距，行内标签和事件位置仍优先。字号和边距按 1080p 基准随输出缩放。
+
+`rf_subtitle_preview` 和 `rf_video_watermark_preview` 都传 `input`、最终 `width/height`；前者必传 `subtitle`，后者必传 `watermark`，均可同时传两者。返回实际 `time_s`、字体警告及 MCP 原生 PNG（最长边 1200 像素），只缩放源画面，不运行 AI 超分。省略 `time_s` 时，字幕预览取首条字幕附近，水印预览取水印开始后 0.2 秒（时长不足则取区间中点）；超过显示区间时水印不会出现。片头水印默认右上角、开始 0 秒、持续 5 秒，文字支持实际换行符，图片支持 PNG/JPG/WebP、透明度和宽度比例。`rf_watermark_preview` 仍是图片去水印工具。
+
+例如先调用 `rf_video_watermark_preview` 检查字幕和水印同时显示：
+
+```json
+{
+  "input": "D:/video.mkv",
+  "width": 3840,
+  "height": 2160,
+  "time_s": 2,
+  "subtitle": {"source": "embedded", "stream": 0, "style_mode": "custom", "outline": 3},
+  "watermark": {"kind": "text", "text": "雨帧制作\n超分修复", "position": "top-right", "duration_s": 5}
+}
+```
+
+确认后用相同 `subtitle` 和 `watermark` 调用 `rf_task_create`，设置 `subtitle_mode=burn`，并指定模型和 MP4 输出路径。重启或重新连接 MCP 客户端以刷新工具列表；这些工具要求支持新功能的后端运行，旧安装版须更新后使用。
 
 工具在请求后端前校验声明的参数类型、枚举、范围和必填项，不进行类型转换；例如 `overwrite="false"` 会返回协议错误 -32602，不会创建任务。编码枚举与后端共用常量，软件 H.265 为 `h265`，硬件编码需对应硬件能力；分块 `tile` 越小越省显存。
 

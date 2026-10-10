@@ -1,6 +1,6 @@
 {
   "name": "super-video-app",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "雨帧（RainFrame）桌面端 —— AI 视频超分",
   "main": "out/main/index.js",
   "private": true,

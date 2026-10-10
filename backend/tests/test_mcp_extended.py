@@ -48,6 +48,10 @@ def png(size=(1800,900)):
     ('rf_diagnostics',{'perf_limit':2.5}),('rf_task_preview',{'task_id':'x','sample_index':-1}),
     ('rf_watermark_preview',{'path':'x','threshold':float('nan')}),
     ('rf_tasks',[]),
+    ('rf_video_watermark_preview', {'input': 'x', 'width': 320, 'height': 180, 'watermark': {'position': 'bottom'}}),
+    ('rf_subtitle_preview', {'input': 'x', 'width': 320, 'height': 180, 'subtitle': {'style_mode': 'bad'}}),
+    ('rf_subtitle_preview', {'input': 'x', 'width': 320, 'height': 180, 'subtitle': {}, 'time_s': float('nan')}),
+    ('rf_task_create', {'input': 'x', 'extra_params': {'watermark': {'duration_s': 0}}}),
 ])
 def test_invalid_args_are_rejected_before_side_effects(monkeypatch,name,args):
     bridge,response=tool(monkeypatch,name,args)
@@ -195,3 +199,99 @@ def test_task_default_models(monkeypatch, args, model, scale, kind):
     assert body["model_id"] == model
     assert body["params"]["scale"] == scale
     assert body["params"].get("kind") == kind
+
+
+def test_overlay_task_parameters_and_extra_override(monkeypatch):
+    bridge = Bridge({('POST', '/api/tasks'): {'id': 't', 'params': {}}})
+    sub = {'source': 'embedded', 'stream': 0, 'style_mode': 'custom', 'outline': 4}
+    wm = {'kind': 'text', 'text': '雨帧\n制作'}
+    _, response = tool(monkeypatch, 'rf_task_create', {
+        'input': 'x.mkv', 'subtitle_mode': 'burn', 'subtitle': sub, 'watermark': wm,
+        'extra_params': {'subtitle_mode': 'burn_keep'}}, bridge)
+    assert text(response)['id'] == 't'
+    params = bridge.calls[0][2]['params']
+    assert params['subtitle'] == sub and params['watermark'] == wm
+    assert params['subtitle_mode'] == 'burn_keep'
+
+
+def test_overlay_preview_auth_rotation_and_offline(monkeypatch):
+    bridge = ms._Bridge(); bridge.base = 'http://localhost'; bridge.token = 'old'
+    seen = []
+    def read(url, token, timeout, body, metadata):
+        seen.append((token, body, metadata))
+        if token == 'old': raise ms.ApiError(401, 'expired')
+        return png(), {'time_s': .2, 'warnings': ['字体替代']}
+    def discover(): bridge.base = 'http://localhost'; bridge.token = 'new'
+    monkeypatch.setattr(ms, '_http_read', read)
+    monkeypatch.setattr(bridge, 'discover', discover)
+    args = {'input': 'x.mp4', 'width': 320, 'height': 180, 'watermark': {'text': '雨帧'}}
+    _, response = tool(monkeypatch, 'rf_video_watermark_preview', args, bridge)
+    assert text(response)['warnings'] == ['字体替代']
+    assert [item[0] for item in seen] == ['old', 'new']
+    assert seen[-1][1]['time_s'] == .2 and seen[-1][2]
+    def offline(*args): raise ms.SidecarOfflineError('offline')
+    monkeypatch.setattr(ms, '_http_read', offline)
+    _, response = tool(monkeypatch, 'rf_video_watermark_preview', args, bridge)
+    assert response['result']['isError'] and bridge.base is None
+
+
+def test_overlay_http_posts_json_and_reads_image_metadata(monkeypatch):
+    from email.message import Message
+    headers = Message()
+    headers['X-Subtitle-Time'] = '.200'
+    headers['X-Subtitle-Warnings'] = json.dumps(['字体替代'], ensure_ascii=True)
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, limit): return png((320, 180))
+    response = Response(); response.headers = headers
+    class Opener:
+        def open(self, req, timeout):
+            assert req.get_method() == 'POST'
+            assert req.get_header('Content-type') == 'application/json'
+            assert req.get_header('X-sv-token') == 'token'
+            assert json.loads(req.data)['watermark']['text'] == '雨帧\n制作'
+            return response
+    monkeypatch.setattr(ms, '_OPENER', Opener())
+    data, metadata = ms._http_read('http://localhost/api/subtitles/preview', 'token', 60,
+                                  {'watermark': {'text': '雨帧\n制作'}}, True)
+    assert data.startswith(b'\x89PNG') and metadata == {'time_s': .2, 'warnings': ['字体替代']}
+
+
+def test_overlay_tools_render_real_backend(monkeypatch, tmp_path):
+    import numpy as np
+    from test_subtitle_burn import ffmpeg
+    from fastapi.testclient import TestClient
+    from sv.server.app import app
+    from sv.server.routes import models
+    monkeypatch.setattr(models, 'TEMP_DIR', tmp_path)
+    video = tmp_path / 'input.mp4'
+    ffmpeg('-f', 'lavfi', '-i', 'color=c=0x304050:s=320x180:r=24', '-t', '2',
+           '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(video))
+    sub = tmp_path / 'test.srt'
+    sub.write_text('1\n00:00:00,500 --> 00:00:01,500\nSubtitle\n', encoding='utf-8')
+    client = TestClient(app)
+    class ApiBridge:
+        def preview(self, body):
+            response = client.post('/api/subtitles/preview', json=body)
+            if response.status_code >= 400: raise ms.ApiError(response.status_code, str(response.json()))
+            return response.content, {'time_s': float(response.headers['X-Subtitle-Time']),
+                                      'warnings': json.loads(response.headers['X-Subtitle-Warnings'])}
+    args = {'input': str(video), 'width': 320, 'height': 180,
+            'subtitle': {'source': 'external', 'path': str(sub), 'font_size': 96},
+            'watermark': {'kind': 'text', 'text': 'RainFrame', 'font_size': 96, 'duration_s': .4}}
+    for name, extra, top, bottom in [
+        ('rf_video_watermark_preview', {}, True, False),
+        ('rf_subtitle_preview', {}, False, True),
+        ('rf_video_watermark_preview', {'time_s': .6, 'watermark': {**args['watermark'], 'duration_s': 1}}, True, True),
+    ]:
+        _, response = tool(monkeypatch, name, {**args, **extra}, ApiBridge())
+        metadata = text(response)
+        block = response['result']['content'][1]
+        with Image.open(io.BytesIO(base64.b64decode(block['data']))) as image:
+            pixels = np.array(image.convert('RGB'))
+        assert (np.count_nonzero(pixels[:70] > 180) > 30) == top
+        assert (np.count_nonzero(pixels[100:] > 180) > 30) == bottom
+        assert 'warnings' in metadata
+    _, response = tool(monkeypatch, 'rf_subtitle_preview', {**args, 'subtitle': {**args['subtitle'], 'path': 'missing.srt'}}, ApiBridge())
+    assert response['result']['isError']

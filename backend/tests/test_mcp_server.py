@@ -76,14 +76,15 @@ def test_initialize_falls_back_on_unknown_version():
 def test_tools_list_shape():
     tools = rpc("tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
-    assert len(tools) == 23 and len(set(names)) == 23
+    assert len(tools) == 25 and len(set(names)) == 25
     assert all(n.startswith("rf_") for n in names)
     assert {"rf_status", "rf_probe", "rf_models", "rf_model_download",
             "rf_task_create", "rf_tasks", "rf_task", "rf_task_cancel",
             "rf_task_resume", "rf_scan_folder", "rf_watermark_preview", "rf_watermark_batch",
             "rf_watermark_job", "rf_watermark_cancel", "rf_diagnostics", "rf_task_preview",
             "rf_compare_create", "rf_compare_job", "rf_compare_cancel", "rf_compare_preview",
-            "rf_trim_create", "rf_trim_job", "rf_trim_cancel"} == set(names)
+            "rf_trim_create", "rf_trim_job", "rf_trim_cancel",
+            "rf_subtitle_preview", "rf_video_watermark_preview"} == set(names)
     for t in tools:
         assert t["description"]
         assert t["inputSchema"]["type"] == "object"

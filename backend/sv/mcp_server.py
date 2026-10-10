@@ -102,8 +102,11 @@ def _http_json(url: str, method: str, body: dict | None, token: str | None,
             f"连不上 sidecar（{e}）。雨帧可能已被关闭，重新打开后重试。") from None
 
 
-def _http_read(url: str, token: str | None, timeout: float) -> bytes:
-    req = urllib.request.Request(url)
+def _http_read(url: str, token: str | None, timeout: float, body: dict | None = None,
+               include_metadata: bool = False) -> Any:
+    req = urllib.request.Request(url, data=json.dumps(body).encode('utf-8') if body is not None else None)
+    if body is not None:
+        req.add_header('Content-Type', 'application/json')
     req.add_header("User-Agent", f"rainframe-mcp/{__version__}")
     if token:
         req.add_header("x-sv-token", token)
@@ -112,6 +115,9 @@ def _http_read(url: str, token: str | None, timeout: float) -> bytes:
             data = response.read(_MAX_ASSET_BYTES + 1)
             if len(data) > _MAX_ASSET_BYTES:
                 raise ToolError("预览或日志超过 32 MiB，请使用更小的样本或缩短日志范围")
+            if include_metadata:
+                return data, {'time_s': float(response.headers['X-Subtitle-Time']),
+                              'warnings': json.loads(response.headers.get('X-Subtitle-Warnings', '[]'))}
             return data
     except urllib.error.HTTPError as error:
         try:
@@ -266,6 +272,24 @@ class _Bridge:
             self.base = None
             raise
 
+    def preview(self, body: dict) -> tuple[bytes, dict]:
+        """Render a frame through the production API, recovering rotated authentication."""
+        if self.base is None:
+            self.discover()
+        for attempt in range(2):
+            try:
+                return _http_read(self.base + '/api/subtitles/preview', self.token,
+                                  _TIMEOUT_S + 30, body, True)
+            except ApiError as error:
+                if error.status != 401:
+                    raise
+                if attempt:
+                    raise UnauthorizedError('令牌在预览时失效，请重试或重启 MCP 服务') from None
+                self.discover()
+            except SidecarOfflineError:
+                self.base = None
+                raise
+
 
 _BRIDGE = _Bridge()
 
@@ -352,7 +376,7 @@ def _t_model_download(args: dict) -> dict:
 
 def _t_task_create(args: dict) -> dict:
     params: dict = {}
-    for key in ("kind", "scale", "codec", "crf", "tile", "denoise", "interp"):
+    for key in ("kind", "scale", "codec", "crf", "tile", "denoise", "interp", "subtitle_mode", "subtitle", "watermark"):
         v = args.get(key)
         if v is not None:
             params[key] = v
@@ -530,6 +554,17 @@ def _image_block(data: bytes) -> dict:
             "data": base64.b64encode(buffer.getvalue()).decode("ascii")}
 
 
+def _t_overlay_preview(args: dict, *, watermark_only: bool = False) -> _ToolContent:
+    body = {key: args[key] for key in ('input', 'subtitle', 'watermark', 'width', 'height', 'time_s') if key in args}
+    if watermark_only and 'time_s' not in body:
+        options = body['watermark']
+        body['time_s'] = options.get('start_s', 0) + min(.2, options.get('duration_s', 5) / 2)
+    data, metadata = _BRIDGE.preview(body)
+    metadata.update(width=args['width'], height=args['height'],
+                    hint='源画面缩放到输出尺寸后烧录，未运行 AI 超分；图像最长边缩至 1200 像素。沿用这些参数创建任务。')
+    return _ToolContent([{'type': 'text', 'text': json.dumps(metadata, ensure_ascii=False)}, _image_block(data)])
+
+
 def _image_pair(metadata: dict, paths: list[tuple[str, str]]) -> _ToolContent:
     blocks = []
     missing = []
@@ -678,6 +713,43 @@ _WATERMARK_PROPERTIES = {
 }
 
 
+_SUBTITLE_SCHEMA = {'type': 'object', 'additionalProperties': False, 'properties': {
+    'source': {'type': 'string', 'enum': ['embedded', 'external', 'matching'], 'default': 'embedded'},
+    'path': {'type': 'string', 'description': '外部 SRT/ASS/SSA 文件绝对路径'},
+    'selection': {'type': 'string', 'enum': ['track', 'match'], 'default': 'track'},
+    'stream': {'type': 'integer', 'minimum': 0, 'description': '字幕轨序号，从 0 起；见 rf_probe'},
+    'language': {'type': 'string'}, 'title': {'type': 'string'},
+    'style_mode': {'type': 'string', 'enum': ['preserve', 'custom'], 'default': 'preserve',
+                   'description': 'ASS/SSA 默认保留原样式；custom 覆盖基础样式，行内标签和事件位置仍优先'},
+    'encoding': {'type': 'string', 'enum': ['utf-8-sig', 'gb18030', 'big5'], 'default': 'utf-8-sig'},
+    'font_name': {'type': 'string', 'default': 'Microsoft YaHei'},
+    'font_color': {'type': 'string', 'description': '#RRGGBB', 'default': '#FFFFFF'},
+    'fonts_dir': {'type': 'string', 'description': '补充字体目录；自动使用 MKV 字体附件'},
+    **{name: {'type': 'number', 'minimum': low, 'maximum': high, 'default': default,
+             'description': '尺寸按 1080p 基准随输出缩放；delay_s 为秒，正值延迟'}
+       for name, default, low, high in [('delay_s', 0, -3600, 3600), ('font_size', 48, 12, 144),
+                                       ('outline', 2, 0, 8), ('shadow', 1, 0, 8), ('margin_v', 50, 0, 400)]},
+}}
+_VIDEO_WATERMARK_SCHEMA = {'type': 'object', 'additionalProperties': False, 'properties': {
+    'kind': {'type': 'string', 'enum': ['text', 'image'], 'default': 'text'},
+    'text': {'type': 'string', 'description': '1~100 字，换行用实际换行符'},
+    'path': {'type': 'string', 'description': 'PNG/JPG/WebP Logo 绝对路径，最大 32MB，支持透明度'},
+    'position': {'type': 'string', 'enum': ['top-left', 'top-center', 'top-right'], 'default': 'top-right'},
+    'font_name': {'type': 'string', 'default': 'Microsoft YaHei'},
+    'font_color': {'type': 'string', 'description': '#RRGGBB', 'default': '#FFFFFF'},
+    **{name: {'type': 'number', 'minimum': low, 'maximum': high, 'default': default}
+       for name, default, low, high in [('start_s', 0, 0, 86400), ('duration_s', 5, .1, 3600),
+                                       ('opacity', .85, .05, 1), ('width_pct', 12, 1, 50),
+                                       ('font_size', 48, 12, 144), ('margin', 40, 0, 400)]},
+}, 'description': '视频片头烧录水印；字体和边距按 1080p 基准缩放，图片宽度为输出宽度百分比，保留宽高比'}
+_OVERLAY_PREVIEW_PROPERTIES = {
+    'input': {'type': 'string', 'description': '视频绝对路径'},
+    'width': {'type': 'integer', 'minimum': 2, 'maximum': 8192, 'description': '最终输出宽度'},
+    'height': {'type': 'integer', 'minimum': 2, 'maximum': 8192, 'description': '最终输出高度，像素总数上限 33554432'},
+    'time_s': {'type': 'number', 'minimum': 0, 'description': '指定秒数；超出视频时长时取最后可预览位置'},
+    'subtitle': _SUBTITLE_SCHEMA, 'watermark': _VIDEO_WATERMARK_SCHEMA,
+}
+
 # name, 描述, inputSchema, handler——描述面向 AI 客户端，写清前置条件与后续动作
 _TOOLS: list[tuple[str, str, dict, Callable[[dict], Any]]] = [
     ("rf_status",
@@ -728,10 +800,22 @@ _TOOLS: list[tuple[str, str, dict, Callable[[dict], Any]]] = [
           "denoise": {"type": "integer", "description": "去噪级别（模型支持时）"},
           "interp": {"type": "string", "enum": ["off", "rife2x"], "description": "补帧设置（实验性，probe 未推荐勿开）"},
           "overwrite": {"type": "boolean", "description": "确认覆盖已存在的输出（收到 409 后置 true 重交）"},
-          "extra_params": {"type": "object",
-                           "description": "透传其他任务参数。视频字幕烧录：subtitle_mode=burn；烧录并保留原字幕轨用 burn_keep。subtitle={source:external,path:字幕路径,delay_s:0}；指定内嵌文本轨用 source:embedded,stream:0；批量内嵌用 source:embedded,selection:match,language:zh,title:简体，按语言和标题包含匹配唯一文本轨，不依赖轨道序号；同名外挂用 source:matching。支持 SRT/ASS/SSA，还可含 encoding、font_name、font_size、font_color(#RRGGBB)、outline、shadow、margin_v、fonts_dir。其它参数：target_w/target_h、deinterlace、deband、folder_src、merge_pdf、pdf_out、format、model_id_color、mix_pass 等"},
+          "subtitle_mode": {"type": "string", "enum": ['none', 'auto', 'burn', 'burn_keep'],
+                            "description": "none 丢弃字幕；auto 保留兼容字幕轨；burn 烧录；burn_keep 烧录并保留原轨。烧录须传 subtitle"},
+          "subtitle": _SUBTITLE_SCHEMA,
+          "watermark": _VIDEO_WATERMARK_SCHEMA,
+          "extra_params": {"type": "object", "properties": {"subtitle": _SUBTITLE_SCHEMA, "watermark": _VIDEO_WATERMARK_SCHEMA, "subtitle_mode": {"type": "string", "enum": ["none", "auto", "burn", "burn_keep"]}},
+                           "description": "透传其他任务参数。视频字幕烧录：subtitle_mode=burn；烧录并保留原字幕轨用 burn_keep。subtitle={source:external,path:字幕路径,delay_s:0}；指定内嵌文本轨用 source:embedded,stream:0；批量内嵌用 source:embedded,selection:match,language:zh,title:简体，按语言和标题包含匹配唯一文本轨，不依赖轨道序号；同名外挂用 source:matching。支持 SRT/ASS/SSA，ASS/SSA 可设 style_mode=custom 覆盖基础样式（行内标签仍优先），默认 preserve。片头水印 watermark={kind:text,text:署名,position:top-right,start_s:0,duration_s:5}；图片 Logo 用 kind:image,path:绝对路径；支持多行文字、opacity、font_name、font_size、font_color、margin、width_pct。先用 rf_subtitle_preview 或 rf_video_watermark_preview 检查画面。以上参数也可直接作为 rf_task_create 顶层参数，extra_params 显式值优先。还可含 encoding、font_name、font_size、font_color(#RRGGBB)、outline、shadow、margin_v、fonts_dir。其它参数：target_w/target_h、deinterlace、deband、folder_src、merge_pdf、pdf_out、format、model_id_color、mix_pass 等"},
       },
       "anyOf": [{"required": ["input"]}, {"required": ["inputs"]}, {"required": ["input_folder"]}]}, _t_task_create),
+    ('rf_subtitle_preview',
+     '预览视频字幕烧录，可同时叠加 watermark。使用源画面缩放，不运行 AI；返回实际秒数、字体警告和原生 PNG。省略 time_s 取首条字幕附近；片头水印可能已到期。ASS custom 只覆盖基础样式。用相同参数创建 rf_task_create，subtitle_mode=burn 或 burn_keep。',
+     {'type': 'object', 'additionalProperties': False, 'properties': _OVERLAY_PREVIEW_PROPERTIES,
+      'required': ['input', 'width', 'height', 'subtitle']}, _t_overlay_preview),
+    ('rf_video_watermark_preview',
+     '预览视频片头文字或图片 Logo，可同时烧录 subtitle。默认右上角、0~5 秒；省略 time_s 取水印开始后 0.2 秒或更短的区间中点。返回实际秒数、字体警告和原生 PNG。使用源画面缩放，不运行 AI。图片去水印请用 rf_watermark_preview。',
+     {'type': 'object', 'additionalProperties': False, 'properties': _OVERLAY_PREVIEW_PROPERTIES,
+      'required': ['input', 'width', 'height', 'watermark']}, lambda args: _t_overlay_preview(args, watermark_only=True)),
     ("rf_tasks",
      "分页列出任务，可按 status 过滤或 q 搜索。默认每页 30 条，用 next_offset 继续；列表变化时分页位置可能变化。",
      {"type": "object",
