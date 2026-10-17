@@ -17,6 +17,7 @@
 12. 全模型基准：11 权重 × {DML-fp16/fp32, TRT-fp16}（08-27）
 13. 端到端全模型吞吐 + TRT 包装生效修复 + CUGAN 问题立案（08-27）
 14. 天花板链路：双路并行+NVENC 全模型实测（08-27）＋「x4 上 1080p 源即 8K」口径勘误
+15. GPU 直连零拷贝链（10-17/18）—— NVDEC→显存推理→NVENC；5070Ti 实测 45.8→64.9fps（+42%）
 
 ---
 
@@ -707,3 +708,75 @@ Y 探针数学 3 + 真权重 CPU 5 + GPU-gated DML 5）；全量 324 passed +
   桩 arity 挂 → 修桩后全绿（教训：给 _load_engine 加参数要 grep tests 里的
   全部 lambda 桩）。
 - 权重 29 资产已传 models-v1（38→67，1.76GB），digest 逐一比对注册表 sha256。
+
+
+# GPU 直连零拷贝链：NVDEC→显存推理→NVENC（2026-10-17/18，RTX 5070 Ti / i5-13500）
+
+## 背景与架构
+
+40fps 天花板分析定论：瓶颈不在算力（GPU SM 65%）而在宿主搬运——每帧 6.2MB 入 +
+24.9MB 出经 ffmpeg 管道 + Python 单线程 + PCIe 往返。本次消除之：PyNvVideoCodec 2.2.3
+（cp314 win wheel）进程内 NVDEC/NVENC + cuda-bindings，帧数据全程驻留显存：
+
+- 解码：`CreateDecoder(usedevicememory=True)` → P016 平面 CAI 视图（10bit HEVC）；
+- 推理：图手术包装模型（`sv/engines/gpu_graph.py`）——Y/UV 平面直进 ONNX 图，图内完成
+  反洗牌→量化→BT.709 矩阵→色度上采样→模型→NV12 双平面输出，IOBinding 全显存；
+- 编码：`CreateEncoder(bf=0, constqp)` 设备指针直进 NVENC，裸 ES 落盘后 ffmpeg remux 成段 mp4；
+- 管线：`GpuStreamPipeline` 经 `SegmentedPipeline(pipeline_factory=...)` 注入，
+  段/checkpoint/续跑/EOF 语义与标准链逐条对齐；worker 门控（gpu_chain_gate）不满足
+  条件自动回标准链并记日志（设置 `gpu_zero_copy` 总闸，默认开）。
+
+## 真机 A/B（3 分钟 BDRemux HEVC 10bit 1080p→4K，animejanai-v3-hd-l2，双路并行 + hevc_nvenc 同开）
+
+| 链路 | 耗时 | 吞吐 |
+|---|---|---|
+| 标准链（TRT+u8 包装+三协程重叠） | 96.7s | 45.8 fps（与 08-27 历史值一致） |
+| **GPU 直连链** | 68.3s | **64.9 fps（+42%）** |
+
+产物正确性：图输出对 numpy 同数学基线 38.4dB（最近邻基线的健康水位，真模型输出高于它）；
+Y 平面 NVDEC vs ffmpeg 软解位级一致（内容帧 maxdiff=0）；色彩 BT.709 limited 全链一致
+（比标准链 swscale 默认 bt601 更正确），remux 显式落 `-colorspace bt709 -color_range tv` 标签。
+
+## 踩坑记录（长，全是实测）
+
+1. **解码表面色度「riffle 洗牌」**：PyNvVideoCodec 设备输出的 UV 平面恒为
+   「前半值在偶槽、后半在奇槽」排列（元素粒度 u16/u8；多文件×分辨率×编码位级实证），
+   Y 平面紧致正常。8bit NV12 同病（字节粒度）→ 门控 8bit 出链只支持 10bit P016。
+   图内 reshape 成对 + Slice 末轴反洗牌（带步长 Slice 在 CUDA EP 结果错误，避开）。
+2. **黑帧验证陷阱**：尖刺期 V1 104dB「位级对齐」是在片头黑帧上验的——黑帧色度恒定，
+   任何排列都匹配。内容帧复验才暴露 riffle。教训：色彩验证必须内容帧。
+3. **FFmpegMuxer 不可用于段产物**：其 B 帧 DTS 补偿（负 DTS + edit list）逐段独立，
+   concat 后时间轴互踩（48 帧段解码漂到 50/33，首帧重复、pts 重复）。裸 ES + ffmpeg
+   remux 是干净路径，但 ES 的 B 帧显示序无法重建（raw demuxer pts 错）→ **bf=0 强制
+   IPP**（CreateEncoder 关键字，官方文档参数表）后解码序==显示序，一切自然干净。
+   IPP 无 B 帧的码率代价由 constqp 承担（同画质码率略高，3 分钟 342MB vs 150MB@cq18）。
+4. **NVENC 设备输入协议**：Encode 只认 `.cuda() → [CAIMemoryView(Y), (UV)]` 且 Y/UV
+   必须同块连续显存；构造序 (shape, strides, typestr, gpuIdx, ptr, readonly)；
+   `cudacontext` 必须显式传主上下文（跨上下文 D2D 静默拷垃圾）。调用线程须持
+   current context（ensure_ctx）。
+5. **`GetPixelFormat()` 解码前返回默认 NV12**：真实格式须查首帧 `f.format`（懒查）。
+6. **PyNvDemuxer.Seek 实参是包序号非时间戳**（校准 Seek(1000)→41s）→ 分段定位改
+   ffmpeg `-ss -c copy -copyts` 切段级 MKV + pts 丢弃（CFR 精确）。
+7. **EOF 契约**：Demux 到尾不返回 None 而是无限 bsl=0 空包；空包喂 Decode 即冲刷
+   尾帧（幂等），Decode(None) 会挂死。
+8. **解码表面池复用**：帧数据须当帧消费，先 `SyncOnCUStream()` 再 D2D。
+9. **参考系乌龙**（排障消耗最大）：ffmpeg 裸解 10bit 值需 <<6 对齐 P016 MSB 口径、
+   2-D 数组 len() 取行数致 riffle 期望构错（行级 vs 元素级）、同 mkv 不同 ffmpeg
+   读取路径首帧不一致——三层叠加制造了「管线坏了」的假象，逐一排除后管线自证清白。
+10. **测试默认参数绑定坑**：SegmentedPipeline 的 pipeline_factory 若用默认参数绑定
+    StreamPipeline，monkeypatch 模块属性失效（定义期绑定）→ 实例期解析。
+
+## 门控条件（gpu_chain_gate，全满足才启用）
+
+设置 gpu_zero_copy（默认开）+ onnx 引擎 + 无补帧 + 视频输出 + h264/hevc_nvenc 编码 +
+无预处理滤镜/字幕烧录/水印/精确尺寸/tile/批处理 + 源编码 ∈ {h264,hevc,av1} + 10bit +
+偶数尺寸 + 模型 IO 兼容（非 Y 通道/仿射/定长）。GpuInfer 构造失败（依赖缺失等）
+自动回标准链。依赖（PyNvVideoCodec/cuda-bindings）装在 .venv-cuda，不进
+requirements.txt（CI 无 GPU；DML 主环境惰性导入零成本）。
+
+## 测试
+
+新增 33 例：test_gpu_graph（图手术 CPU 数学对拍 7）+ test_gpu_codec（切断/pts 对齐/
+EOF/NVENC 往返 4，GPU-gated）+ test_stream_gpu（防御拒绝 + 10bit e2e 含断点续跑 2，
+GPU-gated）+ test_gpu_chain_gate（门控 12）+ segmented 工厂注入回归。全量 686 passed
++ 37 skipped；.venv-cuda 下 GPU 套件 15 passed。

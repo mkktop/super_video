@@ -38,6 +38,7 @@ from sv.pipeline.probe import (
 )
 from sv.pipeline.segmented import SegmentedPipeline, read_eof_marker
 from sv.pipeline.stream import (
+    StreamPipeline,
     TEXT_SUBS,
     EncodeOpts,
     PipelineError,
@@ -62,6 +63,7 @@ from sv.server.worker_engine import (  # noqa: F401 — 引擎装配（含测试
     _cugan_alt_hint,
     _load_onnx_engine,
     _release_aux_slots,
+    _unmask,
 )
 from sv.server.worker_image import (  # noqa: F401 — 图片作业（含测试 re-export）
     _batch_heights,
@@ -410,15 +412,59 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     try:
         weight = model_file(spec, scale, precision, variant)
         tile = int(params.get("tile") or spec.tile_hint)
-        t_load = time.perf_counter()
-        engine, used_precision = _load_onnx_engine(
-            weight, spec, scale, variant, precision, tile,
-            (info.height, info.width), batch=batch, log=emit)
     except Exception as e:  # noqa: BLE001 — 与图片路径同：失败带堆栈落 sidecar.log
         emit_failed("引擎加载失败", e)
         return 1
-    load_s = time.perf_counter() - t_load
-    emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
+
+    # ---- GPU 直连链判定（NVDEC→显存推理→NVENC，帧数据全程驻留 GPU）----
+    # 命中则跳过标准引擎加载（省一次 TRT 反序列化），段管线换 GpuStreamPipeline；
+    # GpuInfer 构造失败（依赖缺失/图手术异常）自动回落标准链，任务不硬失败
+    from ..pipeline.stream_gpu import gpu_chain_gate
+
+    _ok_kw = dict(
+        setting=settings.load().get("gpu_zero_copy", True),
+        spec_engine=spec.engine, interp=interp, out_kind=out_kind,
+        codec=params.get("codec", "h264"), decode_vf=decode_vf,
+        burn_subtitle=params.get("_burn_subtitle"),
+        watermark=params.get("_watermark"),
+        target_size=target_size, tile=tile, batch=batch,
+        src_codec=info.video_codec, bit_depth=info.bit_depth,
+        width=info.width, height=info.height, io=spec.io)
+    gpu_ok, gpu_reason = gpu_chain_gate(**_ok_kw)
+    gpu_factory = None
+    engine = None
+    used_precision = precision
+    load_s = 0.0
+    if gpu_ok:
+        try:
+            from ..pipeline.stream_gpu import GpuInfer, GpuStreamPipeline
+
+            t_load = time.perf_counter()
+            gpu_gi = GpuInfer(Path(weight), info.height, info.width,
+                              info.bit_depth, scale=int(target))
+            gpu_factory = (lambda gi: (lambda *a, **k: GpuStreamPipeline(
+                *a, gpu_infer=gi, **k)))(gpu_gi)
+            load_s = time.perf_counter() - t_load
+            emit({"type": "loaded", "provider": gpu_gi.provider_used,
+                  "precision": used_precision})
+            emit({"type": "log",
+                  "line": "GPU 直连链已启用：NVDEC 解码→显存推理→NVENC 编码，帧数据全程驻留 GPU"})
+        except Exception as e:  # noqa: BLE001 — 依赖缺失/图手术失败：回落标准链
+            gpu_ok = False
+            emit({"type": "log", "line": f"GPU 直连链不可用，使用标准管线（{_unmask(e)[:200]}）"})
+    if not gpu_ok:
+        if gpu_reason:
+            emit({"type": "log", "line": f"GPU 直连链未启用：{gpu_reason}"})
+        try:
+            t_load = time.perf_counter()
+            engine, used_precision = _load_onnx_engine(
+                weight, spec, scale, variant, precision, tile,
+                (info.height, info.width), batch=batch, log=emit)
+        except Exception as e:  # noqa: BLE001
+            emit_failed("引擎加载失败", e)
+            return 1
+        load_s = time.perf_counter() - t_load
+        emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
 
     preview_dir = TEMP_DIR / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
@@ -457,6 +503,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
                        else f"x{target}（{info.width * target}x{info.height * target}）"),
             "load_s": load_s, "seg": seg_est, "n_segs": n_segs,
             "parallel": parallel,
+            "gpu_chain": gpu_ok,
             "resumed": (TEMP_DIR / "segmented" / task_id / "checkpoint.json").exists(),
         })
 
@@ -508,6 +555,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
         cleanup=(not sharded) and not prof,
         decode_hwaccel=decode_hwaccel,
         decode_vf=decode_vf,
+        pipeline_factory=gpu_factory or StreamPipeline,
     )
     work_dir = TEMP_DIR / "segmented" / task_id
     try:

@@ -14,6 +14,7 @@ DEFAULTS = {
     "auto_update_check": True,  # 启动时自动检查 GitHub Releases 更新
     "update_source": "auto",  # 更新下载源：auto GitHub 主源、网络不通切 R2 | r2 R2 优先（国内直连快）| github 仅 GitHub 不用备用源（主进程读，经 IPC 同步）
     "parallel_streams": False,  # 双路并行：两进程分段同时推理（实测 +17~21%，显存翻倍）
+    "gpu_zero_copy": True,  # GPU 直连链：NVDEC→显存推理→NVENC 帧数据不经宿主内存（10bit+NVENC 任务自动启用；异常自动回落标准链）
     "output_dir": "",  # 默认输出目录：空 = 与源视频同目录；超分任务/剪切未显式指定输出时写到这里（不存在则自动建）
     "notify_task_done": True,  # 任务完成/失败时系统通知+闪任务栏（renderer 读；窗口聚焦时不打扰）
     "close_to_tray": False,  # 关闭按钮=最小化到系统托盘继续处理任务（托盘菜单退出应用）
@@ -98,6 +99,8 @@ def save(updates: dict) -> dict:
                 raise ValueError(f"非法 update_source 值: {v}（auto/github/r2）")
             if k == "parallel_streams" and not isinstance(v, bool):
                 raise ValueError(f"非法 parallel_streams 值: {v}")
+            if k == "gpu_zero_copy" and not isinstance(v, bool):
+                raise ValueError(f"非法 gpu_zero_copy 值: {v}")
             if k == "notify_task_done" and not isinstance(v, bool):
                 raise ValueError(f"非法 notify_task_done 值: {v}")
             if k == "close_to_tray" and not isinstance(v, bool):

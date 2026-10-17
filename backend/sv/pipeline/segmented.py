@@ -150,6 +150,7 @@ class SegmentedPipeline:
         nshards: int = 1,
         decode_hwaccel: str | None = None,  # 硬解 '-hwaccel' 值（None=软解；worker 预验证过）
         decode_vf: str | None = None,  # 解码前置滤镜链（反交错/去色带；透传给每段 StreamPipeline）
+        pipeline_factory=None,  # 段管线工厂（GPU 直连链注入 GpuStreamPipeline；None=StreamPipeline 实例期解析，测试可 monkeypatch）
     ):
         self.info = info
         self.output_path = Path(output_path)
@@ -169,6 +170,7 @@ class SegmentedPipeline:
         self.nshards = nshards
         self.decode_hwaccel = decode_hwaccel
         self.decode_vf = decode_vf
+        self.pipeline_factory = pipeline_factory or StreamPipeline
 
     async def run(self) -> RunStats:
         info, tx = self.info, self.tx
@@ -233,7 +235,7 @@ class SegmentedPipeline:
                 _t_gap0 = time.perf_counter()
                 if gap_prev_end is not None:
                     tot["gap"] = tot.get("gap", 0.0) + (_t_gap0 - gap_prev_end)
-                pipe = StreamPipeline(
+                pipe = self.pipeline_factory(
                     info, seg_out, tx, self.enc,
                     progress_cb=_cb,
                     cancel_event=self.cancel_event,
