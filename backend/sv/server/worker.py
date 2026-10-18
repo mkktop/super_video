@@ -433,6 +433,8 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     gpu_ok, gpu_reason = gpu_chain_gate(**_ok_kw)
     gpu_factory = None
     engine = None
+    # 两条路径各自填（GPU 链 engine=None，下方剖析头不可直接引用 engine）
+    provider_used: list[str] = []
     used_precision = precision
     load_s = 0.0
     if gpu_ok:
@@ -445,7 +447,8 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             gpu_factory = (lambda gi: (lambda *a, **k: GpuStreamPipeline(
                 *a, gpu_infer=gi, **k)))(gpu_gi)
             load_s = time.perf_counter() - t_load
-            emit({"type": "loaded", "provider": gpu_gi.provider_used,
+            provider_used = gpu_gi.provider_used
+            emit({"type": "loaded", "provider": provider_used,
                   "precision": used_precision})
             emit({"type": "log",
                   "line": "GPU 直连链已启用：NVDEC 解码→显存推理→NVENC 编码，帧数据全程驻留 GPU"})
@@ -464,7 +467,8 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
             emit_failed("引擎加载失败", e)
             return 1
         load_s = time.perf_counter() - t_load
-        emit({"type": "loaded", "provider": engine.provider_used, "precision": used_precision})
+        provider_used = engine.provider_used
+        emit({"type": "loaded", "provider": provider_used, "precision": used_precision})
 
     preview_dir = TEMP_DIR / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
@@ -491,7 +495,7 @@ def _main_once(task_id: str, shard: int | None = None, nshards: int = 1) -> int:
     if prof and shard is None:
         _prof_write_video_header(task_id, {
             "model": spec.id,
-            "provider": "/".join(engine.provider_used or []) or "?",
+            "provider": "/".join(provider_used or []) or "?",
             "precision": used_precision,
             "u8": bool(getattr(engine, "u8_wrapped", False)),
             "engine_setting": settings.load().get("engine", "auto"),

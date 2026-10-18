@@ -153,6 +153,22 @@ def test_cache_roundtrip(toy, tmp_path, monkeypatch):
     assert p3 == p1 and p3.stat().st_mtime_ns != stat1
 
 
+def test_cache_tmp_pid_suffixed(toy, tmp_path, monkeypatch):
+    """tmp 写入名必须带 pid：双路并行两 worker 进程首次包装同一 (权重,分辨率)
+    时，固定 tmp 名会互踩——交错写坏后 replace 成坏缓存，且 mtime 失效条件
+    永不触发，该键的 GPU 链从此静默回退（回归：曾用固定 .tmp 名）。"""
+    from sv.engines import gpu_graph
+    monkeypatch.setattr(gpu_graph, "WRAP_DIR", tmp_path)
+    saved: list[str] = []
+    real_save = onnx.save
+    monkeypatch.setattr(gpu_graph.onnx, "save",
+                        lambda m, p: (saved.append(Path(p).name),
+                                      real_save(m, p))[1])
+    ensure_wrapped(toy, 64, 96, 8)
+    assert saved and saved[0].endswith(f".tmp{os.getpid()}"), saved
+    assert not list(tmp_path.glob("*.tmp*")), "成功落盘后不得残留 tmp"
+
+
 def test_wrapped_path_keying():
     a = wrapped_path(Path("m.onnx"), 1080, 1920, 10, "709", 2)
     b = wrapped_path(Path("m.onnx"), 1080, 1920, 8, "709", 2)

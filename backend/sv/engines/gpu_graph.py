@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -219,7 +220,9 @@ def ensure_wrapped(weight: Path, h: int, w: int, bit_depth: int,
     if dst.exists() and dst.stat().st_mtime >= weight.stat().st_mtime:
         return dst
     dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_suffix(".tmp")
+    # tmp 名带 pid：双路并行两 worker 进程可能同时首次包装同一 (权重,分辨率)，
+    # 固定名互踩会交错写坏缓存且永不自愈（同 checkpoint/eof 标记的旧坑）
+    tmp = dst.with_suffix(f".tmp{os.getpid()}")
     onnx.save(wrap_model(weight, h, w, bit_depth, matrix, scale), str(tmp))
     tmp.replace(dst)
     return dst
