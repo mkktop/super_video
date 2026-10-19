@@ -1,0 +1,67 @@
+# Memory Index
+
+- [super_video 项目目标](super-video-project-goal.md) — 视频超分软件，2026-08 起步于可行性讨论
+- [models-v1 唯一模型源](models-v1-single-source.md) — 全部下载源指自家 Release（现 68 资产）；上传 starter 僵尸资产坑；digest 比对校验；文件名从 manifest 取勿猜（9-2 起 models-v1 降为 [[modelscope-primary-mirror]] 的备用源）
+- [ModelScope 主源镜像](modelscope-primary-mirror.md) — manifest url=modelscope/mirror_urls=models-v1；同步=注册表对账脚本（取源必须 url+mirror 双源，TRT 资产同池）；上传必须走 CI（blob 全局去重可断点重跑）；68 资产+README+9 TRT 资产已铺底核验；token 在 secret MODELSCOPE_TOKEN
+- [D:\soft 健康安装参照](d-soft-install-healthy.md) — 用户主力实测机（跟版两天四版）；排障工具箱：数据根 super_video_data 下 log/db/token，sqlite 查 failed 任务定位模型，curl 探活带 token+--noproxy；sr_logs 逐任务日志实锤 provider；用户日常 engine=trt+fp16
+- [升级链路与 AIOV 差异](super-video-update-flow.md) — 手动下载+进度条+RELEASE_NOTES.md 只保留当前版本；禁差分+轻量 tag；gh 是假包，API 走 git credential；**预览通道 9-29 整体移除**（只发正式版；electron-updater 行为存档在文内）；9-3~9-4 连发 v0.4.5/6/7（GPU 修复发布前先在装版试跑）
+- [队列拖拽与断点续跑](queue-reorder-and-resume.md) — queue_order 列+reorder API；segmented.py 分段 checkpoint；resume 端点约定
+- [本机代理劫持 localhost](local-proxy-hijacks-localhost.md) — curl 探测 sidecar 必须 --noproxy；退出码 0 ≠ 存活
+- [模型扩容与TRT落地事实](model-broadening-and-trt.md) — 11资产已传models-v1; AnimeJaNai V2=fp16-IO/RGB; CUGAN fp16转换必坏; 通道序红绿分屏测法
+- [只管自己的测试](only-own-tests-scope.md) — 全量 pytest 失败先归属,用户 WIP 的波动不追,只保自己新增测试绿
+- [图标定稿与离线渲染工具链](icon-pipeline.md) — 9-29 终稿 M1「律动环」（用户自迭代 variants3~10 批次选定；柱阵烘焙成静态 SVG 在 design/icons/rainframe/）；无 ImageMagick 用 Electron+Pillow 三条命令出全套
+- [uint8 图手术提速已产品化](uint8-graph-wrap-speedup.md) — 6164108 落地 3.6x、TRT 合体 50.7fps；batch_hint=4 曾静默禁包装(≤720p 慢路径)+64×64 预热毒害 DML 均已修
+- [TRT 可选组件(安装版)](trt-component-installer.md) — v0.1.18~19: meta_path 重定向+frozen GBK 坑+py7zr CI 事故+selftest 闸门;装完不自动启用待拍板
+- [性能数字须用 elapsed 验证](perf-numbers-verify-with-elapsed.md) — 用户核对耗时拆穿虚高 fps；A/B 说明独立任务；报基准先标口径（纯推理 vs 端到端），用户记得历史头条数字会拿来对账
+- [双路并行产品化](dual-stream-parallel.md) — v0.1.20 软编零增益(CPU 饱和)/NVENC +84%；进度局部口径+≥8段门槛
+- [用户数据放安装目录外](user-data-outside-installdir.md) — v0.1.21 教训：更新=旧卸载器清空安装目录；新数据一律进 DATA_ROOT
+- [dev 与安装版不能同时跑](dev-installed-cannot-coexist.md) — 单实例锁共用 userData；安装版进程名 super_video.exe 别 grep electron；dev 秒退 exit 0 零输出即此因；sidecar 身份看命令行
+- [CI 闸门分工](ci-workflows-gates.md) — ci.yml=push main 全量 pytest+vitest；release.yml v0.2.4 起也跑 pytest 门禁+selftest，tag 前版本三方一致性校验；**发版 push 与 tag 并行不等 ci（9-15 起）**；代理挂了 -c http.proxy= 直连；慢机抖动看同 commit 的 ci.yml 对照，绿则 rerun-failed-jobs 补救
+- [Windows locale 中文 stdout 坑](windows-locale-stdout-utf8.md) — cp1252 管道 print 中文 stdout 全空；入口 reconfigure；测试注入 PYTHONIOENCODING=cp1252 回归
+- [任务删除清理链](task-cleanup-delete-flow.md) — 删除任务后台清工作目录+预览+广播事件；启动清扫超龄孤儿；取消不删供续跑；"删除慢"=轮询滞后
+- [UI 按全屏宏观布局评判](ui-fullscreen-layout-feedback.md) — 限宽居中=「挤在中间」差评；容器 width:100%+响应式网格铺满，微调不 register
+- [v0.2.4 审查修复与拍板取舍](v0-2-4-review-fixes.md) — 全部问题已修；webSecurity/量化差异两项已拍板保持现状勿重提
+- [TRT u8 包装生效化](trt-u8wrap-enablement.md) — uint8 只留图边界+容差按 provider 分档；修后 TRT 全线反超 DML（数据在 BENCH §12/13）
+- [CUGAN×DML 泄漏已解决](cugan-dml-leak-resolved.md) — 逐帧显存泄漏 0x887A0006 已定论；围栏=DML 禁包装+主线程内联+worker 拒绝，TRT/CPU 可用
+- [x4×1080p=8K 陷阱](x4-on-1080p-is-8k-trap.md) — H.264 超 8K 规格报误导性 No capable devices；hevc_nvenc 支持 8K；排障先对 hw_out 尺寸再疑设备
+- [多轨混流事实](multitrack-mux-ffmpeg-facts.md) — 多音轨全保留+章节+MKV字体附件已落地；mp4 挂附件必败需门控；ffmpeg 混流实证坑
+- [KeepAlive 常驻页预填须挂 activated](keepalive-prefill-activate-hook.md) — 只挂 onMounted 二次跳转静默失效；两钩子连发靠置空幂等
+- [vite/client 类型不可达](vite-client-types-unreachable.md) — pnpm 顶层无 vite 包致资产通配声明失效；图片导入需 env.d.ts 显式 declare
+- [sr_profiling 与 fps_avg 口径](sr-profiling-and-fps-avg.md) — 都是端到端口径含加载+合成；续跑任务 fps_avg 偏高
+- [后端测试环境](backend-test-env.md) — 仓库根 .venv 跑 pytest；无 PyAV，夹具走 ffmpeg 命令行
+- [嵌入式开发背景(J-Link)](embedded-dev-jlink-context.md) — 用户兼做 MCU 开发；2026-08-30 问串口与 J-Link VCOM，探针当时未接
+- [VSET 对标与模型梯队](vset-model-gap-and-tier1.md) — 一梯队+ArtCNN×3+DIS×2 已落地(9-1，引擎新增 color=y 单通道语义)；**项目非商用(9-1 澄清)→NC 解锁，MangaJaNai 为漫画首选**；图片档候选 HAT/SwinIR-real/x4v3/SeemoRe；候选剩 RIFE-heavy/SwinIR/waifu2x(nunif 线)
+- [SV_DATA 迁移陷阱](sv-data-env-migration-trap.md) — 子进程设 SV_DATA 会搬走 models_store；401=token 文件非 SV_DATA 问题
+- [内置模型换血 V3.1](bundled-models-v31-swap.md) — 2026-09-02 bundled=V3.1 HD 四件(原生fp16/batch固定1/输入名input)；测试 fixture 分布策略；recommend 首选待拍板；bundled 无 url 模型移出前必须先上传补源
+- [R2 备用下载源](r2-mirror-update-fallback.md) — 9-29 迁桶换域：桶 yuzhen / 域 yuzhen-media.yeyushi.com，旧桶旧域删除（删时须连 DNS 记录清干净否则旧客户端不回落）；预览通道同日移除只剩 latest.yml；下个 tag 前新桶必须建好；下载源三档可选；setFeedURL 切源/下载须先重查；token 待轮换
+- [sidecar 复用 token bug（已修）](sidecar-reuse-token-bug.md) — 复用分支不生成 token→401 自锁；主进程 fetch 不带 token→关窗确认死代码；2026-09-03 修复，已随 v0.4.4 发布
+- [GBK settings 引爆引擎加载](gbk-settings-unicode-engine-fail.md) — 1060 实机「引擎加载失败 UnicodeDecodeError」=settings.json 被存成 GBK；已修 utf-8-sig→GBK 兜底+save 愈合；1060 即时解法=删/另存 UTF-8 该文件
+- [UI 优化五轮批次](ux-optimization-batch-v044.md) — R1a→R5 全部随 v0.4.5/v0.4.6 到用户手里：删除确认/409+overwrite 预检/engine 可设 cpu/任务搜索批量（搜索不污染 store.tasks）/总览 grid+先试跑/token 层/probe 透出；测试固定输出路径须 overwrite:true
+- [引擎探测硬编码模型 bug](engine-probe-hardcoded-model-bug.md) — V3.1 换血移走探测校验模型→v0.4.0+ 安装版 trt/cuda 恒回落 DML；已修随 v0.4.5；修好闸门后下游 MangaJaNai CUDA 崩溃二段式爆发；换 bundled 集先 grep 移除文件名
+- [对比功能三雷与资产 key](compare-csp-and-asset-keys.md) — 成片 CSP 黑屏/图片资产 key 404/失败徽标 off-by-one，v0.4.6 全修；第四雷滑块参考系错位（中点对齐越滑越偏，viewportSplitToFrac 已修）；排障指纹=零请求(CSP)/404(key)/200(媒体)
+- [fp16 转换落盘前验证](fp16-conversion-load-validation.md) — 转换器对注意力架构产坏图（CUGAN/DAT2 两例），v0.4.6 起 CPU 会话验证+坏图自动回退 fp32；DAT2 fp16:false 存量自愈
+- [MangaJaNai CUDA Resize 崩溃降链](trt-cuda-resize-mangajanai.md) — TRT 真启用后 MxNet Resize 在 CUDA EP fast_divmod 断言崩；worker 自动降链 trt_cpu/cpu（da261f3 已随 v0.4.7 发布）；engine=cuda 映射 ort_device=auto 勿搞混
+- [DML OOM 被 UnicodeDecodeError 掩盖](dml-unicode-masked-oom.md) — 中文系统 ORT 错误消息内嵌 GBK→utf-8 解码崩掩盖 0x8007000E；_oom 认 args bytes+输出>36M 预设 512 tile（73d01a0 已随 v0.4.7 发布）；同款报错的第二病因（第一是 GBK settings）
+- [Git Bash 中文提交两种坑](git-bash-commit-msg-utf8.md) — heredoc 偶发 GBK 乱码→Python 写 UTF-8 文件+commit -F；console 乱码≠提交坏，xxd 验字节再 amend
+- [Bash 工作目录漂移假损坏](git-bash-cwd-drift-pitfall.md) — cd 子目录后持久残留：pathspec 全 fatal+ls-files 只显子树，先 pwd 再疑 git；staging 恢复套路 reset→add -u→显式列表
+- [本地工作区清理 9.4G](local-workspace-cleaned.md) — 2026-09-04 清 TRT staging+7z/sidecar dist/.tmp 大件/dist-app 旧包；本地打安装包先 pyinstaller，TRT 改包走 build_trt_component.py（成品在 runtime-v1 release）；models_store 刻意保留
+
+- [2026-09 优化大批次落地](optimization-batch-v048.md) — app 拆 routes/+state、worker 拆 common/engine/image、gpu_lease、前端 async chunk+vitest;测试 patch 目标映射表
+- [AST 切割丢 __main__ 入口](ast-split-loses-main-entry.md) — 按函数边界拆模块必查文件尾入口块;症状=子进程 rc=0 零事件
+
+- [浏览器 UI 预览脚手架](browser-preview-harness.md) — pnpm preview 全 mock 走查样式；NProgress 渐变只认 stops 对象/空 trigger 崩 VBinder/大面积径向渐变 banding 三坑；IAB 面板遮挡时页面 rAF 停跳→Vue 过渡卡死假破版（shim setTimeout 可走完，Electron 无此问题）；mock 仅 8 模型 vs 真实注册表 37，灌真 manifest 待拍板
+- [用户逐元素 UI 打磨偏好](user-iterative-ui-polish.md) — 偏爱炫酷动效+实时数据条（金属渐变/流光/呼吸辉光），反感原始代号堆一行（trt→TensorRT 要映射）；preview 截图自查后再交付；9-12 起接受结构化大需求书一次全量交付
+- [2026-09-12 UI 视觉大批次](ui-visual-overhaul-0912.md) — 全语义 token+浅色主题+Ctrl+K+方向过渡+像素 Hero 已落地未 commit；纯 UI 状态新文件 uiFx.ts/theme.ts；.sv-card/.sv-num 工具类；氛围岛两主题恒深色是拍板；渐变 stops/SVG 色均可传 var()
+- [TRT fp16 全 NaN 黑图已修](trt-fp16-nan-black-images.md) — transformer 模型 TRT 混合精度必黑；io.trt_fp16=false + 灰图探测降链 + 缓存分家（125379a）
+- [TRT workspace 不足静默回落 CUDA](trt-workspace-epfail-slow.md) — 大图全图构建 EP_FAIL 慢 40~70 倍；4GB→10GB 已修（410e0ae）；查 trt_cache 有无新 .engine 判真伪
+- [DML 大图静默垃圾图](dml-bigimage-silent-garbage.md) — 大尺寸全图 fp16 灰雾/fp32 近黑不报错；彩色探针+512分块降链已修（16c9447）；一天三案共性=垃圾静默落盘
+- [长驻进程 DML OOM 的 CPU 兜底+错误解蔽](masked-oom-cpu-fallback.md) — 8007000E 被 GBK 掩盖、降 tile 救不回会话损坏；e2c565e 兜底 CPU + _unmask 上报真实错误
+- [漫画超分独立成档](manga-sr-standalone.md) — MangaSR 页+kind=manga；_IMAGE_TASK_KINDS 常量四处消费勿漏；混装双模型 lane 落库+双引擎槽位；mix_pass=split 分趟省显存（先放再建/页序保持）；漫画优化挂点在 worker_image 按 kind 分岔；IAB 走查 rAF 替身+dispatchEvent 解法；9-24 断点续跑=产物 mtime≥created_at（重跑旧产物须重做）+上限 10 万页配套裁剪
+- [GPU 设备移除族自愈](dev-removed-tdr-handling.md) — 887A0005/6/7=环境瞬态 TDR；等 3s×2 原配置重试→CPU 兜底且不进常驻缓存（与 OOM 路径刻意相反，cb139b4）
+- [图片任务对比缩略图上限坑](compare-thumb-cap-image-tasks.md) — 静帧对比曾喂 960p 缩略图致两侧无差异；已改 file:// 全分辨率首对（49040c4）；接缝低相关≠错位（漫画内容本就如此）
+- [编码器选择决定成片体积](encoder-choice-drives-output-size.md) — 5080 h264_nvenc vs 1060 libx264 同"18"实测 2.4~2.6 倍，都不是 bug；codec/crf 是逐任务参数不进 settings；恒 yuv420p、无静默换编码器；查历史参数看 sidecar.db params 列（sr_logs 不含 codec）
+- [Git Bash×Windows Python 工具链坑](gitbash-python-toolchain-pitfalls.md) — /tmp 落 C:\tmp 致 sqlite 空库假象；glob [方括号] 变字符类；全角冒号文件名直传 exe 炸；ffprobe 自带在仓库 bin/
+- [雨帧品牌化定名](brand-yuzhen-rainframe.md) — 显示层=雨帧/英文名 RainFrame，exe 自 v0.5.6 起 RainFrame.exe、安装包 RainFrame_*_setup.exe；内部标识符（appId/repo/npm name/数据目录 super_video_data）刻意保留勿顺手改
+- [文档体系补齐 9.25](docs-completeness-2026-09.md) — LICENSE=自写非商用协议（禁商用再分发，勿换标准开源）；app/README 前端无 router/Pinia；WS 契约表在 backend/README；design/README 图标三命令管线
+- [MCP stdio bridge 落地](mcp-bridge-stdio.md) — 零依赖手写协议层(sidecar.exe mcp)；发现/鉴权复刻 Electron；POST 须显式 Content-Type 的 smoke 教训
+- [GPU 直连零拷贝链已合 main](gpu-zero-copy-chain.md) — +42% 但组件化用户拍板暂缓勿再提；本机 .venv-cuda 缺依赖不激活；bf=0 产物体积翻倍是已知取舍

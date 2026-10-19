@@ -1,0 +1,30 @@
+---
+name: super-video-project-goal
+description: super_video 项目：Electron 视频超分软件，多模型可插拔，2026-08-23 已定架构方案
+metadata:
+  node_type: memory
+  type: project
+  originSessionId: sess_f28c85f3-180e-43f1-814d-6b0b3dc16d5b
+---
+
+用户在 `D:\work\super_video`（Windows）从零开发视频超分软件。**M0-M4 全部完成（2026-08-24）**，47 测试全过，产物 dist-app/super_video_0.1.0_setup.exe（252MB）。已定决策（2026-08-23）：
+
+- GUI 用 **Electron**（参考先例：VSET、ComfyUI Desktop 均为 Electron）
+- 核心需求：**多模型支持**，用户按视频类型选模型；参考项目 [VSET](https://github.com/NangInShell/VSET)（用户此前用过，它是 Electron+Vue 生成 VapourSynth 脚本 → vspipe → ffmpeg，推理靠 vs-mlrt 多后端）
+- 真片源质量评估（提交 8db1821）：animevideov3 比 lanczos +2dB、视觉无伪影，动漫默认定案；x4plus 留真人内容；1080p x4 直出 8K 2.07fps 无显存问题
+- **M3-A（提交 caef403）**：Real-CUGAN（x2/x3/x4+denoise3 variant，vs-mlrt 7z 包下载提取；**原生 opset13 在 DML 默认图优化下 Add 崩溃→graph_opt=basic 绕过，fp16 转换后 DML 加载崩→manifest fp16=false**）；RIFE v4.26 补帧（7 通道 impl=2 版，t=0.5 校准 45.7dB，管线 interp 参数帧率翻倍+末帧补齐）；VFR 接受（avg fps CFR 化 -r）；10bit 接受（rgb24 统一）；HDR 仍拒；worker OOM tile 降档重试；预设"动漫丝滑"
+- **M3-B（0d1de24）**：torch 引擎自实现最小 RRDBNet（**RDB 是 5 层卷积**，官方 pth strict 加载，无 basicsr 依赖），CUDA fp16 autocast+tile，与 ONNX 同权重 PSNR 30.1dB 一致；ChunkedPipeline（PNG 落盘分块+checkpoint 原子续跑+成功清理/取消保留）；runner 按 spec.engine 自动切 .venv-cuda；**扩散模型调研结论：FlashVSR(6.4GiB+CUDA 源码编译 block-sparse-attention)/SeedVR2(12.6GiB+Linux-only apex) 在 Windows 不可行，基础设施落地待官方支持**；PyTorch 2.11 cu128 支持 RTX 5080 sm_120
+- **M4（0d1de24/3270f28/cf3a147）**：PyInstaller sidecar.spec（onedir 155MB，捆绑注册表+模型+预设）；**打包模式 worker 复用 `sidecar.exe worker` 子命令**（cli.py 新子命令+frozen 判定，无解释器依赖）；electron-builder NSIS（per-user oneClick，252MB<400MB 目标）；Electron 打包模式 root=resourcesPath+SV_ROOT 注入；自定义 ONNX 导入（API 真跑验证/回滚+模型市场表单）；镜像 mirror_urls fallback；单实例锁+日志导出 IPC；自定义模型删除连 manifest 一并删；自动更新待发布源（README 记录接入点）；灾难清单：中文路径/双开实测过，无显卡/睡眠唤醒未实测（架构安全）。**坑：Electron 单实例也是多进程同名 exe，验证单实例要看主窗口数不是进程数**
+- **CI/CD 完成（2026-08-24，提交 b892158/a47f7c1/d6223ec/5928353，v0.1.0 已发布）**：仓库 `github.com/mkktop/super_video`。ci.yml=windows-latest 全量测试（**坑：starlette TestClient 需 httpx2，本地间接装入 CI 缺失**；runner 无显卡靠引擎 DML→CPU 回落，x4plus e2e 用 conftest.dml_available 跳过；ffmpeg 由 CI 下载进 bin/）。release.yml=打 tag 全自动：PyInstaller→electron-builder --publish always→发布收敛→模型资产传 models-v1。**坑：ONNX 导出非字节级确定（torch-cpu 与 torch-cu128 同尺寸不同 sha）→ x4plus 模型直接入仓库 bundled（67MB）取代 CI 现导出**；**坑：electron-builder 偶发双草稿拆资产 → releaseType=release + workflow 收敛步骤（v0.1.0 手动收敛过一次）**。产物：v0.1.0 Release（setup 299MB+blockmap+latest.yml）+ models-v1（x4plus_dyn.onnx）。API 监控用 git credential fill 的 token（未认证会限流；日志下载必须认证）。发布流程=打 tag 推送即可
+- **GitHub 基座统一（2026-08-24，提交 4a81092）**：仓库远端 `github.com/mkktop/super_video`。electron-updater 接线（publish=github/mkktop/super_video，启动静默检查+设置页手动检查；发版=上传 setup.exe+blockmap+latest.yml 三件套到 Release）；x4plus 重导出为**动态尺寸 ONNX**（自官方 pth，ImageNet 归一化烘焙进图 IO=0-1 RGB，与 torch 同权重 65.3dB，fp16 66ms/帧 vs 旧固定64版~1800ms 一个数量级），HF 旧版 sha 不一致故不作 mirror；torch.onnx.export 注意 **dynamo=True 不带权重须 dynamo=False**；pnpm workspace allowBuilds 需要 electron-winstaller: false 显式声明
+- **FP16 默认精度落地（2026-08-23，提交 57e8d41）**：验证了"瓶颈=fp32 显存带宽"——fp16 转换后 DML 实测 xsx2 1.36~1.50x、animevideov3-x4 1.58~1.72x、x4plus 2.05x，输出 PSNR 58~75dB（数值无损）。落地方式：`sv/models/fp16.py`（IO 保 fp32，**Clip 算子必须保 fp32——其 DML fp16 实现会崩 0x8007023E**）；bundled 模型随仓库发 fp16 变体；下载完成服务端自动转换；worker 惰性兜底（旧 store 副本首用补转）；设置页 FP16/FP32 开关，默认 fp16，缺失优雅回退。测试 36/36
+- **UI 增量（6609add/75eb2f9）**：对比预览错帧修复（源图只存第 0 帧 vs 输出图每 5s 被覆盖→改为同帧成对保存）；任务用时 elapsed_s 入库显示；全页对比视图（隐藏侧栏+clip-path 像素级对齐滑块+键盘微调）；测试视频裁到 3s（用户要求，重编码 x265 crf14——7z 关键帧间隔 5s，流拷贝切不出 3s）
+- **M2 已完成（2026-08-23，提交 0f54de2）**：模型市场页（内置/下载进度/删除/显存标警）、三步向导+一键预设（动漫快速/动漫高清/真人修复，presets.json）、设置页（引擎热切换 auto/directml/cuda 下一任务生效、日志尾部）、任务卡前后对比滑块（管线截源首帧 preview_src）。顺带修了三个真 bug：db 连接泄漏（with conn 只提交不关闭）、Runner 同进程重启队列假死（_stopping 残留——py-spy 定位）、WS baseUrl 未导入（界面不刷新的原始根因）。测试 31/31。
+- **推理后端对比完成（2026-08-23，提交 eee4841）**：CUDA 基础设施全套落地（.venv-cuda 独立环境、check_cuda.py 真会话探测、runner 按后端选 worker 解释器、/api/engine、SV_ENGINE=cuda 强制开关），但实测 RTX 5080 上 DirectML 全面占优（animevideov3 +12~32%，x4plus +270%）→ 默认 DML，CUDA 留 M3 扩散。坑：ort-gpu 1.29 要 CUDA13（Windows 无 pip 轮子），须 1.24.x+CUDA12 库（含 cufft）
+- **帧批处理完成（2026-08-23，提交 fa7a7f1）**：基础设施落地（engine.process_batch + 管线攒批 + 一致性测试），**实测收益远低预期**：540p 仅 +6%、1080p 反 -9%（单帧 6MP 已喂饱调度），worker 加分辨率启发式（>720p 强制 batch=1）。追加实验确认 1080p x2 下 NVENC≈x264≈各 batch 全部持平 5.2~5.3fps → **瓶颈=DML fp32 推理本身（显存带宽），下一个真杠杆是 FP16 模型转换**。经验教训：该机器上连续两个"预期大提速"假设（CUDA EP、批处理）都被实测推翻——性能优化必须先测再信
+- **原生 x2 落地（2026-08-23，提交 576c5e0）**：用户明确拒绝"放大再缩小"（"吃饱了撑的"），落地原生倍率。AnimeVideo 卡片现支持原生 x2（RealESRGANv2-animevideo-xsx2.onnx，取自 vs-mlrt v15.16 包，IO 同为 0-1+BGR）+ 原生 x4（v3）。registry 支持按倍率选权重（file_for_scale/model_file）；两个小模型(~2.4MB each)随仓库 bundled 分发（backend/sv/models/bundled/），x4plus(67MB) 走下载。UI 只显示原生倍率默认 x2。实测 540p→1080p：原生x2 17.5fps vs x4重建后缩 8.4fps；质量 23.20 vs 23.46dB（v3 略优但慢一倍，两者都保留）。target_scale 缩放路径保留在 API 层（UI 隐藏）
+- **M1+ 增量（2026-08-23，提交 6746caa/45bba16/4e0587d）**：UI 大改版（无边框自绘标题栏、侧边导航、首页仪表盘）；任务列表刷新 bug 修复（WS 无兜底轮询）；NVENC 硬编（h264_nvenc/hevc_nvenc）；ffmpeg 从 master 换 n8.1 正式版（master 的 NVENC 要求驱动≥610，用户是 596.21=API 13.0；另 NVENC 探测分辨率须≥145 宽）。**关键实测结论：1080p 源上瓶颈是 DirectML 推理而非编码（NVENC 2.24fps ≈ x264 2.15fps），CUDA EP（onnxruntime-gpu，独立 venv 避开与 directml 包冲突）是下一优先级**
+- **M1 已完成（2026-08-23，提交 09af503）**：sidecar（FastAPI+WS，`backend/sv/server/`：db/worker/runner/events/hardware/app）+ Electron 壳（`app/`：electron-vite+Vue3+NaiveUI 暗色）。**严格串行队列**（用户明确要求不并发）、**每任务独立参数**（用户明确要求）。关键实现：worker=每任务独立子进程+JSON事件行；Windows 硬杀取消用 runner 标记兜底；sidecar detached 拉起，UI 崩溃任务不丢、重启自动复用（已实测）；pnpm 11.5 构建放行走 `app/pnpm-workspace.yaml` 的 `allowBuilds`。集成测试 6/6。桌面端运行：`cd app && pnpm build && npx electron .`。下一步 M2：模型市场/硬件适配/预设/完整向规
+- **M0 已完成（2026-08-23，提交 2f514fa）**：`backend/` 全量落地——probe/stream/tile 管线、ONNX 引擎（EP 回退+固定尺寸模型支持）、模型 manifest 注册表+下载校验、cli.py、15/15 测试通过。用户硬件实测为 **RTX 5080 16GB**。基准见 `BENCH.md`：animevideov3 480p 9.8fps/720p 4.6fps（DirectML），内存曲线爬升后走平（非泄漏）。关键发现：两模型 IO 均 0-1 归一化+BGR（PSNR 校准实验确定，纯色测试对通道序数学不变、不可用）；x4plus 的 HF 导出版固定 64x64 输入导致极慢(0.59fps)，待换动态尺寸导出；DML 性能天花板明显，CUDA EP 考虑提前
+- 完整施工蓝图在 `D:\work\super_video\PLAN.md`（M0→M4），下一步 M1：FastAPI sidecar + SQLite 队列 + Electron 壳
+- 尚未确认：动漫/真人侧重；用户仍未提供 samples/ 测试视频
