@@ -35,6 +35,10 @@
     ],
     "extraResources": [
       {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      },
+      {
         "from": "../backend/dist/sidecar",
         "to": "sidecar"
       },

@@ -91,11 +91,14 @@ function showMainWindow(): void {
   win.focus()
 }
 
-/** 托盘图标：dev 用 build/icon.ico；打包后 build/ 不进 asar，取 exe 文件图标 */
+/** 直接加载品牌 PNG，避免 Windows 的 exe 文件图标缓存返回旧图标。 */
 async function trayIconImage(): Promise<NativeImage> {
-  const p = path.join(__dirname, '../../build/icon.ico')
+  const p = app.isPackaged
+    ? path.join(process.resourcesPath, 'icon.png')
+    : path.join(__dirname, '../../build/icon.png')
   if (fs.existsSync(p)) {
-    return nativeImage.createFromPath(p).resize({ width: 16, height: 16 })
+    const image = nativeImage.createFromPath(p)
+    if (!image.isEmpty()) return image.resize({ width: 16, height: 16 })
   }
   try {
     return await app.getFileIcon(process.execPath, { size: 'small' })
