@@ -774,6 +774,17 @@ Y 平面 NVDEC vs ffmpeg 软解位级一致（内容帧 maxdiff=0）；色彩 BT
 自动回标准链。依赖（PyNvVideoCodec/cuda-bindings）装在 .venv-cuda，不进
 requirements.txt（CI 无 GPU；DML 主环境惰性导入零成本）。
 
+### 常见误读：「仅 10bit」指源位深，不是输出位深（2026-10-19 记）
+
+- 产品口径（M3 起）：SDR 8/10bit 源都接受，**处理与输出统一 8bit**（模型工作在
+  8bit RGB 域；标准链 `-pix_fmt rgb24` 进、`yuv420p` 出）。HDR 仍拒。
+- 门控的「10bit」说的是**源文件**位深（BDRemux 动画片的常态）。直连链不改变输出
+  规格——它同样编码 NV12 8bit，加速的是过程，不改产物口径。
+- 由此推「10bit 进来都被转 8bit，所以直连链没用」是反的：恰是这些 10bit 源
+  （8bit 源反而不进直连链）构成直连链的全部目标流量。
+- 「10bit 进 10bit 出」不做：模型在 8bit 域工作，10bit 输出只是把 8bit 精度的值
+  装进 10bit 容器，无实质增益。
+
 ## 测试
 
 新增 33 例：test_gpu_graph（图手术 CPU 数学对拍 7）+ test_gpu_codec（切断/pts 对齐/

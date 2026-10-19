@@ -19,6 +19,24 @@ unzip ffmpeg.zip -d ffmpeg_tmp && cp ffmpeg_tmp/ffmpeg-n8.1-latest-win64-gpl-8.1
 
 模型权重在 `models_store/`（同样不入库，用 `cli.py models download` 获取）。
 
+### .venv-cuda（CUDA/TRT 开发环境，重装系统后按此重建）
+
+主 `.venv` 是 DML 环境（requirements.txt）；CUDA/TRT/torch 栈只在 `.venv-cuda`，
+**不进 requirements.txt**（CI 无 GPU）。2026-10-19 快照的实际构成：
+
+```bash
+python -m venv .venv-cuda          # Python 3.14
+.venv-cuda\Scripts\python -m pip install -r backend\requirements.txt
+.venv-cuda\Scripts\python -m pip install onnxruntime-gpu==1.24.4 tensorrt_cu12_libs==10.16.1.11 torch==2.11.0+cu128 torchvision==0.26.0+cu128 py7zr --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+- `nvidia-cuda-nvrtc/runtime-cu12` 是 torch 的传递依赖，自动带入；
+- GPU 直连链额外依赖 PyNvVideoCodec/cuda-bindings（**本机快照未装**，bench 用的
+  5070 Ti 机器上有）：`pip install PyNvVideoCodec==2.2.3 cuda-bindings`，装完
+  10bit+NVENC 任务自动走直连链；
+- 用途：engine=trt/cuda 真机会话探测、GPU-gated 测试（`.venv-cuda -m pytest`）、
+  torch 引擎（RIFE/M3 扩散候选）；无此环境时产品自动回退 DML，全功能可用（除 TRT）。
+
 ## CLI 用法
 
 ```bash

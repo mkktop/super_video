@@ -4,6 +4,8 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# 测试夹具生成的 toy 权重（跑测试即重新生成）
+backend/tests/_toy_up2*.onnx
 
 # 运行时产物
 .tmp/
