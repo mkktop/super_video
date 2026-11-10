@@ -210,17 +210,25 @@ class OnnxSrEngine(BaseEngine):
         if is_cugan and on_dml:
             self.u8_wrap_enabled = False
         self.main_thread_only = is_cugan and on_dml
-        if self.u8_wrap_enabled:
-            if (self._prefer_cuda_postprocess
-                    and self.provider_used[:1] == ["TensorrtExecutionProvider"]
-                    and "CUDAExecutionProvider" in available):
-                self._try_cuda_postprocess()
-                # 对拍不过（数值分歧/定长导出）时包装路径仍可兜底；
-                # _try_u8_wrap 自带 fixed_hw/u8_wrap 门槛，不会重复尝试
-                if not self.cuda_postprocessed:
-                    self._try_u8_wrap()
-            else:
+        self._setup_gpu_paths(available)
+
+    def _setup_gpu_paths(self, available: set[str]) -> None:
+        """CUDA 后处理与 u8 包装的启用决策（独立方法便于测试门序）。
+
+        两者平级互斥：定长导出/对拍失败过的模型（DAT2、MangaJaNai）manifest
+        会关 u8_wrap，但 CUDA 后处理不依赖包装资格——嵌套在 u8_wrap_enabled
+        里会让这些模型整条加速路径被跳过。
+        """
+        if (self._prefer_cuda_postprocess
+                and self.provider_used[:1] == ["TensorrtExecutionProvider"]
+                and "CUDAExecutionProvider" in available):
+            self._try_cuda_postprocess()
+            # 对拍不过（数值分歧）时包装路径仍可兜底；
+            # _try_u8_wrap 自带 fixed_hw/u8_wrap 门槛，不会重复尝试
+            if not self.cuda_postprocessed and self.u8_wrap_enabled:
                 self._try_u8_wrap()
+        elif self.u8_wrap_enabled:
+            self._try_u8_wrap()
 
     def _try_cuda_postprocess(self) -> None:
         """Keep TRT tactics intact when a fused u8 graph fails numerical checks."""

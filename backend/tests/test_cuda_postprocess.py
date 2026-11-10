@@ -144,3 +144,32 @@ def test_fixed_shape_probe_clamped_to_model_input(monkeypatch):
     engine._try_cuda_postprocess()
     assert engine.cuda_postprocessed
     assert seen and all(h <= 256 and w <= 256 for h, w in seen)
+
+
+def test_cuda_path_not_gated_by_u8_wrap_flag(monkeypatch):
+    """manifest u8_wrap=false（DAT2 现状）不得连带跳过 CUDA 后处理。"""
+    engine = OnnxSrEngine("unused.onnx", 4, io={"cuda_postprocess": True}, device="trt")
+    engine.u8_wrap_enabled = False
+    engine.provider_used = ["TensorrtExecutionProvider"]
+    calls = []
+
+    def cuda():
+        calls.append("cuda")
+        engine.cuda_postprocessed = True
+
+    monkeypatch.setattr(engine, "_try_cuda_postprocess", cuda)
+    monkeypatch.setattr(engine, "_try_u8_wrap", lambda: calls.append("wrap"))
+    engine._setup_gpu_paths({"CUDAExecutionProvider", "TensorrtExecutionProvider"})
+    assert calls == ["cuda"]
+
+
+def test_cuda_failure_falls_back_to_wrap_when_allowed(monkeypatch):
+    """CUDA 对拍失败且包装未被 manifest 关断时，兜底尝试包装。"""
+    engine = OnnxSrEngine("unused.onnx", 4, io={"cuda_postprocess": True}, device="trt")
+    engine.u8_wrap_enabled = True
+    engine.provider_used = ["TensorrtExecutionProvider"]
+    calls = []
+    monkeypatch.setattr(engine, "_try_cuda_postprocess", lambda: calls.append("cuda"))
+    monkeypatch.setattr(engine, "_try_u8_wrap", lambda: calls.append("wrap"))
+    engine._setup_gpu_paths({"CUDAExecutionProvider", "TensorrtExecutionProvider"})
+    assert calls == ["cuda", "wrap"]
