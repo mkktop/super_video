@@ -20,7 +20,8 @@
     "color": "rgb",
     "range": "0-1",
     "pad": 1,
-    "trt_fp16": false
+    "trt_fp16": false,
+    "cuda_postprocess": true
   },
   "description": "IllustrationJaNai V1 DAT2：彩漫、封面与数字插画的 4x 画质优先候选（256 定长分块），处理较慢。用于清理退化并重建线条与纹理；严重压缩素材可能重绘眼睛或衣服细节，也可能削弱原有网点，建议先预览。",
   "files": [

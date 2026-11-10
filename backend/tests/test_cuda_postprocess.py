@@ -119,3 +119,28 @@ def test_binding_keeps_float_output_on_device():
     assert actions == [("input", "x", (1, 3, 6, 8)), ("output", "y", "cuda"),
                        ("model",), ("device_input", "raw"), ("output", "pixels", "cuda"),
                        ("post",), ("copy_pixels",)]
+
+
+def test_fixed_shape_probe_clamped_to_model_input(monkeypatch):
+    """定长导出（DAT2 256×256）的探针必须夹到模型输入上限，整页 validate_hw 会超限被拒。"""
+    engine = OnnxSrEngine("unused.onnx", 4, io={"color": "rgb", "range": "0-1"},
+                          device="trt", validate_hw=(1816, 1280))
+    engine.fixed_hw = (256, 256)
+    engine.session = SimpleNamespace(get_outputs=lambda: [SimpleNamespace(type="tensor(float)")])
+    candidate = object()
+    monkeypatch.setattr(cuda_postprocess, "create_session", lambda *a, **kw: candidate)
+    seen = []
+
+    def reference(frame):
+        seen.append(frame.shape[:2])
+        return np.zeros((frame.shape[0] * 4, frame.shape[1] * 4, 3), np.uint8)
+
+    def output(frame, session):
+        assert session is candidate
+        return np.zeros((frame.shape[0] * 4, frame.shape[1] * 4, 3), np.uint8)
+
+    monkeypatch.setattr(engine, "_infer_plain", reference)
+    monkeypatch.setattr(engine, "_infer_cuda_post", output)
+    engine._try_cuda_postprocess()
+    assert engine.cuda_postprocessed
+    assert seen and all(h <= 256 and w <= 256 for h, w in seen)

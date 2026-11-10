@@ -215,6 +215,10 @@ class OnnxSrEngine(BaseEngine):
                     and self.provider_used[:1] == ["TensorrtExecutionProvider"]
                     and "CUDAExecutionProvider" in available):
                 self._try_cuda_postprocess()
+                # 对拍不过（数值分歧/定长导出）时包装路径仍可兜底；
+                # _try_u8_wrap 自带 fixed_hw/u8_wrap 门槛，不会重复尝试
+                if not self.cuda_postprocessed:
+                    self._try_u8_wrap()
             else:
                 self._try_u8_wrap()
 
@@ -232,6 +236,11 @@ class OnnxSrEngine(BaseEngine):
             h, w = self.validate_hw or (96, 128)
             if self.tile:
                 h, w = min(h, self.tile), min(w, self.tile)
+            if self.fixed_hw:
+                # 定长导出（如 DAT2 256×256）：探针不得超过模型固定尺寸——
+                # _prepare_input 会对小帧补边、超限直接拒绝（定长模型无分块
+                # 保护时 validate_hw 是整页尺寸，不夹会整场校验失败）
+                h, w = min(h, self.fixed_hw[0]), min(w, self.fixed_hw[1])
             oh = h - 1 if h % self.pad == 0 and h > self.pad else h
             ow = w - 1 if w % self.pad == 0 and w > self.pad else w
             rng = np.random.default_rng(7)
