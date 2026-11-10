@@ -108,8 +108,10 @@ class OnnxSrEngine(BaseEngine):
         self.tile = tile
         self.tile_overlap = tile_overlap
         self.batch = max(1, batch)
-        # manifest u8_wrap=false 仅禁 DML 主链的包装（CUGAN×DML 双会话互踩前科）；
-        # TRT 主链的包装 A/B 已验证健康（14.9fps 端到端），不受此限。
+        # manifest u8_wrap=false（经 worker_engine 接线的 u8_wrap 参数）= 该模型
+        # 禁用包装（任何后端）——包装对拍失败过的模型没有失败标记，不关断就会
+        # 每次引擎加载空试重验；CUGAN×DML 的运行时围栏在 load() 内另设
+        # （is_cugan and on_dml），与 manifest 关断互不依赖。
         self._spec_allow_wrap = manifest_allow_wrap or device == "trt"
         self.u8_wrap_enabled = u8_wrap and self._spec_allow_wrap
         # 包装图只内嵌 color/range 前后处理，不含仿射——affine 模型跳过包装
@@ -132,6 +134,9 @@ class OnnxSrEngine(BaseEngine):
         self._u8_in_name = None
         self._u8_sess_try = None  # 校验失败的包装 session 引用（防 DML GC 析构崩设备）
         self.u8_wrapped = False
+        self.cuda_postprocessed = False
+        self._cuda_post_sess = None
+        self._prefer_cuda_postprocess = io.get("cuda_postprocess") is True
         # CUGAN×DML 特异：会话首个 run 若发生在非进程主线程 → GPU 栈死锁
         # （2026-08-27 排障：预热/COM MTA/会话选项/主线程先行全部无效，
         # CPU EP 与其他模型不受影响；证据链见 BENCH.md §13）。
@@ -206,7 +211,47 @@ class OnnxSrEngine(BaseEngine):
             self.u8_wrap_enabled = False
         self.main_thread_only = is_cugan and on_dml
         if self.u8_wrap_enabled:
-            self._try_u8_wrap()
+            if (self._prefer_cuda_postprocess
+                    and self.provider_used[:1] == ["TensorrtExecutionProvider"]
+                    and "CUDAExecutionProvider" in available):
+                self._try_cuda_postprocess()
+            else:
+                self._try_u8_wrap()
+
+    def _try_cuda_postprocess(self) -> None:
+        """Keep TRT tactics intact when a fused u8 graph fails numerical checks."""
+        from .cuda_postprocess import create_session
+
+        try:
+            import onnxruntime as ort
+
+            candidate = create_session(
+                ort, self.session.get_outputs()[0].type,
+                color=self.color, range_01=self.value_range == "0-1", affine=self.affine,
+            )
+            h, w = self.validate_hw or (96, 128)
+            if self.tile:
+                h, w = min(h, self.tile), min(w, self.tile)
+            oh = h - 1 if h % self.pad == 0 and h > self.pad else h
+            ow = w - 1 if w % self.pad == 0 and w > self.pad else w
+            rng = np.random.default_rng(7)
+            for frame in (np.zeros((h, w, 3), np.uint8),
+                          rng.integers(0, 256, (h, w, 3), dtype=np.uint8),
+                          rng.integers(0, 256, (oh, ow, 3), dtype=np.uint8)):
+                reference = self._infer_plain(frame)
+                actual = self._infer_cuda_post(frame, candidate)
+                if reference.shape != actual.shape:
+                    raise ValueError(f"CUDA 后处理尺寸不一致 {reference.shape}/{actual.shape}")
+                diff = int(np.abs(reference.astype(np.int16) - actual.astype(np.int16)).max())
+                if diff > 1:
+                    raise ValueError(f"CUDA 后处理输出不一致 maxdiff={diff} (tol=1)")
+            self._cuda_post_sess = candidate
+            self.cuda_postprocessed = True
+            print("[engine] 独立 CUDA 后处理已启用（保留原始推理图，输出像素校验通过）")
+        except Exception as e:  # Optional acceleration must preserve the usable reference path.
+            self._cuda_post_sess = None
+            self.cuda_postprocessed = False
+            print(f"[engine] 独立 CUDA 后处理不可用，使用标准路径: {type(e).__name__}: {e}")
 
     # ---- uint8 直进直出图手术（前后处理全在 GPU，推理 3.8x，见 u8_wrap.py）----
 
@@ -368,11 +413,11 @@ class OnnxSrEngine(BaseEngine):
         # 统一由 BaseEngine 调度整帧/分块，每块都可走 GPU 前后处理。
         if self._u8_sess is not None:
             return self._run_u8(self._u8_sess, self._u8_in_name, frame)
+        if self._cuda_post_sess is not None:
+            return self._infer_cuda_post(frame, self._cuda_post_sess)
         return self._infer_plain(frame)
 
-    def _infer_plain(self, frame: np.ndarray) -> np.ndarray:
-        if self.color == "y":
-            return self._infer_y(frame)
+    def _prepare_input(self, frame: np.ndarray):
         h, w = frame.shape[:2]
         if self.fixed_hw is not None:
             fh, fw = self.fixed_hw
@@ -399,6 +444,21 @@ class OnnxSrEngine(BaseEngine):
             x += b
         if self._in_fp16:
             x = x.astype(np.float16)
+        return x, h, w, ph, pw
+
+    def _infer_cuda_post(self, frame: np.ndarray, post_session) -> np.ndarray:
+        from .cuda_postprocess import run
+
+        x, h, w, ph, pw = self._prepare_input(frame)
+        out = run(self.session, self._in_name, self._out_names[0], x, post_session)
+        if ph or pw:
+            out = np.ascontiguousarray(out[:h * self.scale, :w * self.scale])
+        return out
+
+    def _infer_plain(self, frame: np.ndarray) -> np.ndarray:
+        if self.color == "y":
+            return self._infer_y(frame)
+        x, h, w, ph, pw = self._prepare_input(frame)
 
         y = self.session.run(self._out_names, {self._in_name: x})[0]
         # 自有 float32 工作区：保留原来的舍入顺序，不修改 session 返回的张量。

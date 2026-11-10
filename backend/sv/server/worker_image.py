@@ -266,6 +266,10 @@ def _run_image_job(task: dict, params: dict, spec) -> int:
         load_s_total += time.perf_counter() - _tl
         engines[lane] = built
         precisions[lane] = prec
+        emit({"type": "log", "line": f"{spec_.id} 实际处理路径："
+              + ("独立 CUDA 后处理（保留原始推理图）" if getattr(built, "cuda_postprocessed", False)
+                 else "GPU 前后处理包装" if getattr(built, "u8_wrapped", False)
+                 else "标准 CPU 前后处理")})
         lane_providers[lane] = ("/".join(built.provider_used)
                                 if hasattr(built, "provider_used") else "torch")
         return built

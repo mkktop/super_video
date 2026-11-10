@@ -529,6 +529,9 @@ class Runner:
             try:
                 ev = json.loads(line)
             except json.JSONDecodeError:
+                if line.startswith("[engine]"):
+                    print(f"[task:{task_id[:8]}] {line}", flush=True)
+                    self.bus.publish({"type": "log", "task_id": task_id, "line": line})
                 hint = error_hint(line)
                 if hint is not None:
                     db.update_task(task_id, error=hint)

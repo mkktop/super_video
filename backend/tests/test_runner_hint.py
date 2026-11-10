@@ -39,6 +39,28 @@ def test_engine_info_lines_are_not_errors():
     assert error_hint("") is None
 
 
+def test_engine_fallback_is_visible_without_failing_task(_own_db, capsys):
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from sv.server.runner import Runner
+
+    task = _own_db.new_task('in', 'out', 'model', {})
+    warning = "[engine] GPU 前后处理优化不可用，使用标准路径: maxdiff=11"
+
+    async def stream():
+        yield (warning + '\n').encode('utf-8')
+        yield (json.dumps({'type': 'done', 'frames': 3}) + '\n').encode('utf-8')
+
+    events = []
+    runner = Runner(SimpleNamespace(publish=events.append))
+    runner.proc = SimpleNamespace(stdout=stream())
+    assert asyncio.run(runner._pump_until_final(task))['type'] == 'done'
+    assert events == [{'type': 'log', 'task_id': task['id'], 'line': warning}]
+    assert warning in capsys.readouterr().out
+    assert _own_db.get_task(task['id'])['error'] is None
+
+
 def test_real_errors_still_captured():
     assert error_hint("Traceback (most recent call last):") == "Traceback (most recent call last):"
     long = "E" * 500

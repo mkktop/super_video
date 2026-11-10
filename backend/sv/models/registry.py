@@ -32,7 +32,7 @@ class ModelSpec:
     license: str = ""
     kind: str = "sr"  # sr（超分）| interp（补帧）
     fp16: bool = True  # False = 该模型 fp16 转换不可用（如 DML 加载崩溃）
-    u8_wrap: bool = True  # False = 禁用 uint8 包装双会话结构（CUGAN×DML 0x887A0006 前科）
+    u8_wrap: bool = True  # False = 禁用 uint8 包装（任何后端；定长导出/对拍失败过的模型）
     scenes: list[str] = field(default_factory=lambda: ["video", "image"])  # 适用场景标签：video/manga/image
     files: list[dict] = field(default_factory=list)
     category: str = ""  # 主用途；与 content 内容标签、scenes 任务场景独立

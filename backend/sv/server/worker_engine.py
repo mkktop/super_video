@@ -223,6 +223,11 @@ def _load_onnx_engine(
         try:
             # 仅在关闭混合精度时显式传参（默认 True 走 io 声明，测试 fake 不感知新参）
             extra = {} if fp16_for_trt else {"trt_fp16": False}
+            # manifest u8_wrap=false 才显式关断（同上 fake 不感知）：包装对拍失败
+            # 过的模型（MangaJaNai 系 maxdiff=11）没有失败标记，不关断就会每次
+            # 引擎加载重建 33MB 包装会话再空试一遍三组对拍
+            if not getattr(spec, "u8_wrap", True):
+                extra["u8_wrap"] = False
             engine = OnnxSrEngine(
                 weight, scale, io=spec.io, tile=tile, batch=batch,
                 device=ort_device, validate_hw=warmup_hw, **extra)

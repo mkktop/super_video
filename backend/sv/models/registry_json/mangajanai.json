@@ -25,6 +25,8 @@
       "4": 4
     },
     "batch_hint": 1,
+    "cuda_postprocess": true,
+    "u8_wrap": false,
     "auto_variant": "height"
   },
   "description": "黑白漫画专用，按源高度自动选择 7 档权重，提供 2x/4x。针对文字、线条、网点、JPEG 与摩尔纹退化训练；彩页应使用 IllustrationJaNai。",
